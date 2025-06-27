@@ -109,27 +109,25 @@ class iSLAT:
         if not hasattr(self, "root"):
             self.root = tk.Tk()
             self.root.title("iSLAT - Infrared Spectral Line Analysis Tool")
-            self.root.geometry("800x600")
+            #self.root.geometry("800x600")
             self.root.resizable(True, True)
 
         #self.root.mainloop()
 
         if not hasattr(self, "GUI"):
             self.GUI = GUI(
-                master=self.root,
-                isotopologue_data=self.molecules_data_default,
-                input_spectrum_data = self.input_spectrum_data if hasattr(self, 'input_spectrum_data') else None,
-                data_field=None,  # Placeholder for data field, to be set later
-                wave_data = self.wave_data if hasattr(self, 'wave_data') else None,
-                flux_data = self.flux_data if hasattr(self, 'flux_data') else None,
-                mols=self.mols,
-                basem=self.basem,
-                isot=self.isot,
-                xp1=self.xp1,
-                xp2=self.xp2,
-                config={"iSLAT_version": "2.0", "user_settings":{'first_startup': False, 'reload_default_files': False, 'theme': {'theme_name': 'Light Theme', 'description': 'A light theme for iSLAT with a white background and black text.', 'foreground': '#000000', 'background': '#FFFFFF', 'toolbar': '#000000', 'graph_fill_color': '#D3D3D3', 'selection_color': '#00FF00', 'uncertainty_band_color': '#ABABAB', 'toolbar_highlight_background': '#000000', 'toolbar_highlight_color': '#000000', 'toolbar_active_color': '#FFFFFF', 'buttons': {'DefaultBotton': {'background': '#D3D3D3', 'active_background': '#808080', 'description': 'If a button is not specified, this will be used as the default button style.'}, 'ToggleLegend': {'background': '#D3D3D3', 'active_background': '#808080'}}}}},
-
-            )
+            master=self.root,
+            isotopologue_data=self.molecules_data_default,
+            input_spectrum_data=self.input_spectrum_data if hasattr(self, 'input_spectrum_data') else None,
+            wave_data=self.wave_data if hasattr(self, 'wave_data') else None,
+            flux_data=self.flux_data if hasattr(self, 'flux_data') else None,
+            mols=self.mols,
+            basem=self.basem,
+            isot=self.isot,
+            xp1=self.xp1,
+            xp2=self.xp2,
+            config={"iSLAT_version": "4.06.02", "user_settings": self.user_settings}
+        )
         
         self.GUI.start()
 

@@ -1,29 +1,38 @@
 import tkinter as tk
 from tkinter import ttk
 from .MainPlot import iSLATPlot
-#from MainPlot import iSLATPlot
+from .Data_field import DataField
+from .Tooltips import CreateToolTip
+from .GUIFunctions import GUIHandlers
 
 class GUI:
-    def __init__(self, master, isotopologue_data, input_spectrum_data, data_field, wave_data, flux_data, mols, basem, isot, xp1, xp2, config):
-        self.master = master
+    def __init__(self, master, isotopologue_data, input_spectrum_data, wave_data, flux_data, mols, basem, isot, xp1, xp2, config):
+        self.master = self.window = master
         self.isotopologue_data = isotopologue_data
-        self.data_field = data_field
+        self.input_spectrum_data = input_spectrum_data
+        self.wave_data = wave_data
+        self.flux_data = flux_data
         self.mols = mols
         self.basem = basem
         self.isot = isot
+        self.xp1 = xp1
+        self.xp2 = xp2
         self.config = config
-        self.nb_of_columns = 10  # Adjust as needed
-        self.MainPlot = iSLATPlot(window=master,
-                                  input_spectrum_data=input_spectrum_data,
-                                  molecules_data=isotopologue_data,
-                                  xp1=xp1,
-                                  xp2=xp2,
-                                  wave_data=wave_data,
-                                  flux_data=flux_data,
-                                  config=config)
+
+        self.nb_of_columns = 10
+
+        # Set up main plot and data field
+        self.main_plot = iSLATPlot(master, input_spectrum_data, isotopologue_data, xp1, xp2, wave_data, flux_data, config)
+        #self.data_field = DataField("Main Data Field", "", None)
+
+        # Set up GUI function handlers with references
+        #self.handlers = GUIHandlers(self.main_plot, self.data_field, self.config)
 
     def create_button(self, frame, text, command, row, column, width=13, height=1):
-        button_theme = self.config["user_settings"]["theme"]["buttons"].get(text.replace(" ", ""), self.config["user_settings"]["theme"]["buttons"]["DefaultBotton"])
+        button_theme = self.config["user_settings"]["theme"]["buttons"].get(
+            text.replace(" ", ""), 
+            self.config["user_settings"]["theme"]["buttons"]["DefaultBotton"]
+        )
         button = tk.Button(
             frame,
             text=text,
@@ -34,59 +43,52 @@ class GUI:
             width=width,
             height=height
         )
-        button.grid(row=row, column=column)
+        button.grid(row=row, column=column, padx=2, pady=2, sticky="nsew")
+        CreateToolTip(button, f"{text} button")
         return button
 
     def create_window(self):
-        self.window = tk.Toplevel(self.master)
-        self.window.title("iSLAT GUI")
+        #self.window = tk.Toplevel(self.master)
+        #self.window.title("iSLAT GUI")
 
-        # Title frame
-        self.title_frame = tk.Frame(self.window, bg="gray")
-        self.title_frame.grid(row=0, column=0, columnspan=self.nb_of_columns, sticky='ew')
+        # Configure window resizing
+        self.window.columnconfigure(0, weight=3)
+        self.window.columnconfigure(1, weight=1)
+        self.window.rowconfigure(0, weight=1)
 
-        # Outer frame
-        self.outer_frame = tk.Frame(self.window)
-        self.outer_frame.grid(row=self.title_frame.grid_info()['row'] + self.title_frame.grid_info()['rowspan'],
-                              column=0, rowspan=10, columnspan=5, sticky="nsew")
+        # Left side frame (plot + functions)
+        self.left_frame = tk.Frame(self.window)
+        self.left_frame.grid(row=0, column=0, sticky="nsew")
+        self.left_frame.columnconfigure(0, weight=1)
+        self.left_frame.rowconfigure(0, weight=4)
+        self.left_frame.rowconfigure(1, weight=1)
 
-        # Files frame
-        self.files_frame = tk.Frame(self.window, borderwidth=2, relief="groove")
-        self.files_frame.grid(row=self.outer_frame.grid_info()['row'] + self.outer_frame.grid_info()['rowspan'],
-                              column=0, rowspan=7, columnspan=5, sticky="nsew")
+        # Right side frame (data field)
+        self.right_frame = tk.Frame(self.window)
+        self.right_frame.grid(row=0, column=1, sticky="nsew")
+        self.right_frame.columnconfigure(0, weight=1)
+        self.right_frame.rowconfigure(0, weight=1)
 
-        # Plot parameters frame
-        self.plotparams_frame = tk.Frame(self.window, borderwidth=2, relief="groove")
-        self.plotparams_frame.grid(row=self.files_frame.grid_info()['row'] + self.files_frame.grid_info()['rowspan'],
-                                   column=0, rowspan=6, columnspan=5, sticky="nsew")
+        # Plot area
+        self.plot_frame = tk.Frame(self.left_frame, borderwidth=2, relief="sunken")
+        self.plot_frame.grid(row=0, column=0, sticky="nsew")
+        self.main_plot.embed(self.plot_frame)
 
-        # Functions frame
-        self.functions_frame = tk.Frame(self.window, borderwidth=2, relief="groove")
-        self.functions_frame.grid(row=self.plotparams_frame.grid_info()["row"] + self.plotparams_frame.grid_info()["rowspan"],
-                      column=0, rowspan=6, columnspan=5, sticky="nsew")
+        # Now create data field in right frame
+        self.data_field = DataField("Main Data Field", "", self.right_frame)
+        self.data_field.frame.grid(row=0, column=0, sticky="nsew")
 
-        # Add buttons to the functions frame
-        save_button = self.create_button(self.functions_frame, "Save Line", Save, 0, 0)
-        fit_button = self.create_button(self.functions_frame, "Fit Line", fit_onselect, 0, 1)
-        savedline_button = self.create_button(self.functions_frame, "Show Saved Lines", print_saved_lines, 1, 0)
-        fitsavedline_button = self.create_button(self.functions_frame, "Fit Saved Lines", fit_saved_lines, 1, 1)
-        autofind_button = self.create_button(self.functions_frame, "Find Single Lines", single_finder, 2, 0)
-        atomlines_button = self.create_button(self.functions_frame, "Show Atomic Lines", print_atomic_lines, 2, 1)
-        slabfit_button = self.create_button(self.functions_frame, "Single Slab Fit", run_slabfit, 3, 0)
-        deblender_button = self.create_button(self.functions_frame, "Line De-blender", fitmulti_onselect, 3, 1)
+        self.handlers = GUIHandlers(self.main_plot, self.data_field, self.config)
 
-        # Text frame
-        self.text_frame = tk.Frame(self.window)
-        self.text_frame.grid(row=self.functions_frame.grid_info()['row'] + self.functions_frame.grid_info()['rowspan'],
-                             column=0, columnspan=5, sticky='nsew')
+        # Functions area
+        self.functions_frame = tk.Frame(self.left_frame, borderwidth=2, relief="groove")
+        self.functions_frame.grid(row=1, column=0, sticky="nsew")
+        self.functions_frame.columnconfigure([0,1], weight=1)
 
-        # Data field
-        self.data_field = tk.Text(self.text_frame, wrap="word", height=13, width=24)
-        self.data_field.pack(fill="both", expand=True)
-
-        # Add matplotlib canvas to the plot parameters frame
-        plot_canvas = self.MainPlot.create_plot()
-        plot_canvas.get_tk_widget().pack(padx=5, pady=5, fill="both", expand=True)
+        self.create_button(self.functions_frame, "Save Line", self.handlers.save_line, 0, 0)
+        self.create_button(self.functions_frame, "Fit Line", self.handlers.fit_selected_line, 0, 1)
+        self.create_button(self.functions_frame, "Find Single Lines", self.handlers.find_single_lines, 1, 0)
+        self.create_button(self.functions_frame, "Single Slab Fit", self.handlers.single_slab_fit, 1, 1)
 
     def start(self):
         # Start the Tkinter main loop

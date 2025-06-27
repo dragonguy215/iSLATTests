@@ -1,62 +1,46 @@
-import tkinter as tk
 import numpy as np
 
-def Save(data_field, linesavepath, selectedline, line2save):
+class GUIHandlers:
     """
-    Save() is connected to the "Save Line" button of the tool.
-    \nThis function appends information of the strongest line (as determined by intensity) in the spanned area graph to a csv file. 
-    \nThe name of the csv file is set with the "linesavepath" variable. 
-    \nFor the parameters of the line that is saved, refer to the "line2save" variable.
+    Class to handle GUI button actions. Keeps references to plot and data field.
     """
-    messages = []
+    def __init__(self, main_plot, data_field, config):
+        self.main_plot = main_plot
+        self.data_field = data_field
+        self.config = config
+        self.user_settings = config["user_settings"]
 
-    if not linesavepath:
-        messages.append('Line save file is not defined!')
-    else:
-        if selectedline:  # "selectedline" variable determines whether an area was selected in the top graph
-            line2save.to_csv(linesavepath, mode='a', index=False, header=False)
-            messages.append('Line Saved!')
+    def save_line(self):
+        if not self.main_plot.selected_line:
+            self.data_field.insert_text("No Line Selected!")
+            return
+        try:
+            line2save = self.main_plot.line2save
+            line2save.to_csv(self.main_plot.linesavepath, mode='a', index=False, header=False)
+            self.data_field.insert_text("Line Saved!")
+        except Exception as e:
+            self.data_field.insert_text(f"Error saving line: {e}")
+
+    def fit_selected_line(self):
+        self.data_field.clear()
+        if not self.main_plot.selected_line:
+            self.data_field.insert_text("No Line Selected!")
+            return
+        fit_result = self.main_plot.fit_line_selected()
+        if fit_result:
+            centroid, fwhm, area = fit_result
+            self.data_field.insert_text(f"Gaussian fit results:\n"
+                f"Centroid (μm) = {centroid[0]} ± {centroid[1]}\n"
+                f"FWHM (km/s) = {fwhm[0]} ± {fwhm[1]}\n"
+                f"Area (erg/s/cm²) = {area[0]} ± {area[1]}")
         else:
-            messages.append('No Line Selected!')
-            return messages
+            self.data_field.insert_text("Fit failed or incomplete.")
 
-    return messages
+    def find_single_lines(self):
+        self.data_field.insert_text("Finding single lines...")
+        singles = self.main_plot.find_singles()
+        self.data_field.insert_text(f"Found {len(singles)} isolated lines.")
 
-def fit_onselect(data_field, selectedline, data_region_x, fit_line, user_settings):
-    """
-    fit_onselect() is connected to the "Fit Line" button of the tool. 
-    \nThis function fits the line selected in the top graph using LMFIT.
-    """
-    print(' ')
-    print('Fitting line with LMFIT ...')
-
-    if selectedline:  # "selectedline" variable determines whether an area was selected in the top graph
-        # Fit the line using one less pixel on each side
-        gauss_fit, gauss_fwhm, gauss_area, x_fit = fit_line(data_region_x[1], data_region_x[-2])
-
-        dely = gauss_fit.eval_uncertainty(sigma=3)
-        uncertainty_band = {
-            "x": x_fit,
-            "y_lower": gauss_fit.best_fit - dely,
-            "y_upper": gauss_fit.best_fit + dely,
-            "color": user_settings["theme"]["uncertainty_band_color"],
-            "label": r'3-$\sigma$ uncertainty band'
-        }
-        fit_line_plot = {
-            "x": x_fit,
-            "y": gauss_fit.best_fit,
-            "color": user_settings["theme"]["selection_color"],
-            "label": 'Gauss. fit',
-            "linestyle": '--'
-        }
-
-        fit_results = {
-            "centroid": (np.round(gauss_fit.params['center'].value, decimals=5),
-                         np.round(gauss_fit.params['center'].stderr, decimals=5)),
-            "fwhm": (np.round(gauss_fwhm[0], decimals=1), np.round(gauss_fwhm[1], decimals=1)),
-            "area": (f'{gauss_area[0]:.{3}e}', f'{gauss_area[1]:.{3}e}')
-        }
-
-        return {"uncertainty_band": uncertainty_band, "fit_line_plot": fit_line_plot, "fit_results": fit_results}
-    else:
-        return {"error": 'No Line Selected!'}
+    def single_slab_fit(self):
+        self.data_field.insert_text("Running single slab fit (placeholder).")
+        # Example of connecting to further fit routines
