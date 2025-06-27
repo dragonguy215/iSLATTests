@@ -46,6 +46,7 @@ import datetime
 import certifi
 import ssl
 import urllib
+import json
 
 context = ssl.create_default_context (cafile=certifi.where ())
 
@@ -57,9 +58,39 @@ from COMPONENTS.slabfit_config import *
 from COMPONENTS.slabfit_loader import *
 from COMPONENTS.slabfit_runner import *
 
+os.chdir("iSLAT")
+
 # create HITRAN folder, only needed for first start
 HITRAN_folder = "HITRANdata"
 os.makedirs (HITRAN_folder, exist_ok=True)
+
+# import the user settings from the UserSettings.json file as a dictionary
+def load_user_settings():
+    user_settings_file = "UserSettings.json"
+    if os.path.exists(user_settings_file):
+        with open(user_settings_file, 'r') as f:
+            user_settings = json.load(f)
+    else:
+        # If the file does not exist, return default settings and save them as a new json file
+        default_settings = {
+            "first_startup": True,
+            "dark_mode": False,
+            "reload_default_files": True,
+            "theme": "LightTheme"
+        }
+        with open(user_settings_file, 'w') as f:
+            json.dump(default_settings, f, indent=4)
+        user_settings = default_settings
+    
+    # append theme information to the user settings dictonary
+    theme_file = f"GUIThemes/{user_settings['theme']}.json"
+    if os.path.exists(theme_file):
+        with open(theme_file, 'r') as f:
+            theme_settings = json.load(f)
+        user_settings["theme"] = theme_settings
+    return user_settings
+
+user_settings = load_user_settings()
 
 if __name__ == "__main__":
 
@@ -75,28 +106,38 @@ if __name__ == "__main__":
     min_vu = 1 / (min_wave / 1E6) / 100.
     max_vu = 1 / (max_wave / 1E6) / 100.
 
-    print (' ')
-    print ('Checking for HITRAN files: ...')
+    print('\nChecking for HITRAN files: ...')
+    
+    # If this is the first startup or reload_default_files is True, download the default HITRAN files
+    if user_settings["first_startup"] or user_settings["reload_default_files"]:
+        print('First startup or reload_default_files is True. Downloading default HITRAN files ...')
+        #print('Downloading default HITRAN files ...')
+        for mol, bm, iso in zip(mols, basem, isot):
+            save_folder = 'HITRANdata'
+            file_path = os.path.join(save_folder, "data_Hitran_2020_{:}.par".format(mol))
 
-    for mol, bm, iso in zip (mols, basem, isot):
-        save_folder = 'HITRANdata'
-        file_path = os.path.join (save_folder, "data_Hitran_2020_{:}.par".format (mol))
+            if os.path.exists(file_path):
+                print("File already exists for mol: {:}. Skipping.".format(mol))
+                continue
 
-        if os.path.exists (file_path):
-            print ("File already exists for mol: {:}. Skipping.".format (mol))
-            continue
+            print("Downloading data for mol: {:}".format(mol))
+            Htbl, qdata, M, G = get_Hitran_data(bm, iso, min_vu, max_vu)
 
-        print ("Downloading data for mol: {:}".format (mol))
-        Htbl, qdata, M, G = get_Hitran_data (bm, iso, min_vu, max_vu)
+            with open(file_path, 'w') as fh:
+                fh.write("# HITRAN 2020 {:}; id:{:}; iso:{:};gid:{:}\n".format(mol, M, iso, G))
+                fh.write("# Downloaded from the Hitran website\n")
+                fh.write("# {:s}\n".format(str(datetime.date.today())))
+                fh = write_partition_function(fh, qdata)
+                fh = write_line_data(fh, Htbl)
 
-        with open (file_path, 'w') as fh:
-            fh.write ("# HITRAN 2020 {:}; id:{:}; iso:{:};gid:{:}\n".format (mol, M, iso, G))
-            fh.write ("# Downloaded from the Hitran website\n")
-            fh.write ("# {:s}\n".format (str (datetime.date.today ())))
-            fh = write_partition_function (fh, qdata)
-            fh = write_line_data (fh, Htbl)
+            print("Data for Mol: {:} downloaded and saved.".format(mol))
 
-        print ("Data for Mol: {:} downloaded and saved.".format (mol))
+        user_settings["first_startup"] = False
+        user_settings["reload_default_files"] = False
+        with open("UserSettings.json", 'w') as f:
+            json.dump(user_settings, f, indent=4)
+    else:
+        print('Not the first startup and reload_default_files is False. Skipping HITRAN files download.')
 
 # Define the default molecules and their file path; the folder must be in the same path as iSLAT
 molecules_data = [
@@ -773,11 +814,13 @@ def update(*val):
 
         total_fluxes.append (flux_sum)
 
-    if mode == True:
+    """if isDarkMode == True:
         ax1.fill_between (lambdas_h2o, total_fluxes, color='gray', alpha=1)
 
-    if mode == False:
-        ax1.fill_between (lambdas_h2o, total_fluxes, color='lightgray', alpha=1)
+    if isDarkMode == False:
+        ax1.fill_between (lambdas_h2o, total_fluxes, color='lightgray', alpha=1)"""
+
+    ax1.fill_between (lambdas_h2o, total_fluxes, color=user_settings["theme"]["graph_fill_color"], alpha=1)
 
     # populating the empty lines created earlier in the function
     for mol_name, mol_filepath, mol_label in molecules_data:
@@ -1820,12 +1863,10 @@ def submit_rad(event, text):
     pop_diagram ()
     canvas.draw ()
 
-
 """
 flux_integral() calculates the flux of the data line in the selected region of the top graph.
 This function is used in onselect().
 """
-
 
 def flux_integral(lam, flux, err, lam_min, lam_max):
     # calculate flux integral
@@ -1841,7 +1882,6 @@ def flux_integral(lam, flux, err, lam_min, lam_max):
 model_visible() is connected to the "Visible" button in the tool.
 This function turn on/off the visibility of the line for the currently selected model
 """
-
 
 # Function to update visibility when a button is clicked
 def model_visible(event):
@@ -1878,7 +1918,6 @@ def selectfileinit():
     global wave_data, flux_data, err_data, wave_original
     global input_spectrum_data
     global filename_box_data
-    global mode
     global xp1, rng, xp2
 
     spectra_directory = os.path.abspath ("EXAMPLE-data")
@@ -1916,56 +1955,44 @@ def selectfileinit():
             # svd_line_file = f'savedlines-{dateandtime}.csv'
 
         # Ask the user to select the mode (light or dark)
-        mode_dialog = tk.messagebox.askquestion ("Select Mode", "Would you like to start iSLAT in Dark Mode?")
-
-        if mode_dialog == 'yes':
-            mode = True  # Dark mode
-        else:
-            mode = False  # Light mode
+        #mode_dialog = tk.messagebox.askquestion ("Select Mode", "Would you like to start iSLAT in Dark Mode?")
     else:
-        print ("No files selected.")
+        print("No files selected.")
 
+selectfileinit()
 
-selectfileinit ()
+print(' ')
+print('Loading molecule files: ...')
 
-print (' ')
-print ('Loading molecule files: ...')
+molecules_data = read_from_user_csv()
+# Precompute default parameters for efficiency
+default_params = {mol_name.lower(): initial_parameters.get(mol_name, default_initial_params) for mol_name, _, _ in molecules_data}
 
-molecules_data = read_from_user_csv ()
 # Loop through each molecule and set up the necessary objects and variables
 for mol_name, mol_filepath, mol_label in molecules_data:
-    # Import line lists from the ir_model folder
-    mol_data = MolData (mol_name, mol_filepath)
+    mol_name_lower = mol_name.lower()
 
-    # Get the initial parameters for the current molecule, use default if not defined
-    params = initial_parameters.get (mol_name, default_initial_params)
+    # Import line lists from the ir_model folder
+    mol_data = MolData(mol_name, mol_filepath)
+
+    # Get the precomputed parameters
+    params = default_params[mol_name_lower]
     scale_exponent = params["scale_exponent"]
     scale_number = params["scale_number"]
     t_kin = params["t_kin"]
     radius_init = params["radius_init"]
+    n_mol_init = float(scale_number * (10 ** scale_exponent))
 
-    # Calculate and set n_mol_init for the current molecule
-    n_mol_init = float (scale_number * (10 ** scale_exponent))
-
-    # Use exec() to create the variables with specific variable names for each molecule
-    exec (f"mol_{mol_name.lower ()} = MolData('{mol_name}', '{mol_filepath}')", globals ())
-    exec (f"scale_exponent_{mol_name.lower ()} = {scale_exponent}", globals ())
-    exec (f"scale_number_{mol_name.lower ()} = {scale_number}", globals ())
-    exec (f"n_mol_{mol_name.lower ()}_init = {n_mol_init}", globals ())
-    exec (f"t_kin_{mol_name.lower ()} = {t_kin}", globals ())
-    exec (f"{mol_name.lower ()}_radius_init = {radius_init}", globals ())
-
-    # Print the results (you can modify this part as needed)
-    print (f"Molecule Initialized: {mol_name}")
-    # print(f"scale_exponent_{mol_name.lower()} = {scale_exponent}")
-    # print(f"scale_number_{mol_name.lower()} = {scale_number}")
-    # print(f"n_mol_{mol_name.lower()}_init = {n_mol_init}")
-    # print(f"t_kin_{mol_name.lower()} = {t_kin}")
-    # print(f"{mol_name.lower()}_radius_init = {radius_init}")
-    # print()  # Empty line for spacing
+    # Create variables dynamically using globals dictionary
+    globals()[f"mol_{mol_name_lower}"] = mol_data
+    globals()[f"scale_exponent_{mol_name_lower}"] = scale_exponent
+    globals()[f"scale_number_{mol_name_lower}"] = scale_number
+    globals()[f"n_mol_{mol_name_lower}_init"] = n_mol_init
+    globals()[f"t_kin_{mol_name_lower}"] = t_kin
+    globals()[f"{mol_name_lower}_radius_init"] = radius_init
 
     # Store the initial values in the dictionary
-    initial_values[mol_name.lower ()] = {
+    initial_values[mol_name_lower] = {
         "scale_exponent": scale_exponent,
         "scale_number": scale_number,
         "t_kin": t_kin,
@@ -1973,47 +2000,46 @@ for mol_name, mol_filepath, mol_label in molecules_data:
         "n_mol_init": n_mol_init
     }
 
+    print(f"Molecule Initialized: {mol_name}")
+
 # Initialize visibility booleans for each molecule
-molecule_names = [mol_name.lower () for mol_name, _, _ in molecules_data]
+molecule_names = [mol_name.lower() for mol_name, _, _ in molecules_data]
 for mol_name in molecule_names:
     if mol_name == 'h2o':
-        globals ()[f"{mol_name}_vis"] = True
+        globals()[f"{mol_name}_vis"] = True
     else:
-        globals ()[f"{mol_name}_vis"] = False
+        globals()[f"{mol_name}_vis"] = False
 
 for mol_name, mol_filepath, mol_label in molecules_data:
     molecule_name_lower = mol_name.lower ()
 
     # Column density
-    exec (f"global n_mol_{molecule_name_lower}; n_mol_{molecule_name_lower} = n_mol_{molecule_name_lower}_init")
+    exec(f"global n_mol_{molecule_name_lower}; n_mol_{molecule_name_lower} = n_mol_{molecule_name_lower}_init")
 
     # Temperature
-    exec (f"global t_{molecule_name_lower}; t_{molecule_name_lower} = t_kin_{molecule_name_lower}")
+    exec(f"global t_{molecule_name_lower}; t_{molecule_name_lower} = t_kin_{molecule_name_lower}")
 
     # Radius
-    exec (f"global {molecule_name_lower}_radius; {molecule_name_lower}_radius = {molecule_name_lower}_radius_init")
+    exec(f"global {molecule_name_lower}_radius; {molecule_name_lower}_radius = {molecule_name_lower}_radius_init")
 
-if mode:
-    global background
-    global foreground
+# set up theme for the matplotlib figures from the selected theme json file
+def set_theme():
+    global background, foreground
 
-    # plt.style.use('dark_background')
-    # Set Matplotlib rcParams for dark background
-    matplotlib.rcParams['figure.facecolor'] = 'black'
-    matplotlib.rcParams['axes.facecolor'] = 'black'
-    matplotlib.rcParams['axes.edgecolor'] = 'white'
-    matplotlib.rcParams['xtick.color'] = 'white'
-    matplotlib.rcParams['ytick.color'] = 'white'
-    matplotlib.rcParams['text.color'] = 'white'
-    matplotlib.rcParams['axes.labelcolor'] = 'white'
-    background = 'black'
-    foreground = 'white'
-    # self.toolbar.setStyleSheet("background-color:Gray;")
-else:
+    # Set the background and foreground colors
+    background = user_settings["theme"].get('background', 'white')
+    foreground = user_settings["theme"].get('foreground', 'black')
 
-    background = 'white'
-    foreground = 'black'
+    # Update matplotlib rcParams with the theme colors
+    matplotlib.rcParams['figure.facecolor'] = background
+    matplotlib.rcParams['axes.facecolor'] = background
+    matplotlib.rcParams['axes.edgecolor'] = foreground
+    matplotlib.rcParams['xtick.color'] = foreground
+    matplotlib.rcParams['ytick.color'] = foreground
+    matplotlib.rcParams['text.color'] = foreground
+    matplotlib.rcParams['axes.labelcolor'] = foreground
 
+set_theme()
 
 def update_xp1_rng():
     global xp1, rng, xp2
@@ -2037,7 +2063,6 @@ def update_xp1_rng():
     print ("Updated values: xp1 =", xp1, ", rng =", rng)
     update ()
     canvas.draw ()
-
 
 def update_initvals():
     global min_lamb, max_lamb, dist, fwhm, star_rv, model_line_width, model_pixel_res, intrinsic_line_width, wave_data, pix_per_fwhm
@@ -4129,6 +4154,13 @@ toolbar_frame.grid (row=0, column=9, columnspan=2, sticky="nsew")  # Place the f
 # Create a toolbar and update it
 toolbar = NavigationToolbar2Tk (canvas, toolbar_frame)
 toolbar.update ()
+
+#Set toolbar color to Black if in dark mode
+'''if isDarkMode:
+    toolbar_frame.configure(bg='black')
+    toolbar.configure(bg='black', highlightbackground='black', highlightcolor='black')
+    toolbar._message_label.configure(bg='black', fg='white')
+    toolbar._active_color = 'white'''
 
 title_frame.grid_columnconfigure (9, weight=1)
 

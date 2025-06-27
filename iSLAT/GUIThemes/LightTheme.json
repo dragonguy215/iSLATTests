@@ -1,0 +1,8 @@
+{
+    "theme_name": "Light Theme",
+    "description": "A light theme for iSLAT with a white background and black text.",
+    "foreground": "#000000",
+    "background": "#FFFFFF",
+    "toolbar": "#000000",
+    "graph_fill_color": "#D3D3D3"
+}
