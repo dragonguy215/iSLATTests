@@ -1,8 +1,8 @@
 import os
 import datetime
-from COMPONENTS.Hitran_data import get_Hitran_data
-from COMPONENTS.partition_function_writer import write_partition_function
-from COMPONENTS.line_data_writer import write_line_data
+from .Hitran_data import get_Hitran_data
+from .partition_function_writer import write_partition_function
+from .line_data_writer import write_line_data
 
 def download_hitran_data(mols, basem, isot):
     #mols = ["H2", "HD", "H2O", "H218O", "CO2", "13CO2", "CO", "13CO", "C18O", "CH4", "HCN", "H13CN", "NH3", "OH", "C2H2", "13CCH2", "C2H4", "C4H2", "C2H6", "HC3N"]

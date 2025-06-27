@@ -24,8 +24,8 @@ except ImportError:
     pd = None
     pass
 
-from ir_model.constants import constants as c
-from ir_model.intensity import Intensity
+from ..ir_model.constants import constants as c
+from ..ir_model.intensity import Intensity
 
 
 class Spectrum:

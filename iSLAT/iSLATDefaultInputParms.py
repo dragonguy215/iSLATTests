@@ -1,5 +1,25 @@
 import numpy as np
 
+# Define the default molecules and their file path; the folder must be in the same path as iSLAT
+molecules_data = [
+    ("H2O", "HITRANdata/data_Hitran_2020_H2O.par", "H$_2$O"),
+    ("OH", "HITRANdata/data_Hitran_2020_OH.par", "OH"),
+    ("HCN", "HITRANdata/data_Hitran_2020_HCN.par", "HCN"),
+    ("C2H2", "HITRANdata/data_Hitran_2020_C2H2.par", "C$_2$H$_2$"),
+    ("CO2", "HITRANdata/data_Hitran_2020_CO2.par", "CO$_2$"),
+    ("CO", "HITRANdata/data_Hitran_2020_CO.par", "CO")
+    # Add more molecules here if needed
+]
+
+default_data = [
+    ("H2O", "HITRANdata/data_Hitran_2020_H2O.par", "H$_2$O"),
+    ("OH", "HITRANdata/data_Hitran_2020_OH.par", "OH"),
+    ("HCN", "HITRANdata/data_Hitran_2020_HCN.par", "HCN"),
+    ("C2H2", "HITRANdata/data_Hitran_2020_C2H2.par", "C$_2$H$_2$"),
+    ("CO2", "HITRANdata/data_Hitran_2020_CO2.par", "CO$_2$"),
+    ("CO", "HITRANdata/data_Hitran_2020_CO.par", "CO")
+]
+
 # Set-up default input parameters for model generation
 min_lamb = 4.5
 max_lamb = 28.

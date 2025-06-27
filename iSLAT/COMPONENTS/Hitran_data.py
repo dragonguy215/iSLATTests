@@ -2,8 +2,8 @@ from astroquery import hitran
 import pandas as pd
 import urllib.request
 import ssl
-from COMPONENTS.hitran_utils import get_molecule_identifier
-from COMPONENTS.global_identifier import get_global_identifier
+from .hitran_utils import get_molecule_identifier
+from .global_identifier import get_global_identifier
 from astropy import units as un
 
 context = ssl.create_default_context()

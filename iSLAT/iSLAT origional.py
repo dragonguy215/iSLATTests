@@ -69,7 +69,7 @@ os.makedirs(HITRAN_folder, exist_ok=True)
 
 # import the user settings from the UserSettings.json file as a dictionary
 def load_user_settings():
-    user_settings_file = "UserSettings.json"
+    user_settings_file = "CONFIG/UserSettings.json"
     if os.path.exists(user_settings_file):
         with open(user_settings_file, 'r') as f:
             user_settings = json.load(f)
@@ -85,14 +85,23 @@ def load_user_settings():
         user_settings = default_settings
     
     # append theme information to the user settings dictonary
-    theme_file = f"GUIThemes/{user_settings['theme']}.json"
+    theme_file = f"CONFIG/GUIThemes/{user_settings['theme']}.json"
     if os.path.exists(theme_file):
         with open(theme_file, 'r') as f:
             theme_settings = json.load(f)
         user_settings["theme"] = theme_settings
     return user_settings
 
+def update_default_molecule_parameters():
+    """
+    update_default_molecule_parameters() updates the default molecule parameters from the DefaultMoleculeParameters.json file.
+    """
+    global default_molecule_parameters
+    with open("CONFIG/DefaultMoleculeParameters.json", 'r') as f:
+        default_molecule_parameters = json.load(f)
+
 user_settings = load_user_settings()
+update_default_molecule_parameters()
 
 if __name__ == "__main__":
 
@@ -141,27 +150,7 @@ if __name__ == "__main__":
     else:
         print('Not the first startup and reload_default_files is False. Skipping HITRAN files download.')
 
-# Define the default molecules and their file path; the folder must be in the same path as iSLAT
-molecules_data = [
-    ("H2O", "HITRANdata/data_Hitran_2020_H2O.par", "H$_2$O"),
-    ("OH", "HITRANdata/data_Hitran_2020_OH.par", "OH"),
-    ("HCN", "HITRANdata/data_Hitran_2020_HCN.par", "HCN"),
-    ("C2H2", "HITRANdata/data_Hitran_2020_C2H2.par", "C$_2$H$_2$"),
-    ("CO2", "HITRANdata/data_Hitran_2020_CO2.par", "CO$_2$"),
-    ("CO", "HITRANdata/data_Hitran_2020_CO.par", "CO")
-    # Add more molecules here if needed
-]
-
-default_data = [
-    ("H2O", "HITRANdata/data_Hitran_2020_H2O.par", "H$_2$O"),
-    ("OH", "HITRANdata/data_Hitran_2020_OH.par", "OH"),
-    ("HCN", "HITRANdata/data_Hitran_2020_HCN.par", "HCN"),
-    ("C2H2", "HITRANdata/data_Hitran_2020_C2H2.par", "C$_2$H$_2$"),
-    ("CO2", "HITRANdata/data_Hitran_2020_CO2.par", "CO$_2$"),
-    ("CO", "HITRANdata/data_Hitran_2020_CO.par", "CO")
-]
-
-molecules_data_default = molecules_data.copy ()
+molecules_data_default = molecules_data.copy()
 
 deleted_molecules = []
 
@@ -216,55 +205,6 @@ def read_from_user_csv():
         except FileNotFoundError:
             pass
     return molecules_data
-
-
-# Set default initial parameters for a new molecule
-default_initial_params = {
-    "scale_exponent": 17,
-    "scale_number": 1,
-    "t_kin": 600,
-    "radius_init": 0.5
-}
-
-# Define the initial parameters for default molecules
-initial_parameters = {
-    "H2O": {
-        "scale_exponent": 18,
-        "scale_number": 1,
-        "t_kin": 850,
-        "radius_init": 0.5
-    },
-    "OH": {
-        "scale_exponent": 16,
-        "scale_number": 1,
-        "t_kin": 2000,
-        "radius_init": 0.3
-    },
-    "HCN": {
-        "scale_exponent": 16,
-        "scale_number": 1,
-        "t_kin": 850,
-        "radius_init": 0.5
-    },
-    "C2H2": {
-        "scale_exponent": 17,
-        "scale_number": 1,
-        "t_kin": 600,
-        "radius_init": 0.1
-    },
-    "CO2": {
-        "scale_exponent": 17,
-        "scale_number": 1,
-        "t_kin": 300,
-        "radius_init": 0.5
-    },
-    "CO": {
-        "scale_exponent": 18,
-        "scale_number": 1,
-        "t_kin": 1200,
-        "radius_init": 0.4
-    }
-}
 
 ##### Creating all the functions used for the tool #####
 
@@ -1802,7 +1742,7 @@ def selectfileinit():
             # Process each selected file
             print (' ')
             print ("Selected file:", file_path)
-            file_name = os.path.basename (file_path)
+            file_name = os.path.basename(file_path)
             # code to process each file
             input_spectrum_data = pd.read_csv(filepath_or_buffer=file_path, sep=',')
             wave_data = np.array(input_spectrum_data['wave'])
