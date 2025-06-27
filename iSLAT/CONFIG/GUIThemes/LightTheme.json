@@ -10,6 +10,7 @@
     "toolbar_highlight_background": "#000000",
     "toolbar_highlight_color": "#000000",
     "toolbar_active_color": "#FFFFFF",
+    "highlight": "#FFFF00",
     "buttons": {
         "DefaultBotton": {
             "background": "#D3D3D3",
