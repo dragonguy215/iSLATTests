@@ -4,5 +4,10 @@
     "foreground": "#FFFFFF",
     "background": "#000000",
     "toolbar": "#FFFFFF",
-    "graph_fill_color": "#808080"
+    "graph_fill_color": "#808080",
+    "selection_color": "#00FF00",
+    "uncertainty_band_color": "#ABABAB",
+    "toolbar_highlight_background": "#FFFFFF",
+    "toolbar_highlight_color": "#FFFFFF",
+    "toolbar_active_color": "#000000"
 }

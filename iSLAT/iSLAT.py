@@ -171,7 +171,6 @@ os.makedirs (output_dir, exist_ok=True)
 linesave_folder = "LINESAVES"
 os.makedirs (linesave_folder, exist_ok=True)
 
-
 # read more molecules if saved by the user in a previous iSLAT session
 def read_from_csv():
     global file_name
@@ -187,7 +186,6 @@ def read_from_csv():
             pass
     return molecules_data
 
-
 def read_default_csv():
     global file_name
     filename = os.path.join (save_folder, f"default.csv")
@@ -201,7 +199,6 @@ def read_default_csv():
         except FileNotFoundError:
             pass
     return molecules_data
-
 
 # read more molecules if saved by the user in a previous iSLAT session
 def read_from_user_csv():
@@ -298,14 +295,12 @@ line_threshold = 0.03  # percent value (where 0.01 = 1%) of the strongest line i
 # lines below this this limit are ignored in the plot and in the single line selection
 
 
-"""Creating all the functions used for the tool"""
-
-"""
-run_slabfit() fits a single Slab model for spanmol using the line flux measurement file in input
-"""
-
+##### Creating all the functions used for the tool #####
 
 def run_slabfit():
+    """
+    run_slabfit() fits a single Slab model for spanmol using the line flux measurement file in input
+    """
     global spanmol
 
     try:
@@ -403,17 +398,14 @@ def run_slabfit():
         data_field.delete ('1.0', "end")
         data_field.insert ('1.0', 'Slab fit completed!')
 
-
-"""
-Save() is connected to the "Save Line" button of the tool.
-This function appends information of the the strongest line (as determined by intensity) in the spanned area graph to a csv file. 
-The name of the csv file is set with the "svd_line_file" variable in the second code block above. 
-For the parameters of the line that is saved, refer to the "line2save" variable in onselect().
-When starting the tool up, the "headers" variable is set to False. After apending a line to the csv for the first time, the "headers" variable is changed to False.
-"""
-
-
 def Save():
+    """
+    Save() is connected to the "Save Line" button of the tool.
+    \nThis function appends information of the the strongest line (as determined by intensity) in the spanned area graph to a csv file. 
+    \nThe name of the csv file is set with the "svd_line_file" variable in the second code block above. 
+    \nFor the parameters of the line that is saved, refer to the "line2save" variable in onselect().
+    \nWhen starting the tool up, the "headers" variable is set to False. After apending a line to the csv for the first time, the "headers" variable is changed to False.
+    """
     global line2save
     global headers
     global selectedline
@@ -441,13 +433,8 @@ def Save():
 
     canvas.draw ()
 
-
-"""
-fit_onselect() is connected to the "Fit Line" button of the tool.
-This function fits the line selected in the top graph using LMFIT"""
-
-
 def fit_onselect():
+    """fit_onselect() is connected to the "Fit Line" button of the tool. \nThis function fits the line selected in the top graph using LMFIT"""
     global selectedline
 
     print (' ')
@@ -459,9 +446,9 @@ def fit_onselect():
         gauss_fit, gauss_fwhm, gauss_area, x_fit = fit_line (data_region_x[1], data_region_x[-2])
 
         dely = gauss_fit.eval_uncertainty (sigma=3)
-        ax2.fill_between (x_fit, gauss_fit.best_fit - dely, gauss_fit.best_fit + dely, color="#ABABAB",
+        ax2.fill_between(x_fit, gauss_fit.best_fit - dely, gauss_fit.best_fit + dely, color=user_settings["theme"]["uncertainty_band_color"],
                           label=r'3-$\sigma$ uncertainty band')
-        ax2.plot (x_fit, gauss_fit.best_fit, label='Gauss. fit', color='lime', ls='--')
+        ax2.plot(x_fit, gauss_fit.best_fit, label='Gauss. fit', color=user_settings["theme"]["selection_color"], ls='--')
 
         data_field.insert (tk.END, ('\n ' + '\nGaussian fit results: ' + '\nCentroid (μm) = ' + str (
             np.round (gauss_fit.params['center'].value, decimals=5)) + ' +/- ' + str (
@@ -470,22 +457,16 @@ def fit_onselect():
             np.round (gauss_fwhm[1], decimals=1)) + '\nArea (erg/s/cm2) = ' + f'{gauss_area[0]:.{3}e}' +
                                     ' +/- ' + f'{gauss_area[1]:.{3}e}'))
 
-        fig.canvas.draw_idle ()
+        fig.canvas.draw_idle()
     else:
-        data_field.delete ('1.0', "end")
-        data_field.insert ('1.0', 'No Line Selected!')
-        fig.canvas.draw_idle ()
+        data_field.delete('1.0', "end")
+        data_field.insert('1.0', 'No Line Selected!')
+        fig.canvas.draw_idle()
         return
-    canvas.draw ()
-
-"""
-fit_onselect() is connected to the "Fit Line" button of the tool.
-This function fits the line selected in the top graph using LMFIT"""
-
+    canvas.draw()
 
 def fitmulti_onselect():
     global selectedline, onselect_lines, deblend_filename
-
 
     if selectedline == True:  # "selectedline" variable is determined by whether or not an area was selected in the top graph or not
         print(' ')
@@ -549,7 +530,7 @@ def fitmulti_onselect():
         # save output file with measurements as csv file, update to use linesavepath
         output_lines.to_csv(deblend_filename + '.csv', header=True, index=False)
 
-        fig.canvas.draw_idle ()
+        fig.canvas.draw_idle()
 
         data_field.insert(tk.END, ('\n ' + "\nDe-blended line saved in /LINESAVES!"))
 
@@ -558,13 +539,10 @@ def fitmulti_onselect():
         data_field.insert('1.0', 'No Line Selected!')
         fig.canvas.draw_idle()
         return
-    canvas.draw ()
+    canvas.draw()
 
-
-"""
-multifit_line() uses LMFIT to fit a line and provide best-fit parameters.
-"""
 def fitmulti_line(xmin, xmax, onsel_lines):
+    """multifit_line() uses LMFIT to fit a line and provide best-fit parameters."""
     global deblend_filename
 
     fit_range = np.where(np.logical_and(wave_data >= xmin, wave_data <= xmax))  # define spectral range for the fit
@@ -644,11 +622,8 @@ def fitmulti_line(xmin, xmax, onsel_lines):
 
     return gauss_fit
 
-
-"""
-fit_line() uses LMFIT to fit a line and provide best-fit parameters.
-"""
 def fit_line(xmin, xmax):
+    """fit_line() uses LMFIT to fit a line and provide best-fit parameters."""
     fit_range = np.where (np.logical_and (wave_data >= xmin, wave_data <= xmax))  # define spectral range for the fit
     x_fit = wave_data[fit_range[::-1]]  # reverse the wavelength array to use it in the fit
     model = GaussianModel ()  # use gaussian model from LMFIT
@@ -685,14 +660,11 @@ def fit_line(xmin, xmax):
 
     return gauss_fit, [gauss_fwhm, gauss_fwhm_err], [gauss_area, gauss_area_err], x_fit
 
-
-"""
-update() is main function of this tool. It is called any time and of the sliders or text imput are changed. 
-This function is where the models are rebuilt with new parameters and the graphs are recreated.
-"""
-
-
 def update(*val):
+    """
+    update() is main function of this tool. It is called any time and of the sliders or text imput are changed. 
+    \nThis function is where the models are rebuilt with new parameters and the graphs are recreated.
+    """
     global skip  # See reference in reset()
     # If skip is False, then update() does not run. This cuts down needless processing
     if skip == True:
@@ -814,12 +786,6 @@ def update(*val):
 
         total_fluxes.append (flux_sum)
 
-    """if isDarkMode == True:
-        ax1.fill_between (lambdas_h2o, total_fluxes, color='gray', alpha=1)
-
-    if isDarkMode == False:
-        ax1.fill_between (lambdas_h2o, total_fluxes, color='lightgray', alpha=1)"""
-
     ax1.fill_between (lambdas_h2o, total_fluxes, color=user_settings["theme"]["graph_fill_color"], alpha=1)
 
     # populating the empty lines created earlier in the function
@@ -877,9 +843,7 @@ def update(*val):
     pop_diagram ()
     plt.draw (), canvas.draw ()
 
-
 class ToolTip (object):
-
     def __init__(self, widget):
         self.widget = widget
         self.tipwindow = None
@@ -908,7 +872,6 @@ class ToolTip (object):
         if tw:
             tw.destroy ()
 
-
 def CreateToolTip(widget, text):
     toolTip = ToolTip (widget)
 
@@ -921,15 +884,12 @@ def CreateToolTip(widget, text):
     widget.bind ('<Enter>', enter)
     widget.bind ('<Leave>', leave)
 
-
-"""
-single_finder() is connected to the "Find Singles" button.
-This function is a filter that finds molecular lines in the model that are isolated then prints vertical lines in the top graph where these lines are located
-e.g. they are either a set distance away from other strong lines, or the intensity of the lines near the line are negligible.
-"""
-
-
 def single_finder():
+    """
+    single_finder() is connected to the "Find Singles" button.
+    \nThis function is a filter that finds molecular lines in the model that are isolated then prints vertical lines in the top graph where these lines are located
+    \ne.g. they are either a set distance away from other strong lines, or the intensity of the lines near the line are negligible.
+    """
     update ()
     global fig_height
     global fig_bottom_height
@@ -993,14 +953,11 @@ def single_finder():
                            'There are ' + str (counter) + ' single lines found in the current wavelength range.')
     canvas.draw ()
 
-
-"""
-print_saved_lines() prints, as vertical dashed lines, on the top graph the locations of all lines saved to the current csv connected to the Save() function.
-This csv can be changed in the user adjustable variables code block, but the change won't take into effect until the user regenerates the tool.
-"""
-
-
 def print_saved_lines():
+    """
+    print_saved_lines() prints, as vertical dashed lines, on the top graph the locations of all lines saved to the current csv connected to the Save() function.
+    \nThis csv can be changed in the user adjustable variables code block, but the change won't take into effect until the user regenerates the tool.
+    """
     global linelistpath, green_lines, green_scatter, default_line
 
     try:
@@ -1036,7 +993,6 @@ def print_saved_lines():
     data_field.delete ('1.0', "end")
     data_field.insert ('1.0', 'Saved lines retrieved from file.')
     canvas.draw ()
-
 
 def plot_spectrum_around_line(lamb, xmin, xmax):
     global wave_data, flux_data, lamb_cnts, intensities, einstein, e_up, up_lev, low_lev, g_up, tau, max_intensity, max_y, spanmol
@@ -1224,12 +1180,8 @@ def plot_spectrum_around_line(lamb, xmin, xmax):
 
     fig.canvas.mpl_connect ('pick_event', onpick3)
 
-
-"""
-fit_saved_lines() will fit all saved lines in one click, and save them to output"""
-
-
 def fit_saved_lines():
+    """fit_saved_lines() will fit all saved lines in one click, and save them to output"""
     try:
         linelistpath
     except NameError:
@@ -1338,17 +1290,13 @@ def print_atomic_lines():
 
     canvas.draw ()
 
-
-"""
-onselect() is the function for the span selector functionality in the top graph of the tool.
-Here, the user selects a range in the top graph and the range of the data and water model spectrum are rebuilt in the zoom graph (bottom left graph) 
-along with the water lines in that range.
-The strongest line is determined and its info is printed in the text feed on the left. 
-The lines are also highlighted in the population diagram graph in this function.
-"""
-
-
 def onselect(xmin, xmax):
+    """
+    onselect() is the function for the span selector functionality in the top graph of the tool.
+    \nHere, the user selects a range in the top graph and the range of the data and water model spectrum are rebuilt in the zoom graph (bottom left graph) along with the water lines in that range.
+    \nThe strongest line is determined and its info is printed in the text feed on the left. 
+    \nThe lines are also highlighted in the population diagram graph in this function.
+    """
     global onselect_lines, wave_data, flux_data, line2save, selectedline, spanmol, model_indmin, model_indmax, data_region_x, model_line_select, green_lines, green_scatter, default_line, current_selected_line, intensities, lamb_cnts, e_up, einstein, err_data
 
     xdif = xmax - xmin
@@ -1478,24 +1426,24 @@ def onselect(xmin, xmax):
             green_scatter = []
 
             # Plot the lines in the zoom range
-            if len (model_region_x) >= 1:
+            if len(model_region_x) >= 1:
                 k = 0
                 model_line_select.set_data (model_region_x, model_region_y)
                 data_line_select.set_data (data_region_x, data_region_y)
-                ax2.set_xlim (model_region_x[0], model_region_x[-1])
+                ax2.set_xlim(model_region_x[0], model_region_x[-1])
 
                 for j in range (len (lamb_cnts)):
                     lineheight = (intensities[j] / max_intensity) * max_y
                     # if intensities[j] > max_intensity / 50:
-                    line = ax2.vlines (lamb_cnts[j], 0, lineheight, linestyles='dashed', color='green',
+                    line = ax2.vlines(lamb_cnts[j], 0, lineheight, linestyles='dashed', color='green',
                                        picker=True) if j != max_index else ax2.vlines (lamb_cnts[j], 0, lineheight,
                                                                                        linestyles='dashed', color='orange',
                                                                                        picker=True)
-                    green_lines.append (line)
-                    text = ax2.text (lamb_cnts[j], lineheight,
+                    green_lines.append(line)
+                    text = ax2.text(lamb_cnts[j], lineheight,
                                      (str (f'{e_up[j]:.{0}f}') + ', ' + str (f'{einstein[j]:.{3}f}')), color='green',
                                      fontsize='small')
-                    area = eval (f"np.pi*({spanmol}_radius*au*1e2)**2")  # In cm^2
+                    area = eval(f"np.pi*({spanmol}_radius*au*1e2)**2")  # In cm^2
                     Dist = dist * pc
                     beam_s = area / Dist ** 2
                     F = intensities[j] * beam_s
@@ -1510,12 +1458,12 @@ def onselect(xmin, xmax):
                     threshold_intensity = max_intensity / 50
                     if intensities[j] < threshold_intensity:
                         green_lines[j].remove ()
-                        text.remove ()
+                        text.remove()
                         green_scatter[j].remove ()
                     if j == max_index:
                         default_line = (j, lamb_cnts[j], lineheight, e_up[j], einstein[j], scatter)
 
-                fig.canvas.flush_events ()
+                fig.canvas.flush_events()
 
                 def onpick(event):
                     global default_line, line2save, intensities, lamb_cnts
@@ -1545,8 +1493,8 @@ def onselect(xmin, xmax):
 
                         # Find the corresponding scatter point for this line
                         scatter = green_scatter[idx]
-                        scatter.set_color ('orange')  # Change the color of the scatter point to orange
-                        scatter.set_edgecolors ('black')  # Optional: change the edge color
+                        scatter.set_color('orange')  # Change the color of the scatter point to orange
+                        scatter.set_edgecolors('black')  # Optional: change the edge color
 
                         # Update default_line
                         default_line = (idx, lamb_cnts[idx], lineheight, e_up[idx], einstein[idx], scatter)
@@ -1594,27 +1542,17 @@ def onselect(xmin, xmax):
         pop_diagram ()
         ax2.clear ()
 
-
-"""
-on_xlims_change() saves the current xp1 and xp2 for use in other functions.
-This Function is necessary to allow the user to use matplotlib's interactive graph scrolling feature without 
-breaking the functionality of other features of this tool (e.g. Next() or Prev())
-"""
-
-
 def on_xlims_change(event_ax):
+    """
+    on_xlims_change() saves the current xp1 and xp2 for use in other functions.
+    \nThis Function is necessary to allow the user to use matplotlib's interactive graph scrolling feature without breaking the functionality of other features of this tool (e.g. Next() or Prev())
+    """
     global xp1
     global xp2
     xp1, xp2 = event_ax.get_xlim ()
 
-
-"""
-pop_diagram() is the function for populating the population diagram with the lines of the water model 
-in the entire range of the model
-"""
-
-
 def pop_diagram():
+    """pop_diagram() is the function for populating the population diagram with the lines of the water model in the entire range of the model"""
     ax3.clear ()
     global spanmol
     ax3.set_ylabel (r'ln(4πF/(hν$A_{u}$$g_{u}$))')
@@ -1648,14 +1586,10 @@ def pop_diagram():
     line6 = ax3.scatter (eu, rd_yax, s=0.5, color='#838B8B')
     # plt.show()
 
-
-"""
-submit_col() is connected to the text input box for adjusting the 
-column density of the currently selected molecule
-"""
-
-
 def submit_col(event, text):
+    """
+    submit_col() is connected to the text input box for adjusting the column density of the currently selected molecule
+    """
     # global text_box
     # global text_box_data
 
@@ -1863,28 +1797,24 @@ def submit_rad(event, text):
     pop_diagram ()
     canvas.draw ()
 
-"""
-flux_integral() calculates the flux of the data line in the selected region of the top graph.
-This function is used in onselect().
-"""
-
 def flux_integral(lam, flux, err, lam_min, lam_max):
+    """
+    flux_integral() calculates the flux of the data line in the selected region of the top graph.
+    \nThis function is used in onselect().
+    """
     # calculate flux integral
     integral_range = np.where (np.logical_and (lam > lam_min, lam < lam_max))
-    line_flux_meas = np.trapz (flux[integral_range[::-1]], x=ccum / lam[integral_range[::-1]])
+    line_flux_meas = np.trapezoid (flux[integral_range[::-1]], x=ccum / lam[integral_range[::-1]])
     line_flux_meas = -line_flux_meas * 1e-23  # to get (erg s-1 cm-2); it's using frequency array, so need the - in front of it
-    line_err_meas = np.trapz (err[integral_range[::-1]], x=ccum / lam[integral_range[::-1]])
+    line_err_meas = np.trapezoid (err[integral_range[::-1]], x=ccum / lam[integral_range[::-1]])
     line_err_meas = -line_err_meas * 1e-23  # to get (erg s-1 cm-2); it's using frequency array, so need the - in front of it
     return line_flux_meas, line_err_meas
 
-
-"""
-model_visible() is connected to the "Visible" button in the tool.
-This function turn on/off the visibility of the line for the currently selected model
-"""
-
-# Function to update visibility when a button is clicked
 def model_visible(event):
+    """
+    model_visible() is connected to the "Visible" button in the tool.
+    \nThis function turn on/off the visibility of the line for the currently selected model when the button is clicked.
+    """
     # Update visibility based on the button that was clicked
     if globals ()[f"{event}_vis"] == True:
         globals ()[f"{event}_vis"] = False
@@ -1953,9 +1883,6 @@ def selectfileinit():
             # dateandtime = now.strftime("%d-%m-%Y-%H-%M-%S")
             # print(dateandtime)
             # svd_line_file = f'savedlines-{dateandtime}.csv'
-
-        # Ask the user to select the mode (light or dark)
-        #mode_dialog = tk.messagebox.askquestion ("Select Mode", "Would you like to start iSLAT in Dark Mode?")
     else:
         print("No files selected.")
 
@@ -2024,6 +1951,7 @@ for mol_name, mol_filepath, mol_label in molecules_data:
 
 # set up theme for the matplotlib figures from the selected theme json file
 def set_theme():
+    """set_theme() sets the theme for the matplotlib figures based on the user settings."""
     global background, foreground
 
     # Set the background and foreground colors
@@ -2258,7 +2186,6 @@ for col, label in enumerate (column_labels):
     label_widget = tk.Label (molecule_frame, text=label)
     label_widget.grid (row=0, column=col)
 
-
 def choose_color(widget):
     # Get the row number from the widget's grid info
     row = widget.grid_info ()["row"]
@@ -2279,7 +2206,6 @@ def choose_color(widget):
         color_button.configure (bg=color[1])
         write_user_csv (molecules_data)
         update ()
-
 
 def delete_row(widget):
     global molecules_data, nextrow
@@ -2321,8 +2247,8 @@ def delete_row(widget):
     spandropd['values'] = spanoptionsvar
     if spanoptionsvar:
         spandropd.set (spanoptionsvar[0])
-    update ()
-    canvas.draw ()
+    update()
+    canvas.draw()
     data_field.delete ('1.0', "end")
     data_field.insert ('1.0', f'{mol_name.upper ()} deleted!')
 
@@ -2338,7 +2264,7 @@ def update_csv():
 
         # Identify the row to delete
         for i, row in enumerate (rows):
-            if row[0].lower () == mol_name:
+            if row[0].lower() == mol_name:
                 del rows[i]
                 break
 
@@ -2347,9 +2273,9 @@ def update_csv():
             writer = csv.writer (file)
             writer.writerows (rows)
 
-        print (f"{csv_file} updated.")
+        print(f"{csv_file} updated.")
     except Exception as e:
-        print (f"Error updating {csv_file}: {e}")
+        print(f"Error updating {csv_file}: {e}")
 
 
 # Loop to create rows of input fields and buttons for each chemical
@@ -3058,18 +2984,14 @@ def write_default_csv(data):
     except Exception as e:
         print ("Error:", e)
 
-
 write_default_csv (default_data)
-
-
 
 files_frame = tk.Frame (window, borderwidth=2, relief="groove")
 files_frame.grid (row=outer_frame.grid_info ()['row'] + outer_frame.grid_info ()['rowspan'], column=0, rowspan=7,
                   columnspan=5, sticky="nsew")
 
-
-# Function to open spectrum data file from the GUI using Open File for "Spectrum data file"
 def selectfile():
+    '''Function to open spectrum data file from the GUI using Open File for "Spectrum data file"'''
     global file_path
     global file_name
     global wave_data, flux_data, err_data, wave_original
@@ -3126,7 +3048,6 @@ def selectfile():
     else:
         data_field.delete ('1.0', "end")
         data_field.insert ('1.0', 'No file selected.')
-
 
 def selectlinefile():
     global linelistfile
@@ -3205,7 +3126,7 @@ def savelinefile():
                 with open (infile, 'a') as file:
                     file.write (headers + '\n')
             else:
-                print ("File selected is not a line save file")
+                print("File selected is not a line save file")
         else:
             # File doesn't exist, create a new one and write headers
             with open (infile, 'w') as file:
@@ -3380,7 +3301,6 @@ def on_span_select(selected_item):
             # print("model_indmin or model_indmax is not defined.")
             pass
 
-
 # Create and place the xp1 text box in row 12, column 0
 specsep_label = tk.Label(plotparams_frame, text="Line Separ.:")
 #specsep_label.grid (row=4, column=2, pady=(0, 45))
@@ -3389,8 +3309,6 @@ specsep_entry = tk.Entry (plotparams_frame, bg='lightgray', width=8)
 specsep_entry.insert (0, str(specsep))
 #specsep_entry.grid (row=4, column=3, pady=(0, 45))
 specsep_entry.grid (row=4, column=3)
-
-
 
 # Add some space below plotparams_frame
 # tk.Label(plotparams_frame, text="").grid(row=4, column=0)
@@ -3443,7 +3361,6 @@ def generate_all_csv():
 
     data_field.delete ('1.0', "end")
     data_field.insert ('1.0', f'All models exported into iSLAT/MODELS!')
-
 
 def generate_csv(mol_name):
     if mol_name == "SUM":
@@ -3513,7 +3430,6 @@ def generate_csv(mol_name):
         data_field.delete ('1.0', "end")
         data_field.insert ('1.0', f'{mol_name} model exported into iSLAT/MODELS!')
 
-
 def export_spectrum():
     # Create a new window for exporting the spectrum
     export_window = tk.Toplevel (root)
@@ -3534,7 +3450,6 @@ def export_spectrum():
     button = tk.Button (export_window, text="Generate CSV", command=lambda: generate_csv (dropdown_var.get ()))
     button.grid (row=1, column=1)
 
-
 # Create a dropdown menu in the new window
 spanselectlab = tk.Label (plotparams_frame, text="Molecule:")
 #spanselectlab.grid (row=4, column=0, pady=(0, 45))
@@ -3552,9 +3467,7 @@ spandropd.bind ("<<ComboboxSelected>>", lambda event: on_span_select ((spanoptio
 # spanbutton = tk.Button(plotparams_frame, text="Change Mol", command=lambda: on_span_select((spanoptionsvar[spandropd.current()]).lower()))
 # spanbutton.grid(row=4, column=2)
 
-
 spanmol = (spanoptionsvar[spandropd.current ()]).lower ()
-
 
 # Create the buttons for line de-blender
 fwhmtolerance_label = tk.Label(plotparams_frame, text="FWHM tol.:")
@@ -3568,12 +3481,9 @@ centrtolerance_entry = tk.Entry(plotparams_frame, bg='lightgray', width=8)
 centrtolerance_entry.insert(0, str(centrtolerance))
 centrtolerance_entry.grid(row=5, column=3, pady=(0, 2))
 
-
-
 def toggle_fullscreen():
     state = window.attributes ('-fullscreen')
     window.attributes ('-fullscreen', not state)
-
 
 # # Create a button to toggle fullscreen
 # fullscreen_button = tk.Button(title_frame, text="Toggle Fullscreen", bg='blue', activebackground='darkblue', command=toggle_fullscreen, width=14, height=1)
@@ -3583,7 +3493,6 @@ def import_molecule():
     MoleculeSelector (root, data_field)
     # data_field.delete ('1.0', "end")
     # data_field.insert ('1.0', 'New molecule downloaded from HITRAN.')
-
 
 # Create a Tkinter button to import additional hitran molecules
 import_button = tk.Button (title_frame, text="HITRAN query", bg='lightgray', activebackground='gray',
@@ -3613,14 +3522,12 @@ export_button = tk.Button (title_frame, text='Export Models', bg='lightgray', co
                            height=1)
 export_button.grid (row=0, column=5)
 
-
 def toggle_legend():
     if ax1.legend_ is None:
         ax1.legend ()
     else:
         ax1.legend_.remove ()
     canvas.draw ()
-
 
 # Create a Tkinter button to toggle the legend
 toggle_button = tk.Button (title_frame, text="Toggle Legend", bg='lightgray', activebackground='gray',
@@ -3695,7 +3602,6 @@ def set_file_permissions(filename, mode):
 # After you write the data to the CSV file, call the function to set the permissions
 csv_perm_path = os.path.join (save_folder, f"{file_name}-molsave.csv")
 set_file_permissions (csv_perm_path, 0o666)  # Here, 0o666 sets read and write permissions for all users.
-
 
 def write_to_csv(data, confirmation=False):
     if confirmation:
@@ -3800,7 +3706,6 @@ def add_molecule_data():
     # Ask the user to select a data file
     inmolfiles = filedialog.askopenfilename (multiple=True, title='Choose HITRAN Molecule Data File',
                                              filetypes=molfiletypes, initialdir=hitran_directory)
-
     if inmolfiles:
         for mol_file_path in inmolfiles:
             # Process each selected file
@@ -4108,7 +4013,6 @@ def down_molecule_data(val):
             except OSError:
                 continue  # Try the next browser if the current one fails       
 
-
 # Create a frame for the Text widget
 text_frame = tk.Frame (window)
 text_frame.grid (row=functions_frame.grid_info ()['row'] + functions_frame.grid_info ()['rowspan'], column=0,
@@ -4136,7 +4040,6 @@ ax1.callbacks.connect ('xlim_changed', on_xlims_change)
 # figManager.window.showMaximized()
 # ax1.figure.canvas.draw_idle()
 
-
 # Create a FigureCanvasTkAgg widget to embed the figure in the tkinter window
 canvas = FigureCanvasTkAgg (fig, master=window)
 canvas_widget = canvas.get_tk_widget ()
@@ -4155,16 +4058,15 @@ toolbar_frame.grid (row=0, column=9, columnspan=2, sticky="nsew")  # Place the f
 toolbar = NavigationToolbar2Tk (canvas, toolbar_frame)
 toolbar.update ()
 
-#Set toolbar color to Black if in dark mode
-'''if isDarkMode:
-    toolbar_frame.configure(bg='black')
-    toolbar.configure(bg='black', highlightbackground='black', highlightcolor='black')
-    toolbar._message_label.configure(bg='black', fg='white')
-    toolbar._active_color = 'white'''
+#Adjust tool bar color to match the theme
+toolbar_frame.configure(bg=user_settings["theme"]["background"])
+toolbar.configure(bg=user_settings["theme"]["background"], highlightbackground=user_settings["theme"]["toolbar_highlight_background"], highlightcolor=user_settings["theme"]["toolbar_highlight_color"])
+toolbar._message_label.configure(bg=user_settings["theme"]["background"], fg=user_settings["theme"]["foreground"])
+toolbar._active_color = user_settings["theme"]["toolbar_active_color"]
 
 title_frame.grid_columnconfigure (9, weight=1)
 
-plt.interactive (False)
+plt.interactive(False)
 
 update ()
 
@@ -4292,14 +4194,14 @@ CreateToolTip(atomlines_button, text='Show atomic lines\n'
 
 for row, (mol_name, _, _) in enumerate (molecules_data, start=1):
     # Get the molecule name in lower case
-    mol_name_lower = mol_name.lower ()
+    mol_name_lower = mol_name.lower()
 
     # Get the line object
-    line_var = globals ().get (f"{mol_name_lower}_line")
+    line_var = globals().get (f"{mol_name_lower}_line")
     # Chdeseck if the line object exists and has a color attribute
     if line_var and hasattr (line_var, 'get_color'):
         # Get the color of the line
-        line_color = line_var.get_color ()
+        line_color = line_var.get_color()
 
         # Get the color button from the grid_slaves listatomi
         color_button = molecule_frame.grid_slaves (row=row, column=6)[0]
@@ -4310,5 +4212,5 @@ for row, (mol_name, _, _) in enumerate (molecules_data, start=1):
         print ('Line object or color attribute not found for:', mol_name)
 
 # save_default_to_file(file_name)
-load_molecules_list ()
-window.mainloop ()
+load_molecules_list()
+window.mainloop()
