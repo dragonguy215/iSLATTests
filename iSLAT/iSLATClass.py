@@ -101,9 +101,6 @@ class iSLAT:
         self.xp1 = None
         self.xp2 = None  
 
-        # Initialize GUI
-        #self.init_gui()
-
     def init_gui(self):
         """
         Initialize the GUI components of iSLAT.
@@ -115,13 +112,16 @@ class iSLAT:
             self.root.geometry("800x600")
             self.root.resizable(True, True)
 
-        self.root.mainloop()
+        #self.root.mainloop()
 
         if not hasattr(self, "GUI"):
             self.GUI = GUI(
                 master=self.root,
                 isotopologue_data=self.molecules_data_default,
+                input_spectrum_data = self.input_spectrum_data if hasattr(self, 'input_spectrum_data') else None,
                 data_field=None,  # Placeholder for data field, to be set later
+                wave_data = self.wave_data if hasattr(self, 'wave_data') else None,
+                flux_data = self.flux_data if hasattr(self, 'flux_data') else None,
                 mols=self.mols,
                 basem=self.basem,
                 isot=self.isot,
@@ -237,12 +237,6 @@ class iSLAT:
         os.makedirs(HITRAN_folder, exist_ok=True)
 
     def selectfileinit(self):
-        """global file_path
-        global file_name
-        global wave_data, flux_data, err_data, wave_original
-        global input_spectrum_data
-        global filename_box_data
-        global xp1, rng, xp2"""
         filetypes = [('CSV Files', '*.csv')]
         spectra_directory = os.path.abspath ("EXAMPLE-data")
         # Ask the user to select a file
@@ -273,15 +267,7 @@ class iSLAT:
         else:
             print("No files selected.")
     
-    '''def selectfile(self):
-        ''Function to open spectrum data file from the GUI using Open File for "Spectrum data file"''
-        global file_path
-        global file_name
-        global wave_data, flux_data, err_data, wave_original
-        global input_spectrum_data
-        global filename_box_data
-        global xp1, rng, xp2, xp1_entry, rng_entry
-
+    def selectfile(self):
         filetypes = [('CSV Files', '*.csv')]
         spectra_directory = os.path.abspath("EXAMPLE-data")
         infiles = filedialog.askopenfilename(multiple=True, title='Choose Spectrum Data File', filetypes=filetypes,
@@ -293,7 +279,7 @@ class iSLAT:
                 print ("Selected file:", file_path)
                 file_name = os.path.basename(file_path)
 
-                file_name_label.config (text=str (file_name))
+                file_name_label.config(text=str (file_name))
                 # filename_box_data.set_val(file_name)
                 # Add your code to process each file
                 # THIS IS THE OLD FILE SYSTEM (THIS WILL BE USED UNTIL THE NEW FILE SYSTEM IS DEVELOPED) USE THIS!!!!!
@@ -324,18 +310,24 @@ class iSLAT:
                 # print(dateandtime)
                 # svd_line_file = f'savedlines-{dateandtime}.csv'
 
-                update()
+                self.update()
 
                 data_field.delete('1.0', "end")
                 data_field.insert('1.0', 'New spectrum loaded!')
         else:
             data_field.delete('1.0', "end")
-            data_field.insert('1.0', 'No file selected.')'''
+            data_field.insert('1.0', 'No file selected.')
 
-"""# Create necessary folders, if it doesn't exist (typically at first launch of iSLAT)
-save_folder = "SAVES"
-os.makedirs (save_folder, exist_ok=True)
-output_dir = "MODELS"
-os.makedirs (output_dir, exist_ok=True)
-linesave_folder = "LINESAVES"
-os.makedirs (linesave_folder, exist_ok=True)"""
+    def update(self):
+        """
+        update() updates the GUI components and data fields.
+        This function is called after loading a new spectrum or making changes to the GUI.
+        """
+        # Update the GUI components
+        if hasattr(self, 'GUI'):
+            self.GUI.update_gui()
+        
+        # Update the data field with a message
+        if hasattr(self, 'data_field'):
+            self.data_field.delete('1.0', "end")
+            self.data_field.insert('1.0', 'Spectrum data updated.')

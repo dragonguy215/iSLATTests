@@ -3872,8 +3872,8 @@ text_frame.grid (row=functions_frame.grid_info ()['row'] + functions_frame.grid_
                  columnspan=5, sticky='nsew')
 
 # Create a Text widget within the frame
-data_field = tk.Text (text_frame, wrap="word", height=13, width=24)
-data_field.pack (fill="both", expand=True)
+data_field = tk.Text(text_frame, wrap="word", height=13, width=24)
+data_field.pack(fill="both", expand=True)
 
 # Define the span selecting function of the tool
 span = SpanSelector (

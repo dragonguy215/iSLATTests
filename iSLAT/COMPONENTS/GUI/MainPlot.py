@@ -29,21 +29,19 @@ class iSLATPlot:
         self.config = config
 
         # Initialize the plot
-        #self.create_plot()
-    
+        self.canvas = self.create_plot()
+
     def create_plot(self):
         """
         Create the main plot for iSLAT.
         This method sets up the figure, axes, and various components of the plot.
+        Returns a plot canvas that can be embedded into other windows.
         """
         # Extract user settings
         user_settings = self.config['user_settings']
         foreground = user_settings["theme"]["foreground"]
         background = user_settings["theme"]["background"]
         iSLAT_version = self.config['iSLAT_version']
-
-        # Set the matplotlib style
-        #plt.style.use(user_settings["theme"]["matplotlib_style"])
 
         # Prepare data for plotting
         input_spectrum_data = self.input_spectrum_data
@@ -52,79 +50,66 @@ class iSLATPlot:
         wave_data = self.wave_data
         flux_data = self.flux_data
 
-'''# Creating the graph
-fig = plt.figure(figsize=(15, 8.5))
-# fig = plt.figure()
-gs = GridSpec (nrows=2, ncols=2, width_ratios=[1, 1], height_ratios=[1, 1.5])
-ax1 = fig.add_subplot (gs[0, :])
-ax2 = fig.add_subplot (gs[1, 0])
-ax3 = fig.add_subplot (gs[1, 1])
+        # Create the figure and axes
+        fig = Figure(figsize=(15, 8.5))
+        gs = GridSpec(nrows=2, ncols=2, width_ratios=[1, 1], height_ratios=[1, 1.5], figure=fig)
+        ax1 = fig.add_subplot(gs[0, :])
+        ax2 = fig.add_subplot(gs[1, 0])
+        ax3 = fig.add_subplot(gs[1, 1])
 
-# Create a text box for streaming useful information in the third section
-# text_box = fig.add_subplot(gs[1, 0])  # This is the third section
-# text_box_data = TextBox(text_box, label='', color = background, hovercolor= background)
-# ax3.set_ylabel(r'ln(4πF/(hν$A_{u}$$g_{u}$))')
-# ax3.set_xlabel(r'$E_{u}$')
-ax2.set_xlabel ('Wavelength (μm)')
-ax1.set_ylabel ('Flux density (Jy)')
-ax2.set_ylabel ('Flux density (Jy)')
-ax1.set_xlim (xmin=xp1, xmax=xp2)
-plt.rcParams['font.size'] = 10
-data_line, = ax1.plot (wave_data, flux_data, color=foreground, linewidth=1)
+        # Configure axes
+        ax1.set_ylabel('Flux density (Jy)')
+        ax2.set_xlabel('Wavelength (μm)')
+        ax2.set_ylabel('Flux density (Jy)')
+        ax1.set_xlim(xmin=xp1, xmax=xp2)
+        ax1.set_ylim(ymin=min(flux_data), ymax=max(flux_data) + (max(flux_data) / 8))
+        ax2.set_title('Line inspection plot', fontsize='medium')
 
-for mol_name, mol_filepath, mol_label in molecules_data:
-    molecule_name_lower = mol_name.lower ()
+        # Plot data
+        data_line, = ax1.plot(wave_data, flux_data, color=foreground, linewidth=1, label='Data')
 
-    if molecule_name_lower == 'h2o':
-        exec (
-            f"{molecule_name_lower}_line, = ax1.plot({molecule_name_lower}_spectrum.lamgrid, fluxes_{molecule_name_lower}, alpha=0.8, linewidth=1)",
-            globals ())
-    else:
-        exec (f"{molecule_name_lower}_line, = ax1.plot([], [], alpha=0.8, linewidth=1)", globals ())
-    exec (f"{molecule_name_lower}_line.set_label('{mol_label}')", globals ())
-data_line.set_label ('Data')
-sum_line, = ax1.plot ([], [], color='purple', linewidth=1)
-sum_line.set_label ('Sum')
-ax1.legend ()
+        # Plot molecule data
+        for mol_name, mol_filepath, mol_label in self.molecules_data:
+            molecule_name_lower = mol_name.lower()
+            if molecule_name_lower == 'h2o':
+                ax1.plot([], [], alpha=0.8, linewidth=1, label=mol_label)
+            else:
+                ax1.plot([], [], alpha=0.8, linewidth=1, label=mol_label)
 
-ax2.set_frame_on (False)
-ax3.set_frame_on (False)
+        # Add legend
+        ax1.legend()
 
-# make empty lines for the second plot
-ax2.set_title ('Line inspection plot', fontsize='medium')
-data_line_select, = ax2.plot ([], [], color=foreground, linewidth=1)
+        # Adjust layout
+        fig.subplots_adjust(left=0.06, right=0.97, top=0.97, bottom=0.09)
 
-# Scaling the y-axis based on tallest peak of data
-range_flux_cnts = input_spectrum_data[(input_spectrum_data['wave'] > xp1) & (input_spectrum_data['wave'] < xp2)]
-range_flux_cnts.index = range (len (range_flux_cnts.index))
-fig_height = np.nanmax (range_flux_cnts.flux)
-fig_bottom_height = np.min (range_flux_cnts.flux)
-ax1.set_ylim (ymin=fig_bottom_height, ymax=fig_height + (fig_height / 8))
+        # Create a canvas for embedding
+        canvas = FigureCanvasTkAgg(fig, master=self.window)
+        canvas.draw()
 
-# adjust the plots to make room for the widgets
-fig.subplots_adjust (left=0.06, right=0.97, top=0.97, bottom=0.09)
+        # Return the canvas
+        return canvas
 
-# Populating the population diagram graph
-pop_diagram ()
+    def populate_population_diagram(self):
+        """
+        Populate the population diagram graph.
+        This method handles the creation and configuration of the population diagram.
+        """
+        # Placeholder for population diagram logic
+        pass
 
-num_rows = 9
+    def create_visibility_buttons(self):
+        """
+        Create visibility buttons for molecules.
+        This method handles the creation of buttons for toggling molecule visibility.
+        """
+        num_rows = 9
+        row_height = 0.035
+        row_width = 0.19
+        total_height = row_height * num_rows
+        start_y = 0.52 + (0.45 - total_height) / 2  # Center vertically
 
-# Calculate the height and width of each row
-row_height = 0.035
-row_width = 0.19
+        column_labels = ['Molecule', 'Temp.', 'Radius', 'Col. Dens', 'On', 'Del.', 'Color']
+        vis_buttons_dict = {}
 
-# Calculate the total height of all rows
-total_height = row_height * num_rows
-
-# Calculate the starting y-position for the first row within the control_border
-start_y = 0.52 + (0.45 - total_height) / 2  # Center vertically
-
-# Define the column labels
-column_labels = ['Molecule', 'Temp.', 'Radius', 'Col. Dens', 'On', 'Del.', 'Color']
-
-# Create a dictionary to store the visibility buttons
-vis_buttons_dict = {}
-
-# Create a tkinter window
-window = tk.Tk ()
-window.title ("iSLAT " + iSLAT_version)'''
+        # Placeholder for visibility button creation logic
+        pass
