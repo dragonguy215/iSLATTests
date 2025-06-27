@@ -128,4 +128,3 @@ class MoleculeSelector:
 
     def on_done(self):
         self.window.destroy()
-        

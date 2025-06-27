@@ -1,6 +1,6 @@
 from scipy.optimize import fmin
 import numpy as np
-from ..ir_model import Spectrum
+from iSLAT.ir_model import Spectrum
 
 class ModelFitting:
     def __init__(self, data_loader, config, data_field):

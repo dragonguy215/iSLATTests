@@ -1,6 +1,6 @@
 import pandas as pd
 from astropy.io import ascii
-from ..ir_model import Chi2Spectrum, MolData, Intensity
+from iSLAT.ir_model import Chi2Spectrum, MolData, Intensity
 
 class DataLoader:
     def __init__(self, config):

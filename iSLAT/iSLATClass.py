@@ -8,6 +8,7 @@ import pandas as pd
 import warnings
 import matplotlib
 import os
+import json
 
 # matplotlib.use('Agg')
 matplotlib.use ("TKAgg")
@@ -43,7 +44,6 @@ import datetime
 import certifi
 import ssl
 import urllib
-import json
 import webbrowser
 
 context = ssl.create_default_context (cafile=certifi.where ())
@@ -56,10 +56,9 @@ from .COMPONENTS.line_data_writer import write_line_data
 from .COMPONENTS.slabfit_config import *
 from .COMPONENTS.slabfit_loader import *
 from .COMPONENTS.slabfit_runner import *
-
 from .iSLATDefaultInputParms import *
 from .iSLATCSVHandling import *
-from .GUI import *
+from .COMPONENTS.GUI import *
 
 class iSLAT:
     """
@@ -71,20 +70,16 @@ class iSLAT:
         """
         Initialize the iSLAT application.
         """
-        #os.chdir("iSLAT") ####################
-
-        # create HITRAN folder, only needed for first start
-        HITRAN_folder = "HITRANdata"
-        os.makedirs(HITRAN_folder, exist_ok=True)
+        self.create_folders()
 
         # Load settings
         self.user_settings = self.load_user_settings()
         self.update_default_molecule_parameters()
 
-        self.root = tk.Tk()
+        '''self.root = tk.Tk()
         self.root.title("iSLAT - Infrared Spectral Line Analysis Tool")
         self.root.geometry("800x600")
-        self.root.resizable(True, True)
+        self.root.resizable(True, True)'''
         
         self.mols = ["H2", "HD", "H2O", "H218O", "CO2", "13CO2", "CO", "13CO", "C18O", "CH4", "HCN", "H13CN", "NH3", "OH", "C2H2", "13CCH2", "C2H4", "C4H2", "C2H6", "HC3N"]
         self.basem = ["H2", "H2", "H2O", "H2O", "CO2", "CO2", "CO", "CO", "CO", "CH4", "HCN", "HCN", "NH3", "OH", "C2H2", "C2H2", "C2H4", "C4H2", "C2H6", "HC3N"]
@@ -104,47 +99,38 @@ class iSLAT:
         self.deleted_molecules = []
 
         # Initialize GUI
-        self.init_gui()
+        #self.init_gui()
 
     def init_gui(self):
         """
         Initialize the GUI components of iSLAT.
         This function sets up the main window, menus, and other GUI elements.
         """
-        # Create the main frame
-        self.main_frame = tk.Frame(self.root)
-        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        if not hasattr(self, "root"):
+            self.root = tk.Tk()
+            self.root.title("iSLAT - Infrared Spectral Line Analysis Tool")
+            self.root.geometry("800x600")
+            self.root.resizable(True, True)
 
-        # Create the menu bar
-        self.menu_bar = tk.Menu(self.root)
-        self.root.config(menu=self.menu_bar)
+        if not hasattr(self, "GUI"):
+            self.GUI = GUI(
+                master=self.root,
+                isotopologue_data=self.molecules_data_default,
+                data_field=None,  # Placeholder for data field, to be set later
+                mols=self.mols,
+                basem=self.basem,
+                isot=self.isot
+            )
 
-        '''# Add File menu
-        self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
-        self.file_menu.add_command(label="Open", command=self.open_file)
-        self.file_menu.add_command(label="Save", command=self.save_file)
-        self.file_menu.add_separator()
-        self.file_menu.add_command(label="Exit", command=self.root.quit)
-        self.menu_bar.add_cascade(label="File", menu=self.file_menu)'''
-
-        # Add Help menu
-        self.help_menu = tk.Menu(self.menu_bar, tearoff=0)
-        self.help_menu.add_command(label="About", command=self.show_about)
-        self.menu_bar.add_cascade(label="Help", menu=self.help_menu)
-
-        # Load user settings
-        self.user_settings = self.load_user_settings()
-
-        # Create folders if they do not exist
-        self.create_folders()
-    
     def run(self):
         """
         Run the iSLAT application.
         This function starts the main event loop of the Tkinter application.
         """
         # Start the main event loop
-        self.root.mainloop()
+        self.selectfileinit()
+        #self.root.mainloop()
+        self.init_gui()
 
     def load_user_settings(self):
         """ load_user_settings() loads the user settings from the UserSettings.json file."""
@@ -235,6 +221,106 @@ class iSLAT:
         os.makedirs(output_dir, exist_ok=True)
         linesave_folder = "LINESAVES"
         os.makedirs(linesave_folder, exist_ok=True)
+        # create HITRAN folder, only needed for first start
+        HITRAN_folder = "HITRANdata"
+        os.makedirs(HITRAN_folder, exist_ok=True)
+
+    def selectfileinit(self):
+        """global file_path
+        global file_name
+        global wave_data, flux_data, err_data, wave_original
+        global input_spectrum_data
+        global filename_box_data
+        global xp1, rng, xp2"""
+        spectra_directory = os.path.abspath ("EXAMPLE-data")
+        filetypes = [('CSV Files', '*.csv')]
+        # Ask the user to select a file
+        infiles = filedialog.askopenfilename(multiple=True, title='Choose Spectrum Data File', filetypes=filetypes,
+                                            initialdir=spectra_directory)
+
+        if infiles:
+            for file_path in infiles:
+                # Process each selected file
+                print(' ')
+                print("Selected file:", file_path)
+                file_name = os.path.basename (file_path)
+                # code to process each file
+                input_spectrum_data = pd.read_csv(filepath_or_buffer=file_path, sep=',')
+                wave_data = np.array(input_spectrum_data['wave'])
+                wave_original = np.array(input_spectrum_data['wave'])
+                flux_data = np.array(input_spectrum_data['flux'])
+                if 'err' in input_spectrum_data:
+                    err_data = np.array(input_spectrum_data['err'])
+                else:
+                    err_data = np.full_like(flux_data, np.nanmedian(flux_data)/100)  # assumed, if not present
+
+                    # Set initial values of xp1 and rng
+                fig_max_limit = np.nanmax(wave_data)
+                fig_min_limit = np.nanmin(wave_data)
+                xp1 = np.around(fig_min_limit + (fig_max_limit - fig_min_limit) / 2, decimals=2)
+                rng = np.around((fig_max_limit - fig_min_limit) / 10, decimals=2)
+                xp2 = xp1 + rng
+        else:
+            print("No files selected.")
+    
+    def selectfile(self):
+        '''Function to open spectrum data file from the GUI using Open File for "Spectrum data file"'''
+        global file_path
+        global file_name
+        global wave_data, flux_data, err_data, wave_original
+        global input_spectrum_data
+        global filename_box_data
+        global xp1, rng, xp2, xp1_entry, rng_entry
+
+        filetypes = [('CSV Files', '*.csv')]
+        spectra_directory = os.path.abspath("EXAMPLE-data")
+        infiles = filedialog.askopenfilename(multiple=True, title='Choose Spectrum Data File', filetypes=filetypes,
+                                            initialdir=spectra_directory)
+
+        if infiles:
+            for file_path in infiles:
+                # Process each selected file
+                print ("Selected file:", file_path)
+                file_name = os.path.basename(file_path)
+
+                file_name_label.config (text=str (file_name))
+                # filename_box_data.set_val(file_name)
+                # Add your code to process each file
+                # THIS IS THE OLD FILE SYSTEM (THIS WILL BE USED UNTIL THE NEW FILE SYSTEM IS DEVELOPED) USE THIS!!!!!
+                input_spectrum_data = pd.read_csv(filepath_or_buffer=(file_path), sep=',')
+                wave_data = np.array(input_spectrum_data['wave'])
+                wave_original = np.array(input_spectrum_data['wave'])
+                flux_data = np.array(input_spectrum_data['flux'])
+                if 'err' in input_spectrum_data:
+                    err_data = np.array(input_spectrum_data['err'])
+                else:
+                    err_data = np.full_like(flux_data, np.nanmedian(flux_data)/100)  # assumed, if not present
+
+                # Set new values of xp1 and rng only if the new spectrum is in a different wave range
+                fig_max_limit = np.nanmax(wave_data)
+                fig_min_limit = np.nanmin(wave_data)
+                xp1_current = float(xp1_entry.get ())
+                if xp1_current > fig_max_limit or xp1_current < fig_min_limit:
+                    xp1 = fig_min_limit + (fig_max_limit - fig_min_limit) / 2
+                    rng = (fig_max_limit - fig_min_limit) / 10
+                    xp2 = xp1 + rng
+                    xp1_entry.delete(0, "end")
+                    xp1_entry.insert(0, np.around (xp1, decimals=2))
+                    rng_entry.delete(0, "end")
+                    rng_entry.insert(0, np.around (rng, decimals=2))
+
+                # now = dt.now()
+                # dateandtime = now.strftime("%d-%m-%Y-%H-%M-%S")
+                # print(dateandtime)
+                # svd_line_file = f'savedlines-{dateandtime}.csv'
+
+                update()
+
+                data_field.delete('1.0', "end")
+                data_field.insert('1.0', 'New spectrum loaded!')
+        else:
+            data_field.delete('1.0', "end")
+            data_field.insert('1.0', 'No file selected.')
 
 """# Create necessary folders, if it doesn't exist (typically at first launch of iSLAT)
 save_folder = "SAVES"

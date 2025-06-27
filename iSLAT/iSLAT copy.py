@@ -1911,20 +1911,20 @@ for mol_name, mol_filepath, mol_label in molecules_data:
     molecule_name_lower = mol_name.lower ()
 
     # Intensity calculation
-    exec (f"{molecule_name_lower}_intensity = Intensity(mol_{molecule_name_lower})")
-    exec (
+    exec(f"{molecule_name_lower}_intensity = Intensity(mol_{molecule_name_lower})")
+    exec(
         f"{molecule_name_lower}_intensity.calc_intensity(t_kin_{molecule_name_lower}, n_mol_{molecule_name_lower}, dv=intrinsic_line_width)")
 
     # Spectrum creation
-    exec (
+    exec(
         f"{molecule_name_lower}_spectrum = Spectrum(lam_min=min_lamb, lam_max=max_lamb, dlambda=model_pixel_res, R=model_line_width, distance=dist)")
 
     # Adding intensity to the spectrum
-    exec (
+    exec(
         f"{molecule_name_lower}_spectrum.add_intensity({molecule_name_lower}_intensity, {molecule_name_lower}_radius ** 2 * np.pi)")
 
     # Fluxes and lambdas
-    exec (
+    exec(
         f"fluxes_{molecule_name_lower} = {molecule_name_lower}_spectrum.flux_jy; lambdas_{molecule_name_lower} = {molecule_name_lower}_spectrum.lamgrid")
 
 # Setting up the line identifier tool
@@ -3894,22 +3894,22 @@ ax1.callbacks.connect('xlim_changed', on_xlims_change)
 # ax1.figure.canvas.draw_idle()
 
 # Create a FigureCanvasTkAgg widget to embed the figure in the tkinter window
-canvas = FigureCanvasTkAgg (fig, master=window)
-canvas_widget = canvas.get_tk_widget ()
+canvas = FigureCanvasTkAgg(fig, master=window)
+canvas_widget = canvas.get_tk_widget()
 
 # Place the canvas widget in column 9, row 1
-canvas_widget.grid (row=1, column=5, rowspan=100, sticky='nsew')
+canvas_widget.grid(row=1, column=5, rowspan=100, sticky='nsew')
 
 # Allow column 9 and row 1 to expandc
-window.grid_columnconfigure (5, weight=1)
-window.grid_rowconfigure (100, weight=1)
+window.grid_columnconfigure(5, weight=1)
+window.grid_rowconfigure(100, weight=1)
 
 # Create a frame for the toolbar inside the title_frame
-toolbar_frame = tk.Frame (title_frame)
-toolbar_frame.grid (row=0, column=9, columnspan=2, sticky="nsew")  # Place the frame in row 0, column 9
+toolbar_frame = tk.Frame(title_frame)
+toolbar_frame.grid(row=0, column=9, columnspan=2, sticky="nsew")  # Place the frame in row 0, column 9
 # Create a toolbar and update it
-toolbar = NavigationToolbar2Tk (canvas, toolbar_frame)
-toolbar.update ()
+toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
+toolbar.update()
 
 #Adjust tool bar color to match the theme
 toolbar_frame.configure(bg=user_settings["theme"]["background"])

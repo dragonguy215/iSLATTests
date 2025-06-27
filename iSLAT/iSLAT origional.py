@@ -54,12 +54,12 @@ from COMPONENTS.chart_window import MoleculeSelector
 from COMPONENTS.Hitran_data import get_Hitran_data
 from COMPONENTS.partition_function_writer import write_partition_function
 from COMPONENTS.line_data_writer import write_line_data
-from COMPONENTS.slabfit_config import *
-from COMPONENTS.slabfit_loader import *
-from COMPONENTS.slabfit_runner import *
+#from COMPONENTS.slabfit_config import *
+#from COMPONENTS.slabfit_loader import *
+#from COMPONENTS.slabfit_runner import *
 
 from iSLATDefaultInputParms import *
-from GUI import *
+#from GUI import *
 
 os.chdir("iSLAT") ####################
 
