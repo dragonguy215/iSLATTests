@@ -98,6 +98,9 @@ class iSLAT:
         self.molecules_data_default = molecules_data.copy()
         self.deleted_molecules = []
 
+        self.xp1 = None
+        self.xp2 = None  
+
         # Initialize GUI
         #self.init_gui()
 
@@ -112,6 +115,8 @@ class iSLAT:
             self.root.geometry("800x600")
             self.root.resizable(True, True)
 
+        self.root.mainloop()
+
         if not hasattr(self, "GUI"):
             self.GUI = GUI(
                 master=self.root,
@@ -119,8 +124,14 @@ class iSLAT:
                 data_field=None,  # Placeholder for data field, to be set later
                 mols=self.mols,
                 basem=self.basem,
-                isot=self.isot
+                isot=self.isot,
+                xp1=self.xp1,
+                xp2=self.xp2,
+                config={"iSLAT_version": "2.0", "user_settings":{'first_startup': False, 'reload_default_files': False, 'theme': {'theme_name': 'Light Theme', 'description': 'A light theme for iSLAT with a white background and black text.', 'foreground': '#000000', 'background': '#FFFFFF', 'toolbar': '#000000', 'graph_fill_color': '#D3D3D3', 'selection_color': '#00FF00', 'uncertainty_band_color': '#ABABAB', 'toolbar_highlight_background': '#000000', 'toolbar_highlight_color': '#000000', 'toolbar_active_color': '#FFFFFF', 'buttons': {'DefaultBotton': {'background': '#D3D3D3', 'active_background': '#808080', 'description': 'If a button is not specified, this will be used as the default button style.'}, 'ToggleLegend': {'background': '#D3D3D3', 'active_background': '#808080'}}}}},
+
             )
+        
+        self.GUI.start()
 
     def run(self):
         """
@@ -129,7 +140,7 @@ class iSLAT:
         """
         # Start the main event loop
         self.selectfileinit()
-        #self.root.mainloop()
+    
         self.init_gui()
 
     def load_user_settings(self):
@@ -232,39 +243,38 @@ class iSLAT:
         global input_spectrum_data
         global filename_box_data
         global xp1, rng, xp2"""
-        spectra_directory = os.path.abspath ("EXAMPLE-data")
         filetypes = [('CSV Files', '*.csv')]
+        spectra_directory = os.path.abspath ("EXAMPLE-data")
         # Ask the user to select a file
-        infiles = filedialog.askopenfilename(multiple=True, title='Choose Spectrum Data File', filetypes=filetypes,
-                                            initialdir=spectra_directory)
+        infiles = filedialog.askopenfilename(multiple=True, title='Choose Spectrum Data File', filetypes=filetypes, initialdir=spectra_directory)
 
         if infiles:
             for file_path in infiles:
                 # Process each selected file
-                print(' ')
                 print("Selected file:", file_path)
-                file_name = os.path.basename (file_path)
+                file_name = os.path.basename(file_path)
+
                 # code to process each file
-                input_spectrum_data = pd.read_csv(filepath_or_buffer=file_path, sep=',')
-                wave_data = np.array(input_spectrum_data['wave'])
-                wave_original = np.array(input_spectrum_data['wave'])
-                flux_data = np.array(input_spectrum_data['flux'])
-                if 'err' in input_spectrum_data:
-                    err_data = np.array(input_spectrum_data['err'])
+                self.input_spectrum_data = pd.read_csv(filepath_or_buffer=file_path, sep=',')
+                self.wave_data = np.array(self.input_spectrum_data['wave'])
+                self.wave_original = np.array(self.input_spectrum_data['wave'])
+                self.flux_data = np.array(self.input_spectrum_data['flux'])
+                if 'err' in self.input_spectrum_data:
+                    err_data = np.array(self.input_spectrum_data['err'])
                 else:
-                    err_data = np.full_like(flux_data, np.nanmedian(flux_data)/100)  # assumed, if not present
+                    err_data = np.full_like(self.flux_data, np.nanmedian(self.flux_data)/100)  # assumed, if not present
 
                     # Set initial values of xp1 and rng
-                fig_max_limit = np.nanmax(wave_data)
-                fig_min_limit = np.nanmin(wave_data)
-                xp1 = np.around(fig_min_limit + (fig_max_limit - fig_min_limit) / 2, decimals=2)
+                fig_max_limit = np.nanmax(self.wave_data)
+                fig_min_limit = np.nanmin(self.wave_data)
+                self.xp1 = np.around(fig_min_limit + (fig_max_limit - fig_min_limit) / 2, decimals=2)
                 rng = np.around((fig_max_limit - fig_min_limit) / 10, decimals=2)
-                xp2 = xp1 + rng
+                self.xp2 = self.xp1 + rng
         else:
             print("No files selected.")
     
-    def selectfile(self):
-        '''Function to open spectrum data file from the GUI using Open File for "Spectrum data file"'''
+    '''def selectfile(self):
+        ''Function to open spectrum data file from the GUI using Open File for "Spectrum data file"''
         global file_path
         global file_name
         global wave_data, flux_data, err_data, wave_original
@@ -320,7 +330,7 @@ class iSLAT:
                 data_field.insert('1.0', 'New spectrum loaded!')
         else:
             data_field.delete('1.0', "end")
-            data_field.insert('1.0', 'No file selected.')
+            data_field.insert('1.0', 'No file selected.')'''
 
 """# Create necessary folders, if it doesn't exist (typically at first launch of iSLAT)
 save_folder = "SAVES"

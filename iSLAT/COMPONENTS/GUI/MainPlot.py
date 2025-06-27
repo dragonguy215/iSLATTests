@@ -29,7 +29,7 @@ class iSLATPlot:
         self.config = config
 
         # Initialize the plot
-        self.create_plot()
+        #self.create_plot()
     
     def create_plot(self):
         """
@@ -43,7 +43,7 @@ class iSLATPlot:
         iSLAT_version = self.config['iSLAT_version']
 
         # Set the matplotlib style
-        plt.style.use(user_settings["theme"]["matplotlib_style"])
+        #plt.style.use(user_settings["theme"]["matplotlib_style"])
 
         # Prepare data for plotting
         input_spectrum_data = self.input_spectrum_data
