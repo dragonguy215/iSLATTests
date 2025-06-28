@@ -20,20 +20,21 @@ class iSLATPlot:
         self.ax3 = self.fig.add_subplot(gs[1, 1])
 
         self.ax1.set_title("Full Spectrum with Line Inspection")
-        self.ax1.set_ylabel("Flux (Jy)")
-        self.ax1.set_xlabel("Wavelength (μm)")
-        self.line1, = self.ax1.plot(self.wave_data, self.flux_data, color='black', label='Observed Spectrum')
-        self.ax1.legend()
-
-        # Bottom left - line inspection
         self.ax2.set_title("Line inspection plot")
-        self.ax2.set_xlabel("Wavelength (μm)")
-        self.ax2.set_ylabel("Flux (Jy)")
-
-        # Bottom right - population diagram
         self.ax3.set_title("Population diagram")
-        self.ax3.set_xlabel(r"$E_u$ (K)")
-        self.ax3.set_ylabel(r"$\ln(N_u/g_u)$")
+
+        self.ax1.plot(self.wave_data, self.flux_data, color=self.theme["foreground"], label="Observed Spectrum")
+        self.ax1.set_ylabel("Flux (Jy)")
+
+        # Set default zoom similar to old behavior
+        wmin, wmax = np.min(self.wave_data), np.max(self.wave_data)
+        self.ax1.set_xlim(wmin, wmin + 0.25*(wmax - wmin))
+
+        self.span = SpanSelector(
+            self.ax1, self.onselect, "horizontal",
+            useblit=True, interactive=True,
+            props=dict(alpha=0.5, facecolor=self.theme["selection_color"])
+        )
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=parent_frame)
         self.toolbar = NavigationToolbar2Tk(self.canvas, parent_frame)
@@ -41,22 +42,17 @@ class iSLATPlot:
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self.canvas.draw()
 
-        # SpanSelector
-        self.span = SpanSelector(
-            self.ax1, self.onselect, "horizontal",
-            useblit=True, interactive=True,
-            props=dict(alpha=0.5, facecolor=self.theme.get("selection_color", "green"))
-        )
-
         self.selected_wave = None
         self.selected_flux = None
         self.fit_result = None
 
+
     def onselect(self, xmin, xmax):
-        print(f"Selected range: {xmin:.3f} - {xmax:.3f}")
         mask = (self.wave_data >= xmin) & (self.wave_data <= xmax)
         self.selected_wave = self.wave_data[mask]
         self.selected_flux = self.flux_data[mask]
+        self.islat.selected_wave = self.selected_wave
+        self.islat.selected_flux = self.selected_flux
 
         if len(self.selected_wave) < 5:
             self.ax2.clear()
@@ -64,31 +60,38 @@ class iSLATPlot:
             self.canvas.draw_idle()
             return
 
+        # Fit and update line
         self.fit_result = self.islat.fit_selected_line(xmin, xmax)
         self.update_zoom_line(self.selected_wave, self.selected_flux, self.fit_result)
 
-        # Try to also update population diagram
+        # Try population diagram
         e, p = self.islat.generate_population_diagram()
         if e is not None:
             self.update_population_diagram(e, p)
 
     def update_zoom_line(self, wave, flux, fit_result=None):
         self.ax2.clear()
-        self.ax2.plot(wave, flux, color='black', label="Data")
+        self.ax2.plot(wave, flux, color=self.theme["foreground"], label="Data")
         if fit_result is not None:
             self.ax2.plot(wave, fit_result.best_fit, 'r--', label="Fit")
+            try:
+                conf = fit_result.eval_uncertainty(sigma=1)
+                self.ax2.fill_between(wave, fit_result.best_fit - conf, fit_result.best_fit + conf,
+                                      color='red', alpha=0.3, label="±1σ")
+            except:
+                pass
             self.ax2.legend()
-        self.ax2.set_title("Line inspection plot")
         self.ax2.set_xlabel("Wavelength (μm)")
         self.ax2.set_ylabel("Flux (Jy)")
+        self.ax2.set_title("Line inspection plot")
         self.canvas.draw_idle()
 
-    def update_population_diagram(self, energies, pops):
+    def update_population_diagram(self, energy_levels, populations):
         self.ax3.clear()
-        self.ax3.scatter(energies, pops, color='black')
+        self.ax3.scatter(energy_levels, populations, color=self.theme["foreground"])
         self.ax3.set_title("Population diagram")
-        self.ax3.set_xlabel(r"$E_u$ (K)")
-        self.ax3.set_ylabel(r"$\ln(N_u/g_u)$")
+        self.ax3.set_xlabel("E_upper (K)")
+        self.ax3.set_ylabel("ln(Nu/gu)")
         self.canvas.draw_idle()
 
     def toggle_legend(self):

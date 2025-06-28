@@ -273,35 +273,44 @@ class iSLAT:
             print("No file selected.")
     
     def generate_population_diagram(self):
-        """
-        Generate population diagram data without plotting.
-        Returns arrays of energies and population values.
-        """
-        if not hasattr(self, "selected_lines") or not self.selected_lines:
-            print("No lines selected yet to build population diagram.")
+        if not hasattr(self, 'selected_lines') or not self.selected_lines:
+            print("No selected lines to build population diagram.")
             return None, None
 
-        energies, pops = [], []
+        energies, pops = []
+        dist_pc = self.user_settings.get("distance_pc", 140)
+        dist_cm = dist_pc * 3.086e18  # parsec to cm
+
         for wave in self.selected_lines:
-            for mol in self.molecules.values():
-                closest_line = mol.find_closest_line(wave)
-                if closest_line:
-                    e_upper = closest_line['E_up']
-                    g_u = closest_line['g_u']
-                    a_stein = closest_line['A_stein']
-                    lam = closest_line['lam']
-                    intens_mod = closest_line['intens']
+            for mol_name, mol in self.molecules.items():
+                try:
+                    int_pars = mol.intensity.get_table
+                except AttributeError:
+                    continue
 
-                    # Calculate population diagram values
-                    area = np.pi * (self.user_settings["radius"] * con.au * 1e2) ** 2  # In cm^2
-                    dist = self.user_settings["distance"] * con.pc
-                    beam_s = area / dist ** 2
-                    F = intens_mod * beam_s
-                    freq = con.c / (lam * 1e-6)  # Convert wavelength to meters
-                    rd_yax = np.log(4 * np.pi * F / (a_stein * con.h * freq * g_u))
+                # Find closest line in wavelength
+                idx_closest = (np.abs(int_pars['lam'] - wave)).idxmin()
+                line_data = int_pars.iloc[idx_closest]
 
-                    energies.append(e_upper)
-                    pops.append(rd_yax)
+                # Extract required parameters
+                e_up = line_data['e_up']
+                g_u = line_data['g_up']
+                a_stein = line_data['a_stein']
+                lam = line_data['lam']
+                freq = 3e14 / lam
+                radius_au = self.initial_values[mol_name]["radius_init"]
+                area_cm2 = np.pi * (radius_au * 1.496e13)**2
+                F = line_data.get('intens', 1) * area_cm2 / (dist_cm**2)
+
+                try:
+                    pop_val = np.log(4 * np.pi * F / (a_stein * 6.626e-27 * freq * g_u))
+                    energies.append(e_up)
+                    pops.append(pop_val)
+                except (ValueError, ZeroDivisionError):
+                    continue
+
+        if not energies:
+            return None, None
 
         return np.array(energies), np.array(pops)
     
