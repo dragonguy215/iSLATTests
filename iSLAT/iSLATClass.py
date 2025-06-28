@@ -76,11 +76,6 @@ class iSLAT:
         self.user_settings = self.load_user_settings()
         self.update_default_molecule_parameters()
         self.update_initial_molecule_parameters()
-
-        '''self.root = tk.Tk()
-        self.root.title("iSLAT - Infrared Spectral Line Analysis Tool")
-        self.root.geometry("800x600")
-        self.root.resizable(True, True)'''
         
         self.mols = ["H2", "HD", "H2O", "H218O", "CO2", "13CO2", "CO", "13CO", "C18O", "CH4", "HCN", "H13CN", "NH3", "OH", "C2H2", "13CCH2", "C2H4", "C4H2", "C2H6", "HC3N"]
         self.basem = ["H2", "H2", "H2O", "H2O", "CO2", "CO2", "CO", "CO", "CO", "CH4", "HCN", "HCN", "NH3", "OH", "C2H2", "C2H2", "C2H4", "C4H2", "C2H6", "HC3N"]
@@ -250,20 +245,14 @@ class iSLAT:
         This is typically done at the first launch of iSLAT.
         """
         # Create necessary folders, if they don't exist
-        save_folder = "SAVES"
-        os.makedirs(save_folder, exist_ok=True)
-        output_dir = "MODELS"
-        os.makedirs(output_dir, exist_ok=True)
-        linesave_folder = "LINESAVES"
-        os.makedirs(linesave_folder, exist_ok=True)
-        # create HITRAN folder, only needed for first start
-        HITRAN_folder = "HITRANdata"
-        os.makedirs(HITRAN_folder, exist_ok=True)
+        os.makedirs("SAVES", exist_ok=True)
+        os.makedirs("MODELS", exist_ok=True)
+        os.makedirs("LINESAVES", exist_ok=True)
+        os.makedirs("HITRANdata", exist_ok=True)
 
     def load_spectrum(self, file_path=None):
         filetypes = [('CSV Files', '*.csv')]
         spectra_directory = os.path.abspath("EXAMPLE-data")
-        #file_path = filedialog.askopenfilename(title='Choose Spectrum Data File', filetypes=filetypes, initialdir=spectra_directory)
         if file_path is None:
             file_path = filedialog.askopenfilename(title='Choose Spectrum Data File', filetypes=filetypes, initialdir=spectra_directory)
 
@@ -271,8 +260,6 @@ class iSLAT:
             df = pd.read_csv(file_path)
             self.wave_data = df['wave'].values
             self.flux_data = df['flux'].values
-            #print(np.min(self.wave_data), np.max(self.wave_data))
-            #print(type(self.wave_data), type(np.min(self.wave_data)))
             lam_min = np.min(self.wave_data)
             lam_max = np.max(self.wave_data)
             self.input_spectrum = Spectrum(
@@ -286,6 +273,10 @@ class iSLAT:
             print("No file selected.")
     
     def generate_population_diagram(self):
+        """
+        Generate population diagram data without plotting.
+        Returns arrays of energies and population values.
+        """
         if not hasattr(self, "selected_lines") or not self.selected_lines:
             print("No lines selected yet to build population diagram.")
             return None, None
@@ -297,19 +288,33 @@ class iSLAT:
                 if closest_line:
                     e_upper = closest_line['E_up']
                     g_u = closest_line['g_u']
-                    n_u = Intensity.calculate_population(e_upper, g_u)
+                    a_stein = closest_line['A_stein']
+                    lam = closest_line['lam']
+                    intens_mod = closest_line['intens']
+
+                    # Calculate population diagram values
+                    area = np.pi * (self.user_settings["radius"] * con.au * 1e2) ** 2  # In cm^2
+                    dist = self.user_settings["distance"] * con.pc
+                    beam_s = area / dist ** 2
+                    F = intens_mod * beam_s
+                    freq = con.c / (lam * 1e-6)  # Convert wavelength to meters
+                    rd_yax = np.log(4 * np.pi * F / (a_stein * con.h * freq * g_u))
+
                     energies.append(e_upper)
-                    pops.append(np.log(n_u / g_u))
+                    pops.append(rd_yax)
 
         return np.array(energies), np.array(pops)
     
     def run_single_slab_fit(self):
-        loader = DataLoader(self.molecule_data)
+        loader = DataLoader(self.molecules_data_default)
         self.slab_model = ModelFitting(loader)
         result = self.slab_model.fit()
         return result.summary()
 
     def find_single_lines(self):
+        """ find_single_lines() identifies spectral lines in the flux data based on a threshold.
+        It returns a list of wavelengths where the flux exceeds the threshold.
+        The threshold is calculated as a fraction of the maximum flux value."""
         threshold = line_threshold * np.max(self.flux_data)
         sep = 0.1
         found = []
@@ -326,23 +331,6 @@ class iSLAT:
         file = os.path.join("SAVES", "lines_saved.csv")
         df.to_csv(file, mode='a', header=not os.path.exists(file), index=False)
         print(f"Line saved to {file}")
-
-    '''def fit_single_gaussian(self, x, y, err):
-        model = GaussianModel()
-        params = model.guess(y, x=x)
-        fit_result = model.fit(y, params, x=x, weights=1/err, nan_policy='omit')
-        print(fit_result.fit_report())
-        return fit_result
-
-    def fit_multi_gaussian(self, x, y, err):
-        # try to fit 2 components as an example of deblend
-        g1 = GaussianModel(prefix='g1_')
-        g2 = GaussianModel(prefix='g2_')
-        model = g1 + g2
-        params = g1.guess(y, x=x) + g2.guess(y, x=x)
-        fit_result = model.fit(y, params, x=x, weights=1/err, nan_policy='omit')
-        print(fit_result.fit_report())
-        return fit_result'''
 
     def fit_selected_line(self, xmin, xmax, deblend=False):
         x_fit = self.wave_data[(self.wave_data >= xmin) & (self.wave_data <= xmax)]

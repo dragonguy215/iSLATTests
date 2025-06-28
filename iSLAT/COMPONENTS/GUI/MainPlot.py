@@ -57,6 +57,7 @@ class iSLATPlot:
 
         # Try to also update population diagram
         e, p = self.islat.generate_population_diagram()
+        print("whats good home, heres the population diagram data, yo:", e, p)
         if e is not None:
             self.update_population_diagram(e, p)
 
