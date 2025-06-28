@@ -5,6 +5,8 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.widgets import SpanSelector
 import numpy as np
+from iSLAT.ir_model import Spectrum
+from iSLAT.iSLATDefaultInputParms import model_pixel_res, min_lamb, max_lamb, dist, intrinsic_line_width, model_line_width
 
 class iSLATPlot:
     def __init__(self, parent_frame, wave_data, flux_data, theme, islat_class_ref):
@@ -45,6 +47,30 @@ class iSLATPlot:
         self.selected_wave = None
         self.selected_flux = None
         self.fit_result = None
+
+        self.model_lines = []
+
+    def clear_model_lines(self):
+        # remove previously plotted lines
+        for line in self.model_lines:
+            line.remove()
+        self.model_lines.clear()
+        self.canvas.draw_idle()
+
+    def add_model_line(self, mol_name, temp, radius, density, color):
+        """
+        Adds a model spectrum line for given molecule parameters to the main plot.
+        Assumes the islat.molecules dict has the MolData instances for calc.
+        """
+        mol_obj = self.islat.molecules[mol_name]
+        #model_flux = mol_obj.calculate_spectrum(temp, radius, density, self.wave_data)  # Ensure the method name matches the actual implementation in MolData
+        model_flux = Spectrum(lam_min=self.wave_data[0], lam_max=self.wave_data[-1], dlambda=model_pixel_res, R=model_line_width, distance=dist).flux_jy
+        #(self, lam_min=None, lam_max=None, dlambda=None, R=None, distance=None):
+
+        line, = self.ax1.plot(self.wave_data, model_flux, linestyle='-', color=color, alpha=0.7, label=f"{mol_name}")
+        self.model_lines.append(line)
+        self.ax1.legend()
+        self.canvas.draw_idle()
 
     def onselect(self, xmin, xmax):
         mask = (self.wave_data >= xmin) & (self.wave_data <= xmax)

@@ -51,7 +51,7 @@ class GUI:
         tk.Button(file_frame, text="Load Spectrum", command=self.load_spectrum_file).pack()
 
         # Molecule table
-        self.molecule_table = MoleculeWindow("Molecule Table", parent, self.molecule_data, self.config, self.islat_class)
+        self.molecule_table = MoleculeWindow("Molecule Table", parent, self.molecule_data, self.plot, self.config, self.islat_class)
         self.molecule_table.table_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Main data field
@@ -66,15 +66,15 @@ class GUI:
         self.window.rowconfigure(0, weight=1)
         self.window.rowconfigure(1, weight=0)
 
-        # Left side: all controls
-        left_frame = tk.Frame(self.window)
-        left_frame.grid(row=0, column=0, rowspan=2, sticky="nsew")
-        self.build_left_panel(left_frame)
-
         # Right side: plots
         right_frame = tk.Frame(self.window)
         right_frame.grid(row=0, column=1, sticky="nsew")
         self.plot = iSLATPlot(right_frame, self.wave_data, self.flux_data, self.theme, self.islat_class)
+
+        # Left side: all controls
+        left_frame = tk.Frame(self.window)
+        left_frame.grid(row=0, column=0, rowspan=2, sticky="nsew")
+        self.build_left_panel(left_frame)
 
         # Bottom function buttons
         func_frame = tk.Frame(self.window)
