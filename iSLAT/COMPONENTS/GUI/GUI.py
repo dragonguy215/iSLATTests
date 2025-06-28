@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import filedialog
 from .MainPlot import iSLATPlot
 from .Data_field import DataField
+from .MoleculeWindow import MoleculeWindow
 from .Tooltips import CreateToolTip
 from .GUIFunctions import GUIHandlers
 import os
@@ -50,37 +51,8 @@ class GUI:
         tk.Button(file_frame, text="Load Spectrum", command=self.load_spectrum_file).pack()
 
         # Molecule table
-        table_frame = tk.LabelFrame(parent, text="Molecules")
-        table_frame.pack(fill="both", expand=True, padx=5, pady=5)
-        headers = ['Molecule', 'Temp.', 'Radius', 'Col. Dens', 'On', 'Del.', 'Color']
-        for col, text in enumerate(headers):
-            tk.Label(table_frame, text=text, bg=self.theme["background"], fg=self.theme["foreground"]).grid(row=0, column=col)
-
-        # Fill rows with default values from initial_values
-        for i, molecule in enumerate(self.molecule_data):
-            mol_name = molecule["name"]
-            defaults = self.islat_class.initial_values.get(mol_name, {
-                "t_kin": "", "radius_init": "", "scale_number": "", "scale_exponent": "", "n_mol_init": ""
-            })
-
-            tk.Label(table_frame, text=mol_name,
-                     bg=self.theme["background"], fg=self.theme["foreground"]).grid(row=i+1, column=0)
-
-            t_entry = tk.Entry(table_frame)
-            t_entry.insert(0, str(defaults["t_kin"]))
-            t_entry.grid(row=i+1, column=1)
-
-            r_entry = tk.Entry(table_frame)
-            r_entry.insert(0, str(defaults["radius_init"]))
-            r_entry.grid(row=i+1, column=2)
-
-            n_entry = tk.Entry(table_frame)
-            n_entry.insert(0, str(defaults["n_mol_init"]))
-            n_entry.grid(row=i+1, column=3)
-
-            tk.Checkbutton(table_frame).grid(row=i+1, column=4)
-            tk.Checkbutton(table_frame).grid(row=i+1, column=5)
-            tk.Button(table_frame, text="Pick").grid(row=i+1, column=6)
+        self.molecule_table = MoleculeWindow("Molecule Table", parent, self.molecule_data, self.config, self.islat_class)
+        self.molecule_table.table_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Main data field
         self.data_field = DataField("Main Data Field", "", parent)
