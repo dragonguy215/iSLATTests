@@ -11,6 +11,7 @@
     "toolbar_highlight_color": "#000000",
     "toolbar_active_color": "#FFFFFF",
     "highlight": "#FFFF00",
+    "fit_line_color": "#FF0000",
     "buttons": {
         "DefaultBotton": {
             "background": "#D3D3D3",

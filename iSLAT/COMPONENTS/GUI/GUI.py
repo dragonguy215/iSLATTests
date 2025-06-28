@@ -136,6 +136,7 @@ class GUI:
 
     def toggle_legend(self):
         print("Toggled legend on plot")
+        self.plot.toggle_legend()
 
     def load_spectrum_file(self):
         file_path = filedialog.askopenfilename(title="Select spectrum CSV")

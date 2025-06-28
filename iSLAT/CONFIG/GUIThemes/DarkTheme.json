@@ -21,5 +21,13 @@
             "background": "#D3D3D3",
             "active_background": "#808080"
         }
-    }
+    },
+    "default_molecule_colors": [
+        "#FF0000", 
+        "#00FF00", 
+        "#0000FF", 
+        "#FFFF00", 
+        "#FF00FF", 
+        "#00FFFF" 
+    ]
 }

@@ -15,9 +15,9 @@ class iSLATPlot:
 
         self.fig = plt.Figure(figsize=(10, 7))
         gs = GridSpec(2, 2, height_ratios=[2, 1], figure=self.fig)
-        self.ax1 = self.fig.add_subplot(gs[0, :])
-        self.ax2 = self.fig.add_subplot(gs[1, 0])
-        self.ax3 = self.fig.add_subplot(gs[1, 1])
+        self.ax1 = self.full_spectrum = self.fig.add_subplot(gs[0, :])
+        self.ax2 = self.line_inspection = self.fig.add_subplot(gs[1, 0])
+        self.ax3 = self.population_diagram = self.fig.add_subplot(gs[1, 1])
 
         self.ax1.set_title("Full Spectrum with Line Inspection")
         self.ax2.set_title("Line inspection plot")
@@ -46,7 +46,6 @@ class iSLATPlot:
         self.selected_flux = None
         self.fit_result = None
 
-
     def onselect(self, xmin, xmax):
         mask = (self.wave_data >= xmin) & (self.wave_data <= xmax)
         self.selected_wave = self.wave_data[mask]
@@ -56,7 +55,7 @@ class iSLATPlot:
 
         if len(self.selected_wave) < 5:
             self.ax2.clear()
-            self.ax2.set_title("Line inspection plot")
+            #self.ax2.set_title("Line inspection plot")
             self.canvas.draw_idle()
             return
 
@@ -75,9 +74,9 @@ class iSLATPlot:
         if fit_result is not None:
             self.ax2.plot(wave, fit_result.best_fit, 'r--', label="Fit")
             try:
-                conf = fit_result.eval_uncertainty(sigma=1)
+                conf = fit_result.eval_uncertainty(sigma=self.islat.user_settings["fit_line_uncertainty"])
                 self.ax2.fill_between(wave, fit_result.best_fit - conf, fit_result.best_fit + conf,
-                                      color='red', alpha=0.3, label="±1σ")
+                                      color=self.theme["fit_line_color"], alpha=0.3, label=f"±{self.islat.user_settings["fit_line_uncertainty"]}σ")
             except:
                 pass
             self.ax2.legend()
@@ -88,10 +87,35 @@ class iSLATPlot:
 
     def update_population_diagram(self, energy_levels, populations):
         self.ax3.clear()
-        self.ax3.scatter(energy_levels, populations, color=self.theme["foreground"])
         self.ax3.set_title("Population diagram")
         self.ax3.set_xlabel("E_upper (K)")
         self.ax3.set_ylabel("ln(Nu/gu)")
+
+        # Filtering and plotting isolated points similar to single_finder logic
+        specsep = self.islat.user_settings["specsep"]
+        threshold = self.islat.user_settings["line_threshold"]
+
+        counter = 0
+        for i, energy in enumerate(energy_levels):
+            include = True
+            sub_xmin = energy - specsep
+            sub_xmax = energy + specsep
+            population = populations[i]
+            loc_threshold = population * threshold
+
+            for j, other_energy in enumerate(energy_levels):
+                if sub_xmin <= other_energy <= sub_xmax and i != j:
+                    if populations[j] >= loc_threshold:
+                        include = False
+                        break
+
+            if include:
+                self.ax3.scatter(energy, population, color="blue", label="Isolated Point" if counter == 0 else "")
+                counter += 1
+
+        if counter > 0:
+            self.ax3.legend()
+
         self.canvas.draw_idle()
 
     def toggle_legend(self):

@@ -57,5 +57,5 @@ spanmol = "h2o"
 specsep = .01  # default value for the separation to determine if line is single
 fwhmtolerance = 5  # default value for the tolerance in FWHM for the de-blender (in km/s)
 centrtolerance = 0.0001 # default value for the tolerance in centroid for the de-blender (in um)
-line_threshold = 0.03  # percent value (where 0.01 = 1%) of the strongest line in the plot;
+#line_threshold = 0.03  # percent value (where 0.01 = 1%) of the strongest line in the plot;
 # lines below this this limit are ignored in the plot and in the single line selection

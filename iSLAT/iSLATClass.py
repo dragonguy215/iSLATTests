@@ -5,46 +5,15 @@ print('Loading iSLAT ' + iSLAT_version + ': Please Wait ...')
 # Import necessary modules
 import numpy as np
 import pandas as pd
-import warnings
-import matplotlib
 import os
 import json
 
-# matplotlib.use('Agg')
-matplotlib.use("TKAgg")
-# matplotlib.use('Qt5Agg')
-import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
-from matplotlib.widgets import Slider, Button, SpanSelector, TextBox, CheckButtons
-from matplotlib.artist import Artist
-from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg, NavigationToolbar2Tk)
-# Implement the default Matplotlib key bindings.
-from matplotlib.backend_bases import key_press_handler
-from matplotlib.figure import Figure
-
-import sys
-from astropy.io import ascii, fits
-from astropy.table import vstack, Table
-from astropy import stats
-import lmfit
 from lmfit.models import GaussianModel
-from lmfit.models import PseudoVoigtModel
 import tkinter as tk
-from tkinter import filedialog, simpledialog, ttk, Toplevel, Label, LEFT, SOLID  # For ttk.Style
-from tkinter import colorchooser
-import inspect
-# from PyQt5.QtWidgets import QApplication, QMainWindow
-from datetime import datetime as dt
-import time
-import threading
-from astroquery import hitran
-from astropy import units as un
-from scipy import constants as con
-import datetime
-import certifi
+from tkinter import filedialog
 import ssl
-import urllib
-import webbrowser
+import certifi
+import datetime
 
 context = ssl.create_default_context(cafile=certifi.where ())
 
@@ -277,14 +246,15 @@ class iSLAT:
             print("No selected lines to build population diagram.")
             return None, None
 
-        energies, pops = []
+        energies = []
+        pops = []
         dist_pc = self.user_settings.get("distance_pc", 140)
         dist_cm = dist_pc * 3.086e18  # parsec to cm
 
         for wave in self.selected_lines:
             for mol_name, mol in self.molecules.items():
                 try:
-                    int_pars = mol.intensity.get_table
+                    int_pars = mol.intensity.get_table()
                 except AttributeError:
                     continue
 
@@ -297,7 +267,7 @@ class iSLAT:
                 g_u = line_data['g_up']
                 a_stein = line_data['a_stein']
                 lam = line_data['lam']
-                freq = 3e14 / lam
+                freq = 3e10 / lam  # Convert wavelength to frequency in cm/s
                 radius_au = self.initial_values[mol_name]["radius_init"]
                 area_cm2 = np.pi * (radius_au * 1.496e13)**2
                 F = line_data.get('intens', 1) * area_cm2 / (dist_cm**2)
@@ -309,10 +279,13 @@ class iSLAT:
                 except (ValueError, ZeroDivisionError):
                     continue
 
-        if not energies:
-            return None, None
+        # Sort energies and populations for plotting
+        if energies and pops:
+            sorted_indices = np.argsort(energies)
+            energies = np.array(energies)[sorted_indices]
+            pops = np.array(pops)[sorted_indices]
 
-        return np.array(energies), np.array(pops)
+        return energies, pops
     
     def run_single_slab_fit(self):
         loader = DataLoader(self.molecules_data_default)
@@ -324,7 +297,7 @@ class iSLAT:
         """ find_single_lines() identifies spectral lines in the flux data based on a threshold.
         It returns a list of wavelengths where the flux exceeds the threshold.
         The threshold is calculated as a fraction of the maximum flux value."""
-        threshold = line_threshold * np.max(self.flux_data)
+        threshold = self.user_settings.get("line_threshold", 0.03) * np.max(self.flux_data)
         sep = 0.1
         found = []
         for i, val in enumerate(self.flux_data):
