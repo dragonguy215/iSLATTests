@@ -6,7 +6,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.widgets import SpanSelector
 import numpy as np
 from iSLAT.ir_model import Spectrum
-from iSLAT.iSLATDefaultInputParms import model_pixel_res, min_lamb, max_lamb, dist, intrinsic_line_width, model_line_width
+from iSLAT.iSLATDefaultInputParms import model_pixel_res, dist, intrinsic_line_width, model_line_width
 
 class iSLATPlot:
     def __init__(self, parent_frame, wave_data, flux_data, theme, islat_class_ref):

@@ -29,7 +29,7 @@ class MolData:
     _lines_type = namedtuple('lines', ['nr', 'lev_up', 'lev_low', 'lam', 'freq', 'a_stein',
                                        'e_up', 'e_low', 'g_up', 'g_low'])
 
-    def __init__(self, name, fname):
+    def __init__(self, name, filename):
         """Initialize a molecular data structure and read from a .par file. The file has the same structure as in the
         Fortran 90 code, see notes below.
 
@@ -37,7 +37,7 @@ class MolData:
         ----------
         name: str
             Label of the molecule (e.g. "CO")
-        fname: str
+        filename: str
             Path/filename of the .par file
 
         Notes
@@ -71,7 +71,7 @@ class MolData:
         """
 
         self._name = name
-        self._fname = fname
+        self._fname = filename
 
         self._partition, self._lines = self._read_molecule(self._fname)
 

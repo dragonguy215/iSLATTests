@@ -28,6 +28,8 @@ from .COMPONENTS.slabfit_runner import *
 from .iSLATDefaultInputParms import *
 from .iSLATCSVHandling import *
 from .COMPONENTS.GUI import *
+from .COMPONENTS.Molecule import Molecule
+from .COMPONENTS.MoleculeDict import MoleculeDict
 
 class iSLAT:
     """
@@ -78,7 +80,7 @@ class iSLAT:
         if not hasattr(self, "GUI"):
             self.GUI = GUI(
                 master=self.root,
-                molecule_data=self.molecules_data_default,
+                molecule_data=self.molecules_dict,
                 wave_data=self.wave_data,
                 flux_data=self.flux_data,
                 config=self.user_settings,
@@ -88,10 +90,19 @@ class iSLAT:
         self.GUI.start()
 
     def init_molecules(self):
-        self.molecules = {}
-        self.initial_values = {}
+        self.molecules_dict = MoleculeDict()
+        #self.initial_values = {}
 
-        for mol_entry in molecules_data:
+        self.molecules_dict.load_molecules_data(molecules_data=self.molecules_data_default,
+                                                initial_molecule_parameters=self.initial_molecule_parameters,
+                                                save_file_data = self.savedata,
+                                                wavelength_range = self.wave_range, 
+                                           intrinsic_line_width = intrinsic_line_width, 
+                                           model_pixel_res = model_pixel_res, 
+                                           model_line_width = model_line_width,
+                                           dist = dist)
+
+        '''for mol_entry in molecules_data:
             mol_name = mol_entry["name"]
             mol_filepath = mol_entry["file"]
             mol_label = mol_entry["label"]
@@ -108,17 +119,34 @@ class iSLAT:
             radius_init = params["radius_init"]
             n_mol_init = float(scale_number * (10 ** scale_exponent))
 
+            # Intensity calculation
+            mol_data.calc_intensity(t_kin, n_mol_init, dv=intrinsic_line_width)
+
+            # Spectrum creation
+            mol_spectrum = Spectrum(
+                lam_min=self.wave_range[0],
+                lam_max=self.wave_range[1],
+                dlambda=model_pixel_res,
+                R=model_line_width,
+                distance=dist
+            )
+
+            # Adding intensity to the spectrum
+            mol_spectrum.add_intensity(mol_data.intensity, radius_init ** 2 * np.pi)
+
             # Store in structured dicts
-            self.molecules[mol_name] = mol_data
+            self.molecules[mol_name] = mol_spectrum
             self.initial_values[mol_name] = {
                 "scale_exponent": scale_exponent,
                 "scale_number": scale_number,
                 "t_kin": t_kin,
                 "radius_init": radius_init,
-                "n_mol_init": n_mol_init
+                "n_mol_init": n_mol_init,
+                "fluxes": mol_spectrum.flux_jy,
+                "lambdas": mol_spectrum.lamgrid
             }
 
-            print(f"Molecule Initialized: {mol_name}")
+            print(f"Molecule Initialized: {mol_name}")'''
 
     def run(self):
         """
@@ -126,6 +154,7 @@ class iSLAT:
         This function starts the main event loop of the Tkinter application.
         """
         # Start the main event loop
+        self.get_save_data()
         self.load_spectrum()
         self.init_molecules()
         self.err_data = np.full_like(self.flux_data, np.nanmedian(self.flux_data)/100)
@@ -173,6 +202,23 @@ class iSLAT:
         with open("CONFIG/DefaultMoleculeParameters.json", 'r') as f:
             initial_molecule_parameters = json.load(f)["initial_parameters"]
         self.initial_molecule_parameters = initial_molecule_parameters
+
+    def get_save_data(self):
+        """
+        get_save_data() loads the save data from the SAVES folder.
+        It returns a list of dictionaries with the save data.
+        """
+        save_file = os.path.join("SAVES", "molecules_list.csv")
+        if os.path.exists(save_file):
+            try:
+                df = pd.read_csv(save_file)
+                self.savedata = df.to_dict(orient='records')
+            except Exception as e:
+                print(f"Error reading save file: {e}")
+                self.savedata = []
+        else:
+            print("No save file found.")
+            self.savedata = []
 
     def check_HITRAN(self, print_statments = True):
         """ check_HITRAN(print_statments=True) checks if the HITRAN files are present and downloads them if necessary.
@@ -241,7 +287,7 @@ class iSLAT:
         else:
             print("No file selected.")
     
-    def generate_population_diagram(self):
+    '''def generate_population_diagram(self):
         if not hasattr(self, 'selected_lines') or not self.selected_lines:
             print("No selected lines to build population diagram.")
             return None, None
@@ -285,7 +331,7 @@ class iSLAT:
             energies = np.array(energies)[sorted_indices]
             pops = np.array(pops)[sorted_indices]
 
-        return energies, pops
+        return energies, pops'''
     
     def run_single_slab_fit(self):
         loader = DataLoader(self.molecules_data_default)
@@ -337,4 +383,4 @@ class iSLAT:
         fit_result = model.fit(y_fit, params, x=x_fit, weights=1/err, nan_policy='omit')
         print(fit_result.fit_report())
 
-        return fit_result
+        return fit_result   
