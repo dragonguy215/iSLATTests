@@ -2,45 +2,71 @@ import numpy as np
 
 class GUIHandlers:
     """
-    Class to handle GUI button actions. Keeps references to plot and data field.
+    Handles GUI button actions, connects to MainPlot for visualization and
+    calls into iSLATClass for actual data processing (fits, CSV saves, slab fitting).
     """
-    def __init__(self, main_plot, data_field, config):
+    def __init__(self, main_plot, data_field, config, islat_class):
         self.main_plot = main_plot
         self.data_field = data_field
         self.config = config
-        self.user_settings = config["user_settings"]
+        self.islat_class = islat_class
+        self.user_settings = config
+        self.legend_on = True
 
     def save_line(self):
-        if not self.main_plot.selected_line:
-            self.data_field.insert_text("No Line Selected!")
+        if self.main_plot.selected_wave is None:
+            self.data_field.insert_text("No line selected to save.\n")
             return
-        try:
-            line2save = self.main_plot.line2save
-            line2save.to_csv(self.main_plot.linesavepath, mode='a', index=False, header=False)
-            self.data_field.insert_text("Line Saved!")
-        except Exception as e:
-            self.data_field.insert_text(f"Error saving line: {e}")
+        line_info = {
+            "wavelength": np.mean(self.main_plot.selected_wave),
+            "flux": np.max(self.main_plot.selected_flux)
+        }
+        self.islat_class.save_line(line_info)
+        self.data_field.insert_text(f"Saved line at ~{line_info['wavelength']:.4f} μm\n")
 
-    def fit_selected_line(self):
+    def fit_selected_line(self, deblend=False):
         self.data_field.clear()
-        if not self.main_plot.selected_line:
-            self.data_field.insert_text("No Line Selected!")
+        if self.main_plot.selected_wave is None:
+            self.data_field.insert_text("No region selected for fitting.\n")
             return
-        fit_result = self.main_plot.fit_line_selected()
-        if fit_result:
-            centroid, fwhm, area = fit_result
-            self.data_field.insert_text(f"Gaussian fit results:\n"
-                f"Centroid (μm) = {centroid[0]} ± {centroid[1]}\n"
-                f"FWHM (km/s) = {fwhm[0]} ± {fwhm[1]}\n"
-                f"Area (erg/s/cm²) = {area[0]} ± {area[1]}")
+        xmin, xmax = np.min(self.main_plot.selected_wave), np.max(self.main_plot.selected_wave)
+        result = self.islat_class.fit_selected_line(xmin, xmax, deblend=deblend)
+        if result:
+            self.main_plot.update_zoom_line(self.main_plot.selected_wave, self.main_plot.selected_flux, result)
+            self.data_field.insert_text(result.fit_report())
         else:
-            self.data_field.insert_text("Fit failed or incomplete.")
+            self.data_field.insert_text("Fit failed or insufficient data.\n")
 
     def find_single_lines(self):
-        self.data_field.insert_text("Finding single lines...")
-        singles = self.main_plot.find_singles()
-        self.data_field.insert_text(f"Found {len(singles)} isolated lines.")
+        lines = self.islat_class.find_single_lines()
+        if lines:
+            self.data_field.insert_text(f"Found {len(lines)} isolated lines.\n")
+        else:
+            self.data_field.insert_text("No lines found.\n")
 
     def single_slab_fit(self):
-        self.data_field.insert_text("Running single slab fit (placeholder).")
-        # Example of connecting to further fit routines
+        result_text = self.islat_class.run_single_slab_fit()
+        self.data_field.insert_text(f"Slab fit results:\n{result_text}\n")
+
+    def toggle_legend(self):
+        self.legend_on = not self.legend_on
+        if self.legend_on:
+            self.main_plot.ax2.legend()
+        else:
+            leg = self.main_plot.ax2.get_legend()
+            if leg:
+                leg.remove()
+        self.main_plot.canvas.draw_idle()
+
+    def export_models(self):
+        self.data_field.insert_text("Exporting current models...\n")
+        if not self.islat_class.slab_model:
+            self.data_field.insert_text("No slab model yet, running slab fit first...\n")
+            self.islat_class.run_single_slab_fit()
+
+        try:
+            out_files = self.islat_class.slab_model.export_results()
+            for f in out_files:
+                self.data_field.insert_text(f"Exported to: {f}\n")
+        except Exception as e:
+            self.data_field.insert_text(f"Error exporting models: {e}\n")

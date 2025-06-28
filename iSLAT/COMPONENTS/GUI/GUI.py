@@ -1,30 +1,24 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import filedialog
 from .MainPlot import iSLATPlot
 from .Data_field import DataField
 from .Tooltips import CreateToolTip
 from .GUIFunctions import GUIHandlers
+import os
 
 class GUI:
-    def __init__(self, master, isotopologue_data, input_spectrum_data, wave_data, flux_data, mols, basem, isot, xp1, xp2, config):
+    def __init__(self, master, molecule_data, wave_data, flux_data, config, islat_class_ref):
         self.master = master
-        self.isotopologue_data = isotopologue_data
-        self.input_spectrum_data = input_spectrum_data
+        self.molecule_data = molecule_data
         self.wave_data = wave_data
         self.flux_data = flux_data
-        self.mols = mols
-        self.basem = basem
-        self.isot = isot
-        self.xp1 = xp1
-        self.xp2 = xp2
         self.config = config
-        self.theme = config["user_settings"]["theme"]
-        self.user_settings = config["user_settings"]
+        self.theme = config["theme"]
+        self.islat_class = islat_class_ref
 
     def create_button(self, frame, text, command, row, column):
         btn_theme = self.theme["buttons"].get(
-            text.replace(" ", ""), 
-            self.theme["buttons"]["DefaultBotton"]
+            text.replace(" ", ""), self.theme["buttons"]["DefaultBotton"]
         )
         btn = tk.Button(
             frame, text=text,
@@ -37,67 +31,119 @@ class GUI:
         CreateToolTip(btn, f"{text} button")
         return btn
 
-    def create_window(self):
-        self.window = self.master
-        self.window.title("iSLAT - Infrared Spectral Line Analysis Tool")
-        self.window.columnconfigure(0, weight=3)
-        self.window.columnconfigure(1, weight=1)
-        self.window.rowconfigure(0, weight=1)
+    def build_left_panel(self, parent):
+        # Configure the left panel
+        control_frame = tk.Frame(parent)
+        control_frame.pack(fill="x")
+        self.create_button(control_frame, "Default Molecules", self.default_molecules, 0, 0)
+        self.create_button(control_frame, "Load Parameters", self.load_parameters, 0, 1)
+        self.create_button(control_frame, "Save Parameters", self.save_parameters, 0, 2)
+        self.create_button(control_frame, "HITRAN Query", self.hitran_query, 1, 0)
+        self.create_button(control_frame, "Export Models", self.export_models, 1, 1)
+        self.create_button(control_frame, "Toggle Legend", self.toggle_legend, 1, 2)
 
-        # LEFT side (plot and molecule table)
-        left_frame = tk.Frame(self.window)
-        left_frame.grid(row=0, column=0, sticky="nsew")
-        left_frame.columnconfigure(0, weight=1)
-        left_frame.rowconfigure(0, weight=4)
-        left_frame.rowconfigure(1, weight=2)
+        # Spectrum file selector
+        file_frame = tk.LabelFrame(parent, text="Spectrum File")
+        file_frame.pack(fill="x", padx=5, pady=5)
+        self.file_label = tk.Label(file_frame, text="Loaded: File")
+        self.file_label.pack()
+        tk.Button(file_frame, text="Load Spectrum", command=self.load_spectrum_file).pack()
 
-        # RIGHT side (data field)
-        right_frame = tk.Frame(self.window)
-        right_frame.grid(row=0, column=1, sticky="nsew")
-        right_frame.columnconfigure(0, weight=1)
-        right_frame.rowconfigure(0, weight=1)
-
-        # Plot area on top
-        plot_frame = tk.Frame(left_frame, borderwidth=2, relief="sunken")
-        plot_frame.grid(row=0, column=0, sticky="nsew")
-        self.main_plot = iSLATPlot(self.window, self.input_spectrum_data, self.isotopologue_data, self.xp1, self.xp2, self.wave_data, self.flux_data, self.config)
-        self.main_plot.embed(plot_frame)
-
-        # Molecule table (bottom left)
-        table_frame = tk.Frame(left_frame)
-        table_frame.grid(row=1, column=0, sticky="nsew")
-        self.build_molecule_table(table_frame)
-
-        # Data field on right
-        self.data_field = DataField("Main Data Field", "", right_frame)
-        self.data_field.frame.grid(row=0, column=0, sticky="nsew")
-
-    def build_molecule_table(self, parent):
+        # Molecule table
+        table_frame = tk.LabelFrame(parent, text="Molecules")
+        table_frame.pack(fill="both", expand=True, padx=5, pady=5)
         headers = ['Molecule', 'Temp.', 'Radius', 'Col. Dens', 'On', 'Del.', 'Color']
         for col, text in enumerate(headers):
-            tk.Label(parent, text=text, bg=self.theme["background"], fg=self.theme["foreground"]).grid(row=0, column=col)
+            tk.Label(table_frame, text=text, bg=self.theme["background"], fg=self.theme["foreground"]).grid(row=0, column=col)
 
-        # Example: add one row per molecule
-        for i, mol in enumerate(self.mols):
-            tk.Label(parent, text=mol, bg=self.theme["background"], fg=self.theme["foreground"]).grid(row=i+1, column=0)
-            tk.Entry(parent).grid(row=i+1, column=1)
-            tk.Entry(parent).grid(row=i+1, column=2)
-            tk.Entry(parent).grid(row=i+1, column=3)
-            tk.Checkbutton(parent).grid(row=i+1, column=4)
-            tk.Checkbutton(parent).grid(row=i+1, column=5)
-            tk.Button(parent, text="Pick").grid(row=i+1, column=6)
+        # Fill rows with default values from initial_values
+        for i, molecule in enumerate(self.molecule_data):
+            mol_name = molecule["name"]
+            defaults = self.islat_class.initial_values.get(mol_name, {
+                "t_kin": "", "radius_init": "", "scale_number": "", "scale_exponent": "", "n_mol_init": ""
+            })
 
-    def start(self):
-        # Create function buttons after window is initialized
-        self.create_window()
+            tk.Label(table_frame, text=mol_name,
+                     bg=self.theme["background"], fg=self.theme["foreground"]).grid(row=i+1, column=0)
 
+            t_entry = tk.Entry(table_frame)
+            t_entry.insert(0, str(defaults["t_kin"]))
+            t_entry.grid(row=i+1, column=1)
+
+            r_entry = tk.Entry(table_frame)
+            r_entry.insert(0, str(defaults["radius_init"]))
+            r_entry.grid(row=i+1, column=2)
+
+            n_entry = tk.Entry(table_frame)
+            n_entry.insert(0, str(defaults["n_mol_init"]))
+            n_entry.grid(row=i+1, column=3)
+
+            tk.Checkbutton(table_frame).grid(row=i+1, column=4)
+            tk.Checkbutton(table_frame).grid(row=i+1, column=5)
+            tk.Button(table_frame, text="Pick").grid(row=i+1, column=6)
+
+        # Main data field
+        self.data_field = DataField("Main Data Field", "", parent)
+        self.data_field.frame.pack(fill="both", expand=True)
+
+    def create_window(self):
+        self.window = self.master
+        self.window.title("iSLAT Version 5.00.00")
+        self.window.columnconfigure(0, weight=1)
+        self.window.columnconfigure(1, weight=3)
+        self.window.rowconfigure(0, weight=1)
+        self.window.rowconfigure(1, weight=0)
+
+        # Left side: all controls
+        left_frame = tk.Frame(self.window)
+        left_frame.grid(row=0, column=0, rowspan=2, sticky="nsew")
+        self.build_left_panel(left_frame)
+
+        # Right side: plots
+        right_frame = tk.Frame(self.window)
+        right_frame.grid(row=0, column=1, sticky="nsew")
+        self.plot = iSLATPlot(right_frame, self.wave_data, self.flux_data, self.theme, self.islat_class)
+
+        # Bottom function buttons
         func_frame = tk.Frame(self.window)
         func_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
-        self.handlers = GUIHandlers(self.main_plot, self.data_field, self.config)
-
+        self.handlers = GUIHandlers(self.plot, self.data_field, self.config, self.islat_class)
         self.create_button(func_frame, "Save Line", self.handlers.save_line, 0, 0)
         self.create_button(func_frame, "Fit Line", self.handlers.fit_selected_line, 0, 1)
         self.create_button(func_frame, "Find Single Lines", self.handlers.find_single_lines, 0, 2)
-        self.create_button(func_frame, "Single Slab Fit", self.handlers.single_slab_fit, 0, 3)
+        self.create_button(func_frame, "Line De-blender", lambda: self.handlers.fit_selected_line(deblend=True), 0, 3)
+        self.create_button(func_frame, "Single Slab Fit", self.handlers.single_slab_fit, 0, 4)
 
+    def start(self):
+        self.create_window()
         self.window.mainloop()
+
+    # Callbacks for top buttons
+    def default_molecules(self):
+        print("Default molecules loaded")
+
+    def load_parameters(self):
+        print("Load parameters from file")
+
+    def save_parameters(self):
+        print("Save parameters to file")
+
+    def hitran_query(self):
+        print("Perform HITRAN query")
+
+    def export_models(self):
+        print("Export models to file")
+
+    def toggle_legend(self):
+        print("Toggled legend on plot")
+
+    def load_spectrum_file(self):
+        file_path = filedialog.askopenfilename(title="Select spectrum CSV")
+        if file_path:
+            self.islat_class.load_spectrum(file_path)
+            self.file_label.config(text=f"Loaded: {os.path.basename(file_path)}")
+            self.plot.wave_data = self.islat_class.wave_data
+            self.plot.flux_data = self.islat_class.flux_data
+            self.plot.ax1.clear()
+            self.plot.ax1.plot(self.plot.wave_data, self.plot.flux_data, color=self.theme["foreground"])
+            self.plot.canvas.draw_idle()

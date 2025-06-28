@@ -1,6 +1,6 @@
-iSLAT_version = 'v4.06.02'
-print (' ')
-print ('Loading iSLAT ' + iSLAT_version + ': Please Wait ...')
+iSLAT_version = 'v5.00.00'
+print(' ')
+print('Loading iSLAT ' + iSLAT_version + ': Please Wait ...')
 
 # Import necessary modules
 import numpy as np
@@ -11,7 +11,7 @@ import os
 import json
 
 # matplotlib.use('Agg')
-matplotlib.use ("TKAgg")
+matplotlib.use("TKAgg")
 # matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
@@ -46,7 +46,7 @@ import ssl
 import urllib
 import webbrowser
 
-context = ssl.create_default_context (cafile=certifi.where ())
+context = ssl.create_default_context(cafile=certifi.where ())
 
 from .ir_model import *
 from .COMPONENTS.chart_window import MoleculeSelector
@@ -75,6 +75,7 @@ class iSLAT:
         # Load settings
         self.user_settings = self.load_user_settings()
         self.update_default_molecule_parameters()
+        self.update_initial_molecule_parameters()
 
         '''self.root = tk.Tk()
         self.root.title("iSLAT - Infrared Spectral Line Analysis Tool")
@@ -85,8 +86,6 @@ class iSLAT:
         self.basem = ["H2", "H2", "H2O", "H2O", "CO2", "CO2", "CO", "CO", "CO", "CH4", "HCN", "HCN", "NH3", "OH", "C2H2", "C2H2", "C2H4", "C4H2", "C2H6", "HC3N"]
         self.isot = [1, 2, 1, 2, 1, 2, 1, 2, 3, 1, 1, 2, 1, 1, 1, 2, 1, 1, 1, 1]
 
-        """self.min_wave = 0.3  # micron
-        self.max_wave = 1000  # micron"""
         self.wave_range = (0.3, 1000)
 
         self.min_vu = 1 / (self.wave_range[0] / 1E6) / 100.
@@ -98,8 +97,7 @@ class iSLAT:
         self.molecules_data_default = molecules_data.copy()
         self.deleted_molecules = []
 
-        self.xp1 = None
-        self.xp2 = None  
+        self.xp1 = self.xp2 = None
 
     def init_gui(self):
         """
@@ -109,27 +107,54 @@ class iSLAT:
         if not hasattr(self, "root"):
             self.root = tk.Tk()
             self.root.title("iSLAT - Infrared Spectral Line Analysis Tool")
-            #self.root.geometry("800x600")
             self.root.resizable(True, True)
 
         #self.root.mainloop()
 
         if not hasattr(self, "GUI"):
             self.GUI = GUI(
-            master=self.root,
-            isotopologue_data=self.molecules_data_default,
-            input_spectrum_data=self.input_spectrum_data if hasattr(self, 'input_spectrum_data') else None,
-            wave_data=self.wave_data if hasattr(self, 'wave_data') else None,
-            flux_data=self.flux_data if hasattr(self, 'flux_data') else None,
-            mols=self.mols,
-            basem=self.basem,
-            isot=self.isot,
-            xp1=self.xp1,
-            xp2=self.xp2,
-            config={"iSLAT_version": "4.06.02", "user_settings": self.user_settings}
-        )
+                master=self.root,
+                molecule_data=self.molecules_data_default,
+                wave_data=self.wave_data,
+                flux_data=self.flux_data,
+                config=self.user_settings,
+                islat_class_ref=self
+            )
         
         self.GUI.start()
+
+    def init_molecules(self):
+        self.molecules = {}
+        self.initial_values = {}
+
+        for mol_entry in molecules_data:
+            mol_name = mol_entry["name"]
+            mol_filepath = mol_entry["file"]
+            mol_label = mol_entry["label"]
+            mol_name_lower = mol_name.lower()
+
+            # Load the molecule line data
+            mol_data = MolData(mol_name, mol_filepath)
+
+            # Get precomputed parameters
+            params = self.initial_molecule_parameters[mol_name]
+            scale_exponent = params["scale_exponent"]
+            scale_number = params["scale_number"]
+            t_kin = params["t_kin"]
+            radius_init = params["radius_init"]
+            n_mol_init = float(scale_number * (10 ** scale_exponent))
+
+            # Store in structured dicts
+            self.molecules[mol_name] = mol_data
+            self.initial_values[mol_name] = {
+                "scale_exponent": scale_exponent,
+                "scale_number": scale_number,
+                "t_kin": t_kin,
+                "radius_init": radius_init,
+                "n_mol_init": n_mol_init
+            }
+
+            print(f"Molecule Initialized: {mol_name}")
 
     def run(self):
         """
@@ -137,8 +162,9 @@ class iSLAT:
         This function starts the main event loop of the Tkinter application.
         """
         # Start the main event loop
-        self.selectfileinit()
-    
+        self.load_spectrum()
+        self.init_molecules()
+        self.err_data = np.full_like(self.flux_data, np.nanmedian(self.flux_data)/100)
         self.init_gui()
 
     def load_user_settings(self):
@@ -234,98 +260,111 @@ class iSLAT:
         HITRAN_folder = "HITRANdata"
         os.makedirs(HITRAN_folder, exist_ok=True)
 
-    def selectfileinit(self):
-        filetypes = [('CSV Files', '*.csv')]
-        spectra_directory = os.path.abspath ("EXAMPLE-data")
-        # Ask the user to select a file
-        infiles = filedialog.askopenfilename(multiple=True, title='Choose Spectrum Data File', filetypes=filetypes, initialdir=spectra_directory)
-
-        if infiles:
-            for file_path in infiles:
-                # Process each selected file
-                print("Selected file:", file_path)
-                file_name = os.path.basename(file_path)
-
-                # code to process each file
-                self.input_spectrum_data = pd.read_csv(filepath_or_buffer=file_path, sep=',')
-                self.wave_data = np.array(self.input_spectrum_data['wave'])
-                self.wave_original = np.array(self.input_spectrum_data['wave'])
-                self.flux_data = np.array(self.input_spectrum_data['flux'])
-                if 'err' in self.input_spectrum_data:
-                    err_data = np.array(self.input_spectrum_data['err'])
-                else:
-                    err_data = np.full_like(self.flux_data, np.nanmedian(self.flux_data)/100)  # assumed, if not present
-
-                    # Set initial values of xp1 and rng
-                fig_max_limit = np.nanmax(self.wave_data)
-                fig_min_limit = np.nanmin(self.wave_data)
-                self.xp1 = np.around(fig_min_limit + (fig_max_limit - fig_min_limit) / 2, decimals=2)
-                rng = np.around((fig_max_limit - fig_min_limit) / 10, decimals=2)
-                self.xp2 = self.xp1 + rng
-        else:
-            print("No files selected.")
-    
-    def selectfile(self):
+    def load_spectrum(self, file_path=None):
         filetypes = [('CSV Files', '*.csv')]
         spectra_directory = os.path.abspath("EXAMPLE-data")
-        infiles = filedialog.askopenfilename(multiple=True, title='Choose Spectrum Data File', filetypes=filetypes,
-                                            initialdir=spectra_directory)
+        #file_path = filedialog.askopenfilename(title='Choose Spectrum Data File', filetypes=filetypes, initialdir=spectra_directory)
+        if file_path is None:
+            file_path = filedialog.askopenfilename(title='Choose Spectrum Data File', filetypes=filetypes, initialdir=spectra_directory)
 
-        if infiles:
-            for file_path in infiles:
-                # Process each selected file
-                print ("Selected file:", file_path)
-                file_name = os.path.basename(file_path)
-
-                file_name_label.config(text=str (file_name))
-                # filename_box_data.set_val(file_name)
-                # Add your code to process each file
-                # THIS IS THE OLD FILE SYSTEM (THIS WILL BE USED UNTIL THE NEW FILE SYSTEM IS DEVELOPED) USE THIS!!!!!
-                input_spectrum_data = pd.read_csv(filepath_or_buffer=(file_path), sep=',')
-                wave_data = np.array(input_spectrum_data['wave'])
-                wave_original = np.array(input_spectrum_data['wave'])
-                flux_data = np.array(input_spectrum_data['flux'])
-                if 'err' in input_spectrum_data:
-                    err_data = np.array(input_spectrum_data['err'])
-                else:
-                    err_data = np.full_like(flux_data, np.nanmedian(flux_data)/100)  # assumed, if not present
-
-                # Set new values of xp1 and rng only if the new spectrum is in a different wave range
-                fig_max_limit = np.nanmax(wave_data)
-                fig_min_limit = np.nanmin(wave_data)
-                xp1_current = float(xp1_entry.get ())
-                if xp1_current > fig_max_limit or xp1_current < fig_min_limit:
-                    xp1 = fig_min_limit + (fig_max_limit - fig_min_limit) / 2
-                    rng = (fig_max_limit - fig_min_limit) / 10
-                    xp2 = xp1 + rng
-                    xp1_entry.delete(0, "end")
-                    xp1_entry.insert(0, np.around (xp1, decimals=2))
-                    rng_entry.delete(0, "end")
-                    rng_entry.insert(0, np.around (rng, decimals=2))
-
-                # now = dt.now()
-                # dateandtime = now.strftime("%d-%m-%Y-%H-%M-%S")
-                # print(dateandtime)
-                # svd_line_file = f'savedlines-{dateandtime}.csv'
-
-                self.update()
-
-                data_field.delete('1.0', "end")
-                data_field.insert('1.0', 'New spectrum loaded!')
+        if file_path:
+            df = pd.read_csv(file_path)
+            self.wave_data = df['wave'].values
+            self.flux_data = df['flux'].values
+            #print(np.min(self.wave_data), np.max(self.wave_data))
+            #print(type(self.wave_data), type(np.min(self.wave_data)))
+            lam_min = np.min(self.wave_data)
+            lam_max = np.max(self.wave_data)
+            self.input_spectrum = Spectrum(
+                lam_min = lam_min,
+                lam_max = lam_max,
+                dlambda= (lam_max - lam_min) / len(self.wave_data),
+                R= 1 / (lam_min / 1E6) / 100.,  # Convert to cm-1
+            )
+            print(f"Loaded spectrum from {file_path}")
         else:
-            data_field.delete('1.0', "end")
-            data_field.insert('1.0', 'No file selected.')
+            print("No file selected.")
+    
+    def generate_population_diagram(self):
+        if not hasattr(self, "selected_lines") or not self.selected_lines:
+            print("No lines selected yet to build population diagram.")
+            return None, None
 
-    def update(self):
-        """
-        update() updates the GUI components and data fields.
-        This function is called after loading a new spectrum or making changes to the GUI.
-        """
-        # Update the GUI components
-        if hasattr(self, 'GUI'):
-            self.GUI.update_gui()
-        
-        # Update the data field with a message
-        if hasattr(self, 'data_field'):
-            self.data_field.delete('1.0', "end")
-            self.data_field.insert('1.0', 'Spectrum data updated.')
+        energies, pops = [], []
+        for wave in self.selected_lines:
+            for mol in self.molecules.values():
+                closest_line = mol.find_closest_line(wave)
+                if closest_line:
+                    e_upper = closest_line['E_up']
+                    g_u = closest_line['g_u']
+                    n_u = Intensity.calculate_population(e_upper, g_u)
+                    energies.append(e_upper)
+                    pops.append(np.log(n_u / g_u))
+
+        return np.array(energies), np.array(pops)
+    
+    def run_single_slab_fit(self):
+        loader = DataLoader(self.molecule_data)
+        self.slab_model = ModelFitting(loader)
+        result = self.slab_model.fit()
+        return result.summary()
+
+    def find_single_lines(self):
+        threshold = line_threshold * np.max(self.flux_data)
+        sep = 0.1
+        found = []
+        for i, val in enumerate(self.flux_data):
+            if val > threshold:
+                if len(found) == 0 or (self.wave_data[i] - found[-1]) > sep:
+                    found.append(self.wave_data[i])
+        self.selected_lines = found
+        print(f"Found {len(found)} lines.")
+        return found
+
+    def save_line(self, line_info):
+        df = pd.DataFrame([line_info])
+        file = os.path.join("SAVES", "lines_saved.csv")
+        df.to_csv(file, mode='a', header=not os.path.exists(file), index=False)
+        print(f"Line saved to {file}")
+
+    '''def fit_single_gaussian(self, x, y, err):
+        model = GaussianModel()
+        params = model.guess(y, x=x)
+        fit_result = model.fit(y, params, x=x, weights=1/err, nan_policy='omit')
+        print(fit_result.fit_report())
+        return fit_result
+
+    def fit_multi_gaussian(self, x, y, err):
+        # try to fit 2 components as an example of deblend
+        g1 = GaussianModel(prefix='g1_')
+        g2 = GaussianModel(prefix='g2_')
+        model = g1 + g2
+        params = g1.guess(y, x=x) + g2.guess(y, x=x)
+        fit_result = model.fit(y, params, x=x, weights=1/err, nan_policy='omit')
+        print(fit_result.fit_report())
+        return fit_result'''
+
+    def fit_selected_line(self, xmin, xmax, deblend=False):
+        x_fit = self.wave_data[(self.wave_data >= xmin) & (self.wave_data <= xmax)]
+        y_fit = self.flux_data[(self.wave_data >= xmin) & (self.wave_data <= xmax)]
+        err = self.err_data[(self.wave_data >= xmin) & (self.wave_data <= xmax)]
+
+        if len(x_fit) < 5:
+            print("Not enough data points to fit.")
+            return None
+
+        print(f"Fitting line in range: {xmin:.4f}-{xmax:.4f}, points: {len(x_fit)}")
+
+        if deblend:
+            g1 = GaussianModel(prefix='g1_')
+            g2 = GaussianModel(prefix='g2_')
+            model = g1 + g2
+            params = g1.guess(y_fit, x=x_fit) + g2.guess(y_fit, x=x_fit)
+        else:
+            model = GaussianModel()
+            params = model.guess(y_fit, x=x_fit)
+
+        fit_result = model.fit(y_fit, params, x=x_fit, weights=1/err, nan_policy='omit')
+        print(fit_result.fit_report())
+
+        return fit_result

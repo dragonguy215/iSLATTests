@@ -1,13 +1,23 @@
 import numpy as np
 
 # Define the default molecules and their file path; the folder must be in the same path as iSLAT
-molecules_data = [
+'''molecules_data = [
     ("H2O", "HITRANdata/data_Hitran_2020_H2O.par", "H$_2$O"),
     ("OH", "HITRANdata/data_Hitran_2020_OH.par", "OH"),
     ("HCN", "HITRANdata/data_Hitran_2020_HCN.par", "HCN"),
     ("C2H2", "HITRANdata/data_Hitran_2020_C2H2.par", "C$_2$H$_2$"),
     ("CO2", "HITRANdata/data_Hitran_2020_CO2.par", "CO$_2$"),
     ("CO", "HITRANdata/data_Hitran_2020_CO.par", "CO")
+    # Add more molecules here if needed
+]'''
+
+molecules_data = [
+    {"name": "H2O", "file": "HITRANdata/data_Hitran_2020_H2O.par", "label": "H$_2$O"},
+    {"name": "OH",  "file": "HITRANdata/data_Hitran_2020_OH.par",  "label": "OH"},
+    {"name": "HCN", "file": "HITRANdata/data_Hitran_2020_HCN.par", "label": "HCN"},
+    {"name": "C2H2", "file": "HITRANdata/data_Hitran_2020_C2H2.par", "label": "C$_2$H$_2$"},
+    {"name": "CO2", "file": "HITRANdata/data_Hitran_2020_CO2.par", "label": "CO$_2$"},
+    {"name": "CO",  "file": "HITRANdata/data_Hitran_2020_CO.par",  "label": "CO"}
     # Add more molecules here if needed
 ]
 
