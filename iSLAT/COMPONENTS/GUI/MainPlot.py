@@ -61,11 +61,22 @@ class iSLATPlot:
         self.islat.update_model_spectrum()
         self.update_population_diagram()
 
-    def match_wavelength_range(self):
-        if hasattr(self.islat, 'wavelength_range') and self.islat.wavelength_range:
-            print("Setting xlim to islat wavelength range:", self.islat.wavelength_range)
-            wmin, wmax = self.islat.wavelength_range
+    def match_display_range(self):
+        if hasattr(self.islat, 'display_range') and self.islat.display_range:
+            #print("Setting xlim to islat wavelength range:", self.islat.display_range)
+            wmin, wmax = self.islat.display_range
             self.ax1.set_xlim(wmin, wmax)
+
+            # Scaling the y-axis based on tallest peak of data in the range of wmin and wmax
+            mask = (self.wave_data >= wmin) & (self.wave_data <= wmax)
+            range_flux_cnts = self.flux_data[mask]
+            if range_flux_cnts.size == 0:
+                fig_height = np.nanmax(self.flux_data)
+                fig_bottom_height = 0
+            else:
+                fig_height = np.nanmax(range_flux_cnts)
+                fig_bottom_height = np.nanmin(range_flux_cnts)
+            self.ax1.set_ylim(ymin=fig_bottom_height, ymax=fig_height + (fig_height / 8))
 
     def make_span_selector(self):
         """
@@ -101,21 +112,28 @@ class iSLATPlot:
 
     def update_model_plot(self):
         self.ax1.clear()
-        self.match_wavelength_range()
+        self.match_display_range()
         self.plot_model_lines()
         self.make_span_selector()
+        self.compute_sum_flux()
         # plot the data line
         self.ax1.plot(self.wave_data, self.flux_data, color=self.theme["foreground"], label="Data")
 
         # plot each molecule if it is turned on
-        for mol in self.islat.molecules_dict.values():
-            if mol.is_visible:
-                model_flux = mol.get_flux(self.wave_data)
-                self.ax1.fill_between(self.wave_data, model_flux, alpha=0.3, color=mol.color, label=mol.name)
+        #self.compute_sum_flux()  # Compute the summed flux using the existing function
 
-        # plot sum of models if exists
-        if hasattr(self.islat, 'sum_spectrum_flux'):
-            self.ax1.plot(self.wave_data, self.islat.sum_spectrum_flux, 'r--', label='Sum of models')
+        for mol_name, molecule_obj in self.islat.molecules_dict.items():
+            if molecule_obj.is_visible:
+                #model_flux = molecule_obj.get_flux(self.wave_data)
+                self.ax1.fill_between(
+                    #molecule_obj.spectrum.lamgrid, 
+                    #self.summed_flux,  # Use the computed summed flux
+                    molecule_obj.spectrum.lamgrid,
+                    molecule_obj.spectrum.flux_jy,
+                    color=molecule_obj.color, 
+                    alpha=0.3, 
+                    lw=0
+                )
 
         self.ax1.legend()
         self.canvas.draw_idle()
@@ -162,7 +180,7 @@ class iSLATPlot:
             if mol.is_visible:
                 mol_flux = mol.get_flux(self.wave_data)
                 summed_flux += mol_flux
-        return summed_flux
+        self.summed_flux = summed_flux
 
     def plot_sum_line(self, wave, flux, label=None, color=None, compute = True):
         """

@@ -53,6 +53,7 @@ class iSLAT:
         self.isot = [1, 2, 1, 2, 1, 2, 1, 2, 3, 1, 1, 2, 1, 1, 1, 2, 1, 1, 1, 1]
 
         self.wavelength_range = wavelength_range
+        self.display_range = (23.52, 25.41)
 
         self.min_vu = 1 / (self.wavelength_range[0] / 1E6) / 100.
         self.max_vu = 1 / (self.wavelength_range[1] / 1E6) / 100.
