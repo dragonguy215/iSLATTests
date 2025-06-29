@@ -66,7 +66,7 @@ class iSLATPlot:
         self.ax1.plot(self.wave_data, self.flux_data, color=self.theme["foreground"], label="Data")
 
         # plot each molecule if it is turned on
-        for mol in self.islat.molecules.values():
+        for mol in self.islat.molecules_dict.values():
             if mol.is_active:
                 model_flux = mol.get_flux(self.wave_data)
                 self.ax1.fill_between(self.wave_data, model_flux, alpha=0.3, color=mol.color, label=mol.name)
@@ -178,11 +178,15 @@ class iSLATPlot:
         self.canvas.draw_idle()'''
 
     def onselect(self, xmin, xmax):
+        self.current_selection = (xmin, xmax)
+        self.update_line_inspection_plot(xmin, xmax)
         mask = (self.wave_data >= xmin) & (self.wave_data <= xmax)
         self.selected_wave = self.wave_data[mask]
         self.selected_flux = self.flux_data[mask]
         self.islat.selected_wave = self.selected_wave
         self.islat.selected_flux = self.selected_flux
+        self.last_xmin = xmin
+        self.last_xmax = xmax
 
         if len(self.selected_wave) < 5:
             self.ax2.clear()
@@ -192,55 +196,52 @@ class iSLATPlot:
         # Fit and update line
         self.fit_result = self.islat.fit_selected_line(xmin, xmax)
         #self.update_line_inspection_plot(self.selected_wave, self.selected_flux, self.fit_result)
-        self.update_line_inspection_plot()
+        self.update_line_inspection_plot(xmin, xmax)
 
         self.update_population_diagram()
 
-    def update_line_inspection_plot(self):
+    def update_line_inspection_plot(self, xmin=None, xmax=None):
         self.ax2.clear()
+        self.ax3.clear()
 
-        # Calculate indices of selection in global wavelength grid
-        wave = self.wave_data
-        model_sum = self.islat.sum_spectrum_flux
-        data_flux = self.flux_data
-
-        if hasattr(self.islat, 'selected_wave'):
-            xmin = np.min(self.islat.selected_wave)
-            xmax = np.max(self.islat.selected_wave)
-
-            # Find indices
-            idx_min = np.searchsorted(wave, xmin) - 1
-            idx_max = np.searchsorted(wave, xmax) + 1
-            idx_min = max(idx_min, 0)
-            idx_max = min(idx_max, len(wave)-1)
-
-            # Slice
-            model_region_x = wave[idx_min:idx_max]
-            model_region_y = model_sum[idx_min:idx_max]
-            data_region_y = data_flux[idx_min:idx_max]
-
-            # Determine max y
-            max_y = max(np.nanmax(model_region_y), np.nanmax(data_region_y))
-            self.ax2.set_ylim(0, max_y)
-
-            # Plot summed model
-            self.ax2.plot(model_region_x, model_region_y, 'k--', lw=2, label="Sum model")
-
-            # Plot data
-            self.ax2.plot(model_region_x, data_region_y, 'r-', lw=1.2, label="Data")
-
-            # Optional: fill by molecule contributions
-            for mol in self.islat.molecules_dict.values():
-                if mol.is_active:
-                    mol_flux = mol.spectrum.flux_jy[idx_min:idx_max]
-                    color = mol.color
-                    self.ax2.fill_between(model_region_x, mol_flux, alpha=0.4, color=color, label=mol.displaylabel)
-
-            self.ax2.set_xlim(model_region_x[0], model_region_x[-1])
-            self.ax2.set_xlabel("Wavelength (μm)")
-            self.ax2.set_ylabel("Flux")
-            self.ax2.legend()
+        if xmin is None or xmax is None or (xmax - xmin) < 0.0001:
             self.canvas.draw_idle()
+            return
+
+        # Plot data in zoom
+        mask = (self.wave_data >= xmin) & (self.wave_data <= xmax)
+        self.ax2.plot(self.wave_data[mask], self.flux_data[mask], color="black", label="Observed")
+
+        # Plot each active molecule in zoom
+        max_y = np.nanmax(self.flux_data[mask])
+        for mol in self.islat.molecules_dict.values():
+            if mol.is_active:
+                flux = mol.get_flux(self.wave_data[mask])
+                self.ax2.plot(self.wave_data[mask], flux, color=mol.color, linestyle="--", label=mol.name)
+                max_y = max(max_y, np.nanmax(flux))
+
+        self.ax2.set_ylim(0, max_y * 1.1)
+        self.ax2.legend()
+        self.ax2.set_title("Line inspection")
+        self.ax2.set_xlabel("Wavelength (μm)")
+        self.ax2.set_ylabel("Flux (Jy)")
+
+        # Populate population diagram
+        line_data = self.islat.get_line_data_in_range(xmin, xmax)
+        if line_data:
+            lambs, intens, eups, a_steins, g_ups = line_data
+            area = np.pi * (mol.radius * au * 1e2) ** 2
+            dist_cm = mol.distance * pc
+            beam_s = area / dist_cm ** 2
+            F = intens * beam_s
+            freq = ccum / lambs
+            y_axis = np.log(4 * np.pi * F / (a_steins * hh * freq * g_ups))
+            self.ax3.scatter(eups, y_axis, color="green", edgecolors="black")
+            self.ax3.set_title("Population diagram")
+            self.ax3.set_xlabel("$E_u$ (K)")
+            self.ax3.set_ylabel(r"ln($N_u$/$g_u$)")
+
+        self.canvas.draw_idle()
 
     def update_population_diagram(self):
         self.ax3.clear()

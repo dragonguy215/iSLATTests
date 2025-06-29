@@ -292,3 +292,17 @@ class iSLAT:
         print(fit_result.fit_report())
 
         return fit_result   
+    
+    def get_line_data_in_range(self, xmin, xmax):
+        selected_mol = self.get_selected_molecule()  # implement however you track active molecule
+        if not selected_mol:
+            return None
+        lines_df = selected_mol.intensity.get_table()
+        subset = lines_df[(lines_df['lam'] >= xmin) & (lines_df['lam'] <= xmax)]
+        if subset.empty:
+            return None
+        return (subset['lam'].values,
+                subset['intens'].values,
+                subset['e_up'].values,
+                subset['a_stein'].values,
+                subset['g_up'].values)

@@ -51,9 +51,11 @@ class GUIHandlers:
     def toggle_legend(self):
         self.legend_on = not self.legend_on
         for ax in [self.main_plot.ax1, self.main_plot.ax2, self.main_plot.ax3]:
-            leg = ax.get_legend()
-            if leg:
-                leg.set_visible(self.legend_on)
+            if self.legend_on:
+                ax.legend()
+            else:
+                leg = ax.get_legend()
+                if leg: leg.set_visible(False)
         self.main_plot.canvas.draw_idle()
 
     def export_models(self):

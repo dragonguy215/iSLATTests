@@ -82,4 +82,9 @@ class MoleculeWindow:
                 m_obj.color = color
                 self.plot.add_model_line(mol, temp, rad, dens, color)
         self.islat.update_model_spectrum()
-        self.plot.update_line_inspection_plot()
+        self.plot.update_model_plot()
+
+        # If user has already selected a span, refresh the inspection plot with updated molecules
+        if hasattr(self.plot, "current_selection") and self.plot.current_selection:
+            xmin, xmax = self.plot.current_selection
+            self.plot.update_line_inspection_plot(xmin, xmax)
