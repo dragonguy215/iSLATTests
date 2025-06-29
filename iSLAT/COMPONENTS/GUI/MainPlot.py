@@ -25,8 +25,12 @@ class iSLATPlot:
         self.ax2.set_title("Line inspection plot")
         self.ax3.set_title("Population diagram")
 
-        self.ax1.plot(self.wave_data, self.flux_data, color=self.theme["foreground"], label="Observed Spectrum")
-        self.ax1.set_ylabel("Flux (Jy)")
+        #self.ax1.plot(self.wave_data, self.flux_data, color=self.theme["foreground"], label="Observed Spectrum")
+        #self.ax1.set_ylabel("Flux (Jy)")
+
+        '''print("Here is the wave and flux data for the main plot:")
+        print("Wavelength:", self.wave_data)
+        print("Flux:", self.flux_data)'''
 
         # Set default zoom similar to old behavior
         wmin, wmax = np.min(self.wave_data), np.max(self.wave_data)
@@ -50,7 +54,28 @@ class iSLATPlot:
 
         self.model_lines = []
 
+        self.plot_model_lines()  # Initial plot of model lines
+        self.plot_data_line(self.wave_data, self.flux_data, label="Observed Spectrum", color=self.theme["foreground"])
+        self.plot_sum_line(self.wave_data, np.zeros_like(self.wave_data), label="Sum Line", color=self.theme["highlight"])
+        self.islat.update_model_spectrum()
+        #self.draw_plot()  # Initial draw of the main plot
+        #print("ax1 lines:", self.ax1.lines)
         self.update_population_diagram()
+
+    '''@property
+    def model_lines(self):
+        """
+        Returns the list of model lines currently plotted on the main plot.
+        """
+        return self._model_lines
+    
+    @model_lines.setter
+    def model_lines(self, value):
+        """
+        reloads the plot whenever model_lines is set.
+        """
+        self._model_lines = value
+        self.canvas.'''
 
     def clear_model_lines(self):
         # remove previously plotted lines
@@ -59,7 +84,25 @@ class iSLATPlot:
         self.model_lines.clear()
         self.canvas.draw_idle()
 
-    def add_model_line(self, mol_name, temp, radius, density, color):
+    def update_model_plot(self):
+        self.ax1.clear()
+        # plot the data line
+        self.ax1.plot(self.wave_data, self.flux_data, color=self.theme["foreground"], label="Data")
+
+        # plot each molecule if it is turned on
+        for mol in self.islat.molecules.values():
+            if mol.is_active:
+                model_flux = mol.get_flux(self.wave_data)
+                self.ax1.fill_between(self.wave_data, model_flux, alpha=0.3, color=mol.color, label=mol.name)
+
+        # plot sum of models if exists
+        if hasattr(self.islat, 'sum_spectrum_flux'):
+            self.ax1.plot(self.wave_data, self.islat.sum_spectrum_flux, 'r--', label='Sum of models')
+
+        self.ax1.legend()
+        self.canvas.draw_idle()
+
+    def add_model_line(self, mol_name, temp, radius, density, color = None):
         """
         Adds a model spectrum line for given molecule parameters to the main plot.
         Assumes the islat.molecules dict has the MolData instances for calc.
@@ -70,22 +113,95 @@ class iSLATPlot:
         #(self, lam_min=None, lam_max=None, dlambda=None, R=None, distance=None):
         model_flux = molecule_obj.spectrum.flux_jy
 
-        if molecule_obj.name == "H2O":
+        '''if molecule_obj.name == "H2O":
             print("hey bro, here are the current values for h20:")
             print(f"temp: {molecule_obj.temp}, radius: {molecule_obj.radius}")
             print(f"n_mol: {molecule_obj.n_mol}, scale_exponent: {molecule_obj.scale_exponent}, scale_number: {molecule_obj.scale_number}")
             print(f"t_kin: {molecule_obj.t_kin}, intrinsic_line_width: {molecule_obj.intrinsic_line_width}, model_pixel_res: {molecule_obj.model_pixel_res}")
-            print(f"model_line_width: {molecule_obj.model_line_width}, distance: {molecule_obj.distance}, wavelength_range: {molecule_obj.wavelength_range}")
+            print(f"model_line_width: {molecule_obj.model_line_width}, distance: {molecule_obj.distance}, wavelength_range: {molecule_obj.wavelength_range}")'''
 
+        if color is None:
+            color = molecule_obj.line_color if hasattr(molecule_obj, "line_color") else self.theme["default_molecule_colors"][len(self.model_lines) % len(self.theme["default_molecule_colors"])]
         #line, = self.ax1.plot(self.wave_data, model_flux, linestyle='-', color=color, alpha=0.7, label=f"{mol_name}")
         line, = self.ax1.plot(molecule_obj.spectrum.lamgrid, model_flux, linestyle='-', color=color, alpha=0.7, label=f"{mol_name}")
-        print("Here is the lamgrid for the model line:")
+        '''print("Here is the lamgrid for the model line:")
         print(molecule_obj.spectrum.lamgrid)
         print("And here is the model flux:")
-        print(model_flux)
+        print(model_flux)'''
+
         self.model_lines.append(line)
         self.ax1.legend()
         self.canvas.draw_idle()
+
+    def plot_model_lines(self):
+        """
+        Plots all model lines for the molecules in the islat.molecules_dict.
+        Assumes the islat.molecules_dict has the MolData instances for calc.
+        """
+        self.clear_model_lines()
+        for mol_name, molecule_obj in self.islat.molecules_dict.items():
+            if molecule_obj.is_active:
+                self.add_model_line(
+                    mol_name,
+                    temp=molecule_obj.temp,
+                    radius=molecule_obj.radius,
+                    density=molecule_obj.n_mol_init,
+                )
+
+    def plot_data_line(self, wave, flux, label=None, color=None):
+        """
+        Plots a data line on the main plot.
+        """
+        if label is None:
+            label = "Data Line"
+        if color is None:
+            color = self.theme["foreground"]
+        
+        print("Plotting data line with wavelength and flux:")
+        print("Wavelength:", wave)
+        print("Flux:", flux)
+        line, = self.ax1.plot(wave, flux, linestyle='-', color=color, alpha=0.7, label=label)
+        self.model_lines.append(line)
+        self.ax1.legend()
+        self.canvas.draw_idle()
+    
+    def plot_sum_line(self, wave, flux, label=None, color=None):
+        """
+        Plots a summed line on the main plot.
+        """
+        if label is None:
+            label = "Sum Line"
+        if color is None:
+            color = self.theme["highlight"]
+        
+        line, = self.ax1.plot(wave, flux, linestyle='-', color=color, alpha=0.7, label=label)
+        self.model_lines.append(line)
+        self.ax1.legend()
+        self.canvas.draw_idle()
+
+    '''def draw_plot(self):
+        self.ax1.clear()
+        self.ax1.set_title("Full Spectrum")
+        self.ax1.set_ylabel("Flux")
+
+        # Plot data
+        #self.ax1.plot(self.wave_data, self.flux_data, color=self.theme["foreground"], label="Data")
+        self.plot_data_line(self.wave_data, self.flux_data, label="Observed Spectrum", color=self.theme["foreground"])
+
+        # Plot sum line
+        if hasattr(self.islat, 'sum_spectrum_flux'):
+            self.ax1.plot(self.wave_data, self.islat.sum_spectrum_flux, color="orange", label="Sum Model")
+
+        # Plot each molecule
+        for mol in self.islat.molecules_dict.values():
+            if mol.is_active:
+                flux = mol.get_flux(self.wave_data)
+                color = self.theme["default_molecule_colors"][len(self.model_lines) % len(self.theme["default_molecule_colors"])]
+                self.ax1.plot(self.wave_data, flux, color=color, alpha=0.6, lw=1)
+                self.ax1.fill_between(self.wave_data, flux, color=color, alpha=0.3, lw=0)
+
+        self.ax1.legend()
+        self.canvas.draw_idle()'''
 
     def onselect(self, xmin, xmax):
         mask = (self.wave_data >= xmin) & (self.wave_data <= xmax)
@@ -104,10 +220,6 @@ class iSLATPlot:
         self.fit_result = self.islat.fit_selected_line(xmin, xmax)
         self.update_zoom_line(self.selected_wave, self.selected_flux, self.fit_result)
 
-        # Try population diagram
-        '''e, p = self.islat.generate_population_diagram()
-        if e is not None:
-            self.update_population_diagram(e, p)'''
         self.update_population_diagram()
 
     def update_zoom_line(self, wave, flux, fit_result=None):

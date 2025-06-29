@@ -45,7 +45,7 @@ class Molecule:
         self.wavelength_range = wavelength_range #if wavelength_range is not ((None, None) or None) else (0.3, 1000)
         #print("Wavelength range:", self.wavelength_range)
         
-        print("Here is the file path for the molecule data:", filepath)
+        #print("Here is the file path for the molecule data:", filepath)
         self.mol_data = MolData(name, filepath)  # Load molecule data from file
         
         self.intensity = Intensity(self.mol_data)
@@ -61,7 +61,7 @@ class Molecule:
 
         self.spectrum.add_intensity(
             intensity=self.intensity,
-            dA=self.radius ** 2 ** np.pi
+            dA=self.radius * 2 ** np.pi
         )
 
     def calculate_intensity(self):
@@ -71,3 +71,8 @@ class Molecule:
             n_mol=self.n_mol,
             dv=self.intrinsic_line_width
         )
+    
+    def get_flux(self, wavelength_array):
+        lam_grid = self.spectrum._lamgrid
+        flux_grid = self.spectrum.flux
+        return np.interp(wavelength_array, lam_grid, flux_grid)

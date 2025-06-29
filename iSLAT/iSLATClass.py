@@ -111,7 +111,7 @@ class iSLAT:
         self.get_save_data()
         self.load_spectrum()
         self.init_molecules()
-        self.err_data = np.full_like(self.flux_data, np.nanmedian(self.flux_data)/100)
+        #self.err_data = np.full_like(self.flux_data, np.nanmedian(self.flux_data)/100)
         self.init_gui()
 
     def load_user_settings(self):
@@ -231,10 +231,20 @@ class iSLAT:
             self.wave_data = np.array(df['wave'].values)
             self.wave_data_original = self.wave_data.copy()
             self.flux_data = np.array(df['flux'].values)
+            self.err_data = np.array(df['err'].values)
+            self.continuum_data = np.array(df['cont'].values)
             print(f"Loaded spectrum from {file_path}")
         else:
             print("No file selected.")
-    
+
+    def update_model_spectrum(self):
+        summed_flux = np.zeros_like(self.wave_data)
+        for mol in self.molecules_dict.values():
+            if mol.is_active:
+                mol_flux = mol.get_flux(self.wave_data)
+                summed_flux += mol_flux
+        self.sum_spectrum_flux = summed_flux
+
     def run_single_slab_fit(self):
         loader = DataLoader(self.molecules_data_default)
         self.slab_model = ModelFitting(loader)
