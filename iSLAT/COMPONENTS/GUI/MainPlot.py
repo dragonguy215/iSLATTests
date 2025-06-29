@@ -7,7 +7,7 @@ from matplotlib.widgets import SpanSelector
 import numpy as np
 from lmfit.models import GaussianModel
 from iSLAT.ir_model import Spectrum
-from iSLAT.iSLATDefaultInputParms import dist, au, pc, ccum, hh
+from iSLAT.iSLATDefaultInputParms import dist, au, pc, ccum, hh, fwhm
 
 class iSLATPlot:
     def __init__(self, parent_frame, wave_data, flux_data, theme, islat_class_ref):
@@ -179,42 +179,54 @@ class iSLATPlot:
         self.ax1.legend()
         self.canvas.draw_idle()
 
-    def compute_fit_line(self, wave = None, flux = None, deblend=False):
+    def compute_fit_line(self, xmin = None, xmax = None, deblend=False):
         """
-        Computes a fit line for the given wavelength and flux data.
+        Computes a fit line for the given wavelength and flux data within the specified range.
         If deblend is True, it fits two Gaussian models.
         """
-        if wave is None:
-            wave = self.selected_wave
-        if flux is None:
-            flux = self.selected_flux
+        if xmin is None or xmax is None:
+            if hasattr(self, 'current_selection') and self.current_selection:
+                xmin, xmax = self.current_selection
+            else:
+                print("No selection made for fitting.")
+                return None
+
+        fit_range = np.where(np.logical_and(self.wave_data >= xmin, self.wave_data <= xmax))  # define spectral range for the fit
+        x_fit = self.wave_data[fit_range[::-1]]  # reverse the wavelength array to use it in the fit
+        flux_fit = self.flux_data[fit_range[::-1]]  # reverse the flux array to match the wavelength array
+
         if deblend:
             g1 = GaussianModel(prefix='g1_')
             g2 = GaussianModel(prefix='g2_')
             model = g1 + g2
-            params = g1.guess(flux, x=wave) + g2.guess(flux, x=wave)
+            params = g1.guess(flux_fit, x=x_fit) + g2.guess(flux_fit, x=x_fit)
         else:
             model = GaussianModel()
-            params = model.guess(flux, x=wave)
+            params = model.guess(flux_fit, x=x_fit)
 
-        self.fit_result = model.fit(flux, params, x=wave, nan_policy='omit')
-        self.best_fit_line = self.fit_result.best_fit
+        # Perform the fit using weights (e.g., error array if available)
+        gauss_fit = model.fit(flux_fit, params, x=x_fit, nan_policy='omit')
+        print(gauss_fit.fit_report())  # print full fit report
 
-    '''def plot_fit_line(self, wave, flux, output_plot = None, label=None, color=None):
-        """
-        Plots a fit line on the given plot.
-        """
-        if output_plot is None:
-            output_plot = self.ax2
-        if label is None:
-            label = "Fit Line"
-        if color is None:
-            color = self.theme["fit_color"]
-        
-        line, = self.output_plot.plot(wave, flux, linestyle='-', color=color, alpha=0.7, label=label)
-        self.model_lines.append(line)
-        self.output_plot.legend()
-        self.canvas.draw_idle()'''
+        #fwhm = fwhm
+
+        # Extract fit parameters and calculate derived quantities
+        gauss_fwhm = gauss_fit.params['fwhm'].value / gauss_fit.params['center'].value * ccum  # FWHM in km/s
+        gauss_fwhm_err = (gauss_fit.params['fwhm'].stderr / gauss_fit.params['center'].value * ccum
+                          if gauss_fit.params['fwhm'].stderr is not None else np.nan)
+
+        sigma_freq = ccum / (gauss_fit.params['center'].value ** 2) * gauss_fit.params['sigma'].value  # sigma in frequency
+        sigma_freq_err = (ccum / (gauss_fit.params['center'].value ** 2) * gauss_fit.params['sigma'].stderr
+                          if gauss_fit.params['sigma'].stderr is not None else np.nan)
+
+        gauss_area = gauss_fit.params['height'].value * sigma_freq * np.sqrt(2 * np.pi) * 1.e-23  # line flux in erg/s/cm^2
+        gauss_area_err = (np.absolute(gauss_area * np.sqrt(
+            (gauss_fit.params['height'].stderr / gauss_fit.params['height'].value) ** 2 +
+            (sigma_freq_err / sigma_freq) ** 2))
+                          if gauss_fit.params['height'].stderr is not None else np.nan)
+
+        self.fit_result = gauss_fit, [gauss_fwhm, gauss_fwhm_err], [gauss_area, gauss_area_err], x_fit
+        return self.fit_result
 
     def onselect(self, xmin, xmax):
         self.current_selection = (xmin, xmax)
@@ -241,6 +253,11 @@ class iSLATPlot:
         self.ax2.clear()
         self.ax3.clear()
 
+        if xmin is None:
+            xmin = self.last_xmin if hasattr(self, 'last_xmin') else None
+        if xmax is None:
+            xmax = self.last_xmax if hasattr(self, 'last_xmax') else None
+
         if xmin is None or xmax is None or (xmax - xmin) < 0.0001:
             self.canvas.draw_idle()
             return
@@ -262,12 +279,13 @@ class iSLATPlot:
         else:
             max_y = np.nanmax(self.flux_data[mask])
 
-        # Plot the fit line if available
+        # Plot the fit line using the compute_fit_line function
         if self.fit_result is not None:
-            fit_wave = self.fit_result.eval(x=self.selected_wave)
-            self.ax2.plot(self.selected_wave, fit_wave, color="red", linestyle='-', label="Fit Line")
-            max_y = max(max_y, np.nanmax(fit_wave))
-            self.fit_result = None  # Reset fit result after plotting
+            fit_result, _, _, fit_wave = self.fit_result
+            if fit_result is not None:
+                self.ax2.plot(fit_wave, fit_result.eval(x=fit_wave), color="red", linestyle='-', label="Fit Line")
+                max_y = max(max_y, np.nanmax(fit_result.eval(x=fit_wave)))
+            self.fit_result = None
 
         self.ax2.set_ylim(0, max_y * 1.1)
         self.ax2.legend()

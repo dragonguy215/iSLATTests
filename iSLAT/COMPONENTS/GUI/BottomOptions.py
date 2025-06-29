@@ -44,6 +44,7 @@ class BottomOptions:
 
         self.main_plot.compute_fit_line(deblend=deblend)
         fit_result = self.main_plot.fit_result
+        self.main_plot.update_line_inspection_plot()
 
         if fit_result:
             self.data_field.insert_text(fit_result)
