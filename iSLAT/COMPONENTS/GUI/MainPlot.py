@@ -302,8 +302,17 @@ class iSLATPlot:
         if self.fit_result is not None:
             gauss_fit, fit_results, x_fit = self.fit_result
             if gauss_fit is not None:
-                self.ax2.plot(x_fit, gauss_fit.eval(x=x_fit), color="red", linestyle='-', label="Fit Line")
+                # Plot the total fit line
+                self.ax2.plot(x_fit, gauss_fit.eval(x=x_fit), color="red", linestyle='-', label="Total Fit Line")
                 max_y = max(max_y, np.nanmax(gauss_fit.eval(x=x_fit)))
+
+                # Plot individual component lines if it's a deblended fit
+                if len(fit_results) > 1:  # Check if multiple components exist
+                    for i, fit_result in enumerate(fit_results):
+                        prefix = f'g{i+1}_'
+                        component_flux = gauss_fit.eval_components(x=x_fit)[prefix]
+                        self.ax2.plot(x_fit, component_flux, linestyle='--', label=f"Component {i+1}")
+
             self.fit_result = None
 
         self.ax2.set_ylim(0, max_y * 1.1)
