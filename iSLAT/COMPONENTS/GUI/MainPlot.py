@@ -179,10 +179,10 @@ class iSLATPlot:
         self.ax1.legend()
         self.canvas.draw_idle()
 
-    def compute_fit_line(self, xmin = None, xmax = None, deblend=False):
+    def compute_fit_line(self, xmin=None, xmax=None, deblend=False):
         """
         Computes a fit line for the given wavelength and flux data within the specified range.
-        If deblend is True, it fits two Gaussian models.
+        If deblend is True, it fits multiple Gaussian models.
         """
         if xmin is None or xmax is None:
             if hasattr(self, 'current_selection') and self.current_selection:
@@ -191,41 +191,60 @@ class iSLATPlot:
                 print("No selection made for fitting.")
                 return None
 
-        fit_range = np.where(np.logical_and(self.wave_data >= xmin, self.wave_data <= xmax))  # define spectral range for the fit
-        x_fit = self.wave_data[fit_range[::-1]]  # reverse the wavelength array to use it in the fit
-        flux_fit = self.flux_data[fit_range[::-1]]  # reverse the flux array to match the wavelength array
+        fit_range = np.where((self.wave_data >= xmin) & (self.wave_data <= xmax))
+        x_fit = self.wave_data[fit_range]
+        flux_fit = self.flux_data[fit_range]
 
         if deblend:
-            g1 = GaussianModel(prefix='g1_')
-            g2 = GaussianModel(prefix='g2_')
-            model = g1 + g2
-            params = g1.guess(flux_fit, x=x_fit) + g2.guess(flux_fit, x=x_fit)
+            # Create multiple Gaussian models for deblending
+            num_lines = 2  # Example: fitting two Gaussian lines
+            models = []
+            params = []
+            for i in range(num_lines):
+                prefix = f'g{i+1}_'
+                model = GaussianModel(prefix=prefix)
+                models.append(model)
+                params.append(model.guess(flux_fit, x=x_fit))
+            combined_model = models[0]
+            for model in models[1:]:
+                combined_model += model
+            combined_params = params[0]
+            for param in params[1:]:
+                combined_params += param
         else:
-            model = GaussianModel()
-            params = model.guess(flux_fit, x=x_fit)
+            combined_model = GaussianModel()
+            combined_params = combined_model.guess(flux_fit, x=x_fit)
 
-        # Perform the fit using weights (e.g., error array if available)
-        gauss_fit = model.fit(flux_fit, params, x=x_fit, nan_policy='omit')
-        print(gauss_fit.fit_report())  # print full fit report
+        # Perform the fit
+        gauss_fit = combined_model.fit(flux_fit, combined_params, x=x_fit, nan_policy='omit')
+        print(gauss_fit.fit_report())
 
-        #fwhm = fwhm
+        # Extract fit parameters for each Gaussian component
+        fit_results = []
+        for i in range(len(models) if deblend else 1):
+            prefix = f'g{i+1}_' if deblend else ''
+            center = gauss_fit.params[f'{prefix}center'].value
+            fwhm = gauss_fit.params[f'{prefix}fwhm'].value / center * ccum
+            fwhm_err = (gauss_fit.params[f'{prefix}fwhm'].stderr / center * ccum
+                        if gauss_fit.params[f'{prefix}fwhm'].stderr is not None else np.nan)
+            sigma_freq = ccum / (center ** 2) * gauss_fit.params[f'{prefix}sigma'].value
+            sigma_freq_err = (ccum / (center ** 2) * gauss_fit.params[f'{prefix}sigma'].stderr
+                              if gauss_fit.params[f'{prefix}sigma'].stderr is not None else np.nan)
+            gauss_area = gauss_fit.params[f'{prefix}height'].value * sigma_freq * np.sqrt(2 * np.pi) * 1.e-23
+            gauss_area_err = (np.abs(gauss_area * np.sqrt(
+                (gauss_fit.params[f'{prefix}height'].stderr / gauss_fit.params[f'{prefix}height'].value) ** 2 +
+                (sigma_freq_err / sigma_freq) ** 2))
+                              if gauss_fit.params[f'{prefix}height'].stderr is not None else np.nan)
 
-        # Extract fit parameters and calculate derived quantities
-        gauss_fwhm = gauss_fit.params['fwhm'].value / gauss_fit.params['center'].value * ccum  # FWHM in km/s
-        gauss_fwhm_err = (gauss_fit.params['fwhm'].stderr / gauss_fit.params['center'].value * ccum
-                          if gauss_fit.params['fwhm'].stderr is not None else np.nan)
+            fit_results.append({
+                'center': center,
+                'fwhm': fwhm,
+                'fwhm_err': fwhm_err,
+                'gauss_area': gauss_area,
+                'gauss_area_err': gauss_area_err
+            })
 
-        sigma_freq = ccum / (gauss_fit.params['center'].value ** 2) * gauss_fit.params['sigma'].value  # sigma in frequency
-        sigma_freq_err = (ccum / (gauss_fit.params['center'].value ** 2) * gauss_fit.params['sigma'].stderr
-                          if gauss_fit.params['sigma'].stderr is not None else np.nan)
-
-        gauss_area = gauss_fit.params['height'].value * sigma_freq * np.sqrt(2 * np.pi) * 1.e-23  # line flux in erg/s/cm^2
-        gauss_area_err = (np.absolute(gauss_area * np.sqrt(
-            (gauss_fit.params['height'].stderr / gauss_fit.params['height'].value) ** 2 +
-            (sigma_freq_err / sigma_freq) ** 2))
-                          if gauss_fit.params['height'].stderr is not None else np.nan)
-
-        self.fit_result = gauss_fit, [gauss_fwhm, gauss_fwhm_err], [gauss_area, gauss_area_err], x_fit
+        self.fit_result = gauss_fit, fit_results, x_fit
         return self.fit_result
 
     def onselect(self, xmin, xmax):
@@ -281,10 +300,10 @@ class iSLATPlot:
 
         # Plot the fit line using the compute_fit_line function
         if self.fit_result is not None:
-            fit_result, _, _, fit_wave = self.fit_result
-            if fit_result is not None:
-                self.ax2.plot(fit_wave, fit_result.eval(x=fit_wave), color="red", linestyle='-', label="Fit Line")
-                max_y = max(max_y, np.nanmax(fit_result.eval(x=fit_wave)))
+            gauss_fit, fit_results, x_fit = self.fit_result
+            if gauss_fit is not None:
+                self.ax2.plot(x_fit, gauss_fit.eval(x=x_fit), color="red", linestyle='-', label="Fit Line")
+                max_y = max(max_y, np.nanmax(gauss_fit.eval(x=x_fit)))
             self.fit_result = None
 
         self.ax2.set_ylim(0, max_y * 1.1)
