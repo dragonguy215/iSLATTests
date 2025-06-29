@@ -74,5 +74,12 @@ class MoleculeWindow:
                 rad = float(props["rad_entry"].get())
                 dens = float(props["dens_entry"].get())
                 color = props["color"]
+                # actually update molecule parameters
+                m_obj = self.islat.molecules_dict[mol]
+                m_obj.temp = temp
+                m_obj.radius = rad
+                m_obj.n_mol_init = dens
+                m_obj.color = color
                 self.plot.add_model_line(mol, temp, rad, dens, color)
-        self.plot.canvas.draw_idle()
+        self.islat.update_model_spectrum()
+        self.plot.update_line_inspection_plot()
