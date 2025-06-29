@@ -277,7 +277,7 @@ class iSLAT:
         df.to_csv(file, mode='a', header=not os.path.exists(file), index=False)
         print(f"Line saved to {file}")
 
-    def fit_selected_line(self, xmin, xmax, deblend=False):
+    '''def fit_selected_line(self, xmin, xmax, deblend=False):
         x_fit = self.wave_data[(self.wave_data >= xmin) & (self.wave_data <= xmax)]
         y_fit = self.flux_data[(self.wave_data >= xmin) & (self.wave_data <= xmax)]
         err = self.err_data[(self.wave_data >= xmin) & (self.wave_data <= xmax)]
@@ -300,7 +300,7 @@ class iSLAT:
         fit_result = model.fit(y_fit, params, x=x_fit, weights=1/err, nan_policy='omit')
         print(fit_result.fit_report())
 
-        return fit_result   
+        return fit_result  ''' 
 
     def get_line_data_in_range(self, xmin, xmax):
         selected_mol = self.active_molecule

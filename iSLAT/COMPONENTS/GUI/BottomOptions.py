@@ -2,6 +2,7 @@ import numpy as np
 import tkinter as tk
 from tkinter import ttk
 from .GUIFunctions import create_button
+from lmfit.models import GaussianModel
 
 class BottomOptions:
     def __init__(self, master, islat, theme, main_plot, data_field, config):
@@ -40,11 +41,12 @@ class BottomOptions:
         if self.main_plot.selected_wave is None:
             self.data_field.insert_text("No region selected for fitting.\n")
             return
-        xmin, xmax = np.min(self.main_plot.selected_wave), np.max(self.main_plot.selected_wave)
-        result = self.islat.fit_selected_line(xmin, xmax, deblend=deblend)
-        if result:
-            self.main_plot.update_zoom_line(self.main_plot.selected_wave, self.main_plot.selected_flux, result)
-            self.data_field.insert_text(result.fit_report())
+
+        self.main_plot.compute_fit_line(deblend=deblend)
+        fit_result = self.main_plot.fit_result
+
+        if fit_result:
+            self.data_field.insert_text(fit_result)
         else:
             self.data_field.insert_text("Fit failed or insufficient data.\n")
 

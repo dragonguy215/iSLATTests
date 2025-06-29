@@ -5,6 +5,7 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.widgets import SpanSelector
 import numpy as np
+from lmfit.models import GaussianModel
 from iSLAT.ir_model import Spectrum
 from iSLAT.iSLATDefaultInputParms import dist, au, pc, ccum, hh
 
@@ -25,22 +26,6 @@ class iSLATPlot:
         self.ax2.set_title("Line inspection plot")
         self.ax3.set_title("Population diagram")
 
-        '''# Set default zoom similar to old behavior
-        wmin, wmax = np.min(self.wave_data), np.max(self.wave_data)
-        self.ax1.set_xlim(wmin, wmin + 0.25*(wmax - wmin))'''
-
-        # Set default zoom to make the wavelength_range given in the islat_class_ref
-        #self.match_wavelength_range()
-
-        # Set default zoom to the full range of the data
-        #self.ax1.set_xlim(np.min(self.wave_data), np.max(self.wave_data))
-
-        '''self.span = SpanSelector(
-            self.ax1, self.onselect, "horizontal",
-            useblit=True, interactive=True,
-            props=dict(alpha=0.5, facecolor=self.theme["selection_color"])
-        )'''
-
         self.make_span_selector()
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=parent_frame)
@@ -55,8 +40,6 @@ class iSLATPlot:
 
         self.model_lines = []
 
-        #self.plot_model_lines()  # Initial plot of model lines
-        #self.plot_data_line(self.wave_data, self.flux_data, label="Observed Spectrum", color=self.theme["foreground"])
         self.compute_sum_flux()
         self.islat.update_model_spectrum()
         self.update_population_diagram()
@@ -196,6 +179,43 @@ class iSLATPlot:
         self.ax1.legend()
         self.canvas.draw_idle()
 
+    def compute_fit_line(self, wave = None, flux = None, deblend=False):
+        """
+        Computes a fit line for the given wavelength and flux data.
+        If deblend is True, it fits two Gaussian models.
+        """
+        if wave is None:
+            wave = self.selected_wave
+        if flux is None:
+            flux = self.selected_flux
+        if deblend:
+            g1 = GaussianModel(prefix='g1_')
+            g2 = GaussianModel(prefix='g2_')
+            model = g1 + g2
+            params = g1.guess(flux, x=wave) + g2.guess(flux, x=wave)
+        else:
+            model = GaussianModel()
+            params = model.guess(flux, x=wave)
+
+        self.fit_result = model.fit(flux, params, x=wave, nan_policy='omit')
+        self.best_fit_line = self.fit_result.best_fit
+
+    '''def plot_fit_line(self, wave, flux, output_plot = None, label=None, color=None):
+        """
+        Plots a fit line on the given plot.
+        """
+        if output_plot is None:
+            output_plot = self.ax2
+        if label is None:
+            label = "Fit Line"
+        if color is None:
+            color = self.theme["fit_color"]
+        
+        line, = self.output_plot.plot(wave, flux, linestyle='-', color=color, alpha=0.7, label=label)
+        self.model_lines.append(line)
+        self.output_plot.legend()
+        self.canvas.draw_idle()'''
+
     def onselect(self, xmin, xmax):
         self.current_selection = (xmin, xmax)
         self.update_line_inspection_plot(xmin, xmax)
@@ -213,9 +233,8 @@ class iSLATPlot:
             return
 
         # Fit and update line
-        self.fit_result = self.islat.fit_selected_line(xmin, xmax)
+        #self.fit_result = self.islat.fit_selected_line(xmin, xmax)
         self.update_line_inspection_plot(xmin, xmax)
-
         self.update_population_diagram()
 
     def update_line_inspection_plot(self, xmin=None, xmax=None):
@@ -242,6 +261,13 @@ class iSLATPlot:
             max_y = np.nanmax(self.flux_data[mask])
         else:
             max_y = np.nanmax(self.flux_data[mask])
+
+        # Plot the fit line if available
+        if self.fit_result is not None:
+            fit_wave = self.fit_result.eval(x=self.selected_wave)
+            self.ax2.plot(self.selected_wave, fit_wave, color="red", linestyle='-', label="Fit Line")
+            max_y = max(max_y, np.nanmax(fit_wave))
+            self.fit_result = None  # Reset fit result after plotting
 
         self.ax2.set_ylim(0, max_y * 1.1)
         self.ax2.legend()
