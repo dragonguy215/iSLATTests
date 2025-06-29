@@ -198,30 +198,6 @@ class iSLATPlot:
         self.ax1.legend()
         self.canvas.draw_idle()
 
-    '''def draw_plot(self):
-        self.ax1.clear()
-        self.ax1.set_title("Full Spectrum")
-        self.ax1.set_ylabel("Flux")
-
-        # Plot data
-        #self.ax1.plot(self.wave_data, self.flux_data, color=self.theme["foreground"], label="Data")
-        self.plot_data_line(self.wave_data, self.flux_data, label="Observed Spectrum", color=self.theme["foreground"])
-
-        # Plot sum line
-        if hasattr(self.islat, 'sum_spectrum_flux'):
-            self.ax1.plot(self.wave_data, self.islat.sum_spectrum_flux, color="orange", label="Sum Model")
-
-        # Plot each molecule
-        for mol in self.islat.molecules_dict.values():
-            if mol.is_active:
-                flux = mol.get_flux(self.wave_data)
-                color = self.theme["default_molecule_colors"][len(self.model_lines) % len(self.theme["default_molecule_colors"])]
-                self.ax1.plot(self.wave_data, flux, color=color, alpha=0.6, lw=1)
-                self.ax1.fill_between(self.wave_data, flux, color=color, alpha=0.3, lw=0)
-
-        self.ax1.legend()
-        self.canvas.draw_idle()'''
-
     def onselect(self, xmin, xmax):
         self.current_selection = (xmin, xmax)
         self.update_line_inspection_plot(xmin, xmax)
@@ -257,31 +233,28 @@ class iSLATPlot:
         mask = (self.wave_data >= xmin) & (self.wave_data <= xmax)
         self.ax2.plot(self.wave_data[mask], self.flux_data[mask], color="black", label="Observed")
 
-        '''# Plot each the active molecule in zoom
-        active_molecule = self.islat.active_molecule
-        max_y = np.nanmax(self.flux_data[mask])
-        for mol in self.islat.molecules_dict.values():
-            if mol.is_visible:
-                flux = mol.get_flux(self.wave_data[mask])
-                self.ax2.plot(self.wave_data[mask], flux, color=mol.color, linestyle="--", label=mol.name)
-                max_y = max(max_y, np.nanmax(flux))'''
-        
         # plot the active molecule in the line inspection plot
         active_molecule = self.islat.active_molecule
         if active_molecule is not None:
-            flux = active_molecule.get_flux(self.wave_data[mask])
-            self.ax2.plot(self.wave_data[mask], flux, color=active_molecule.color, linestyle="--", label=active_molecule.name)
-            max_y = np.nanmax([np.nanmax(self.flux_data[mask]), np.nanmax(flux)])
+            wavegrid = active_molecule.spectrum.lamgrid
+            mol_mask = (wavegrid >= xmin) & (wavegrid <= xmax)
+            data = wavegrid[mol_mask]
+            flux = active_molecule.spectrum.flux_jy[mol_mask]
+            #flux = active_molecule.get_flux(self.wave_data[mask])
+            #self.ax2.plot(self.wave_data[mask], flux, color=active_molecule.color, linestyle="--", label=active_molecule.name)
+            self.ax2.plot(data, flux, color=active_molecule.color, linestyle="--", label=active_molecule.name)
+            #max_y = np.nanmax([np.nanmax(self.flux_data[mask]), np.nanmax(flux)])
+            max_y = np.nanmax(self.flux_data[mask])
         else:
             max_y = np.nanmax(self.flux_data[mask])
 
         self.ax2.set_ylim(0, max_y * 1.1)
         self.ax2.legend()
-        self.ax2.set_title("Line inspection")
+        self.ax2.set_title("Line inspection plot")
         self.ax2.set_xlabel("Wavelength (μm)")
         self.ax2.set_ylabel("Flux (Jy)")
 
-        # Populate population diagram
+        """# Populate population diagram
         line_data = self.islat.get_line_data_in_range(xmin, xmax)
         if line_data:
             lambs, intens, eups, a_steins, g_ups = line_data
@@ -291,10 +264,10 @@ class iSLATPlot:
             F = intens * beam_s
             freq = ccum / lambs
             y_axis = np.log(4 * np.pi * F / (a_steins * hh * freq * g_ups))
-            self.ax3.scatter(eups, y_axis, color="green", edgecolors="black")
+            '''self.ax3.scatter(eups, y_axis, color="green", edgecolors="black")
             self.ax3.set_title("Population diagram")
             self.ax3.set_xlabel("$E_u$ (K)")
-            self.ax3.set_ylabel(r"ln($N_u$/$g_u$)")
+            self.ax3.set_ylabel(r"ln($N_u$/$g_u$)")'''"""
 
         self.canvas.draw_idle()
 
