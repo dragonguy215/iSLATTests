@@ -5,7 +5,7 @@ from iSLAT.ir_model.constants import constants as c
 import numpy as np
 
 class Molecule:
-    def __init__(self, name, displaylabel, filepath, initial_molecule_parameters, intrinsic_line_width, model_pixel_res, model_line_width, distance, temp = None, n_mol= None, radius= None, wavelength_range=(None, None)):
+    def __init__(self, name, displaylabel, filepath, initial_molecule_parameters, intrinsic_line_width, model_pixel_res, model_line_width, distance, is_active, wavelength_range, temp = None, n_mol= None, radius= None):
         """Initialize a molecule with its parameters.
 
         Parameters
@@ -24,7 +24,7 @@ class Molecule:
         self.name = name
         self.displaylabel = displaylabel
         self.filepath = filepath
-        
+
         self.t_kin = initial_molecule_parameters.get('t_kin', temp)  # Kinetic temperature in Kelvin
         self.scale_exponent = initial_molecule_parameters.get('scale_exponent', 1.0)  # Scaling exponent for the intensity
         self.scale_number = initial_molecule_parameters.get('scale_number', 1.0)  # Scaling number for the intensity
@@ -32,14 +32,18 @@ class Molecule:
 
         self.temp = temp
         self.radius = radius
-        self.n_mol = n_mol if n_mol is not None else float(self.scale_number * (10**self.scale_exponent))  # Number density in cm^-3
+        #self.n_mol = n_mol if n_mol is not None else float(self.scale_number * (10**self.scale_exponent))  # Number density in cm^-3
+        self.n_mol = n_mol
+        self.n_mol_init = float(self.scale_number * (10**self.scale_exponent))
         #self.line_color = line_color
+        self.is_active = is_active
 
         self.intrinsic_line_width = intrinsic_line_width
         self.model_pixel_res = model_pixel_res  # Pixel resolution for the model spectrum
         self.model_line_width = model_line_width  # Line width for the model spectrum
         self.distance = distance
-        self.wavelength_range = wavelength_range if wavelength_range is not ((None, None) or None) else (0.3, 1000)
+        self.wavelength_range = wavelength_range #if wavelength_range is not ((None, None) or None) else (0.3, 1000)
+        #print("Wavelength range:", self.wavelength_range)
         
         self.mol_data = MolData(name, filepath)  # Load molecule data from file
         

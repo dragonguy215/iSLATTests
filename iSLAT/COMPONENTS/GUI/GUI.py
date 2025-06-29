@@ -52,7 +52,7 @@ class GUI:
 
         # Molecule table
         self.molecule_table = MoleculeWindow("Molecule Table", parent, self.molecule_data, self.plot, self.config, self.islat_class)
-        self.molecule_table.table_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.molecule_table.frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Main data field
         self.data_field = DataField("Main Data Field", "", parent)

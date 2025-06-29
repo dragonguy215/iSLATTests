@@ -6,7 +6,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.widgets import SpanSelector
 import numpy as np
 from iSLAT.ir_model import Spectrum
-from iSLAT.iSLATDefaultInputParms import model_pixel_res, dist, intrinsic_line_width, model_line_width
+from iSLAT.iSLATDefaultInputParms import dist, au, pc, ccum, hh
 
 class iSLATPlot:
     def __init__(self, parent_frame, wave_data, flux_data, theme, islat_class_ref):
@@ -62,12 +62,14 @@ class iSLATPlot:
         Adds a model spectrum line for given molecule parameters to the main plot.
         Assumes the islat.molecules dict has the MolData instances for calc.
         """
-        mol_obj = self.islat.molecules[mol_name]
+        molecule_obj = self.islat.molecules_dict[mol_name]
         #model_flux = mol_obj.calculate_spectrum(temp, radius, density, self.wave_data)  # Ensure the method name matches the actual implementation in MolData
-        model_flux = Spectrum(lam_min=self.wave_data[0], lam_max=self.wave_data[-1], dlambda=model_pixel_res, R=model_line_width, distance=dist).flux_jy
+        #model_flux = Spectrum(lam_min=self.wave_data[0], lam_max=self.wave_data[-1], dlambda=model_pixel_res, R=model_line_width, distance=dist).flux_jy
         #(self, lam_min=None, lam_max=None, dlambda=None, R=None, distance=None):
+        model_flux = molecule_obj.spectrum.flux_jy
 
-        line, = self.ax1.plot(self.wave_data, model_flux, linestyle='-', color=color, alpha=0.7, label=f"{mol_name}")
+        #line, = self.ax1.plot(self.wave_data, model_flux, linestyle='-', color=color, alpha=0.7, label=f"{mol_name}")
+        line, = self.ax1.plot(molecule_obj.spectrum.lamgrid, model_flux, linestyle='-', color=color, alpha=0.7, label=f"{mol_name}")
         self.model_lines.append(line)
         self.ax1.legend()
         self.canvas.draw_idle()
@@ -90,9 +92,10 @@ class iSLATPlot:
         self.update_zoom_line(self.selected_wave, self.selected_flux, self.fit_result)
 
         # Try population diagram
-        e, p = self.islat.generate_population_diagram()
+        '''e, p = self.islat.generate_population_diagram()
         if e is not None:
-            self.update_population_diagram(e, p)
+            self.update_population_diagram(e, p)'''
+        self.update_population_diagram()
 
     def update_zoom_line(self, wave, flux, fit_result=None):
         self.ax2.clear()
@@ -111,37 +114,44 @@ class iSLATPlot:
         self.ax2.set_title("Line inspection plot")
         self.canvas.draw_idle()
 
-    def update_population_diagram(self, energy_levels, populations):
+    def update_population_diagram(self):
         self.ax3.clear()
-        self.ax3.set_title("Population diagram")
-        self.ax3.set_xlabel("E_upper (K)")
-        self.ax3.set_ylabel("ln(Nu/gu)")
+        self.ax3.set_ylabel(r'ln(4πF/(hν$A_{u}$$g_{u}$))')
+        self.ax3.set_xlabel(r'$E_{u}$ (K)')
+        self.ax3.set_title('Population diagram', fontsize='medium')
 
-        # Filtering and plotting isolated points similar to single_finder logic
-        specsep = self.islat.user_settings["specsep"]
-        threshold = self.islat.user_settings["line_threshold"]
+        #molecule_obj = self.islat.molecules_dict[mol_name]
+        #print("Whats good, here is the molecules dict:")
+        #print(self.islat.molecules_dict)
+        molecule_obj = self.islat.molecules_dict["H2O"]
+        #print("And here is the molecule object:")
+        #print(molecule_obj)
+        int_pars = molecule_obj.intensity.get_table
+        #print("Hey man heres that table you wanted:")
+        #print(int_pars)
+        int_pars.index = range(len(int_pars.index))
 
-        counter = 0
-        for i, energy in enumerate(energy_levels):
-            include = True
-            sub_xmin = energy - specsep
-            sub_xmax = energy + specsep
-            population = populations[i]
-            loc_threshold = population * threshold
+        # Parsing the components of the lines in int_pars
+        wl = int_pars['lam']
+        intens_mod = int_pars['intens']
+        Astein_mod = int_pars['a_stein']
+        gu = int_pars['g_up']
+        eu = int_pars['e_up']
 
-            for j, other_energy in enumerate(energy_levels):
-                if sub_xmin <= other_energy <= sub_xmax and i != j:
-                    if populations[j] >= loc_threshold:
-                        include = False
-                        break
+        # Calculating the y-axis for the population diagram for each line in int_pars
+        area = np.pi * (molecule_obj.radius * au * 1e2) ** 2  # In cm^2
+        Dist = dist * pc
+        beam_s = area / Dist ** 2
+        F = intens_mod * beam_s
+        freq = ccum / wl
+        rd_yax = np.log(4 * np.pi * F / (Astein_mod * hh * freq * gu))
+        threshold = np.nanmax(F) / 100
 
-            if include:
-                self.ax3.scatter(energy, population, color="blue", label="Isolated Point" if counter == 0 else "")
-                counter += 1
+        self.ax3.set_ylim(np.nanmin(rd_yax[F > threshold]), np.nanmax(rd_yax) + 0.5)
+        self.ax3.set_xlim(np.nanmin(eu) - 50, np.nanmax(eu[F > threshold]))
 
-        if counter > 0:
-            self.ax3.legend()
-
+        # Populating the population diagram graph with the lines
+        self.ax3.scatter(eu, rd_yax, s=0.5, color='#838B8B')
         self.canvas.draw_idle()
 
     def toggle_legend(self):

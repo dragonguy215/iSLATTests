@@ -29,7 +29,7 @@ from .intensity import Intensity
 
 class Spectrum:
 
-    debug_printed = False
+    debug_printed = True
     def __init__(self, lam_min=None, lam_max=None, dlambda=None, R=None, distance=None):
         """Initialize a spectrum class and prepare it to add intensity components
 

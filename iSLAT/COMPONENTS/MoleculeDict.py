@@ -20,10 +20,16 @@ class MoleculeDict(dict):
             displaylabel=mol_entry["label"],
             initial_molecule_parameters=self.initial_molecule_parameters.get(mol_name, {}),
             wavelength_range = wavelength_range,
-            intrinsic_line_width=self.save_file_data.get(mol_name, "Broad"),
+            intrinsic_line_width=self.save_file_data[mol_name]["Broad"],
+            #intrinsic_line_width=self.save_file_data.get(mol_name, "Broad"),
             model_pixel_res=model_pixel_res,
             model_line_width=model_line_width,
-            distance=dist
+            
+            distance = self.save_file_data.get(mol_name, {}).get("Dist", dist),
+            radius = self.save_file_data.get(mol_name, {}).get("Rad", None),
+            temp = self.save_file_data.get(mol_name, {}).get("Temp", None),
+            n_mol = self.save_file_data.get(mol_name, {}).get("N_Mol", None),
+            is_active=self.save_file_data.get(mol_name, {}).get("Vis", True)
         )
 
         # Store the molecule in the dictionary
@@ -36,5 +42,13 @@ class MoleculeDict(dict):
         """Load multiple molecules data into the dictionary."""
         self.initial_molecule_parameters = initial_molecule_parameters
         self.save_file_data = save_file_data
+        #print("Hey homie wavelength range is :", wavelength_range)
         for mol_entry in molecules_data:
-            self.add_molecule(mol_entry, wavelength_range, intrinsic_line_width, model_pixel_res, model_line_width, dist)
+            self.add_molecule(
+                mol_entry,
+                intrinsic_line_width=intrinsic_line_width,
+                wavelength_range=wavelength_range,
+                model_pixel_res=model_pixel_res,
+                model_line_width=model_line_width,
+                dist=dist
+            )

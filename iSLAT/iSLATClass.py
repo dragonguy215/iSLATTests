@@ -52,7 +52,7 @@ class iSLAT:
         self.basem = ["H2", "H2", "H2O", "H2O", "CO2", "CO2", "CO", "CO", "CO", "CH4", "HCN", "HCN", "NH3", "OH", "C2H2", "C2H2", "C2H4", "C4H2", "C2H6", "HC3N"]
         self.isot = [1, 2, 1, 2, 1, 2, 1, 2, 3, 1, 1, 2, 1, 1, 1, 2, 1, 1, 1, 1]
 
-        self.wave_range = (0.3, 1000)
+        self.wave_range = wavelength_range
 
         self.min_vu = 1 / (self.wave_range[0] / 1E6) / 100.
         self.max_vu = 1 / (self.wave_range[1] / 1E6) / 100.
@@ -212,7 +212,8 @@ class iSLAT:
         if os.path.exists(save_file):
             try:
                 df = pd.read_csv(save_file)
-                self.savedata = df.to_dict(orient='records')
+                self.savedata = {row['Molecule Name']: {col: row[col] for col in df.columns if col != 'Molecule Name'} for _, row in df.iterrows()}
+                #print("self.savedata:", self.savedata)
             except Exception as e:
                 print(f"Error reading save file: {e}")
                 self.savedata = []
@@ -273,16 +274,9 @@ class iSLAT:
 
         if file_path:
             df = pd.read_csv(file_path)
-            self.wave_data = df['wave'].values
-            self.flux_data = df['flux'].values
-            lam_min = np.min(self.wave_data)
-            lam_max = np.max(self.wave_data)
-            self.input_spectrum = Spectrum(
-                lam_min = lam_min,
-                lam_max = lam_max,
-                dlambda= (lam_max - lam_min) / len(self.wave_data),
-                R= 1 / (lam_min / 1E6) / 100.,  # Convert to cm-1
-            )
+            self.wave_data = np.array(df['wave'].values)
+            self.wave_data_original = self.wave_data.copy()
+            self.flux_data = np.array(df['flux'].values)
             print(f"Loaded spectrum from {file_path}")
         else:
             print("No file selected.")
