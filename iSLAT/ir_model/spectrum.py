@@ -29,7 +29,7 @@ from .intensity import Intensity
 
 class Spectrum:
 
-    debug_printed = True
+    debug_printed = False
     def __init__(self, lam_min=None, lam_max=None, dlambda=None, R=None, distance=None):
         """Initialize a spectrum class and prepare it to add intensity components
 
@@ -82,6 +82,8 @@ class Spectrum:
             Area of the component in au**2
         """
 
+        #debug_printed = Spectrum.debug_printed
+
         # 0. make sure to invalidate the flux field, so that the intensity list and returned spectrum are consistent
         self._flux = None
 
@@ -93,9 +95,18 @@ class Spectrum:
         select_border = 100 * self._lam_max / self._R
         lines_selected = np.where(np.logical_and(lam_all > self._lam_min - select_border,
                                                  lam_all < self._lam_max + select_border))[0]
+        '''if not debug_printed:
+            print("Hey pookie, here are the lines that were selected:")
+            print(lines_selected)
+            print("And here are the intensities that were selected:")
+            print(I_all[lines_selected])'''
+
 
         # 3. scale for area in au**2
         I_scaled = dA * I_all[lines_selected]
+        '''if not debug_printed:
+            print("And here are the scaled intensities that were calculated:")
+            print(I_scaled)'''
 
         # 4. append to list
         self._I_list = np.hstack((self._I_list, I_scaled))
@@ -117,6 +128,20 @@ class Spectrum:
 
         debug_printed = Spectrum.debug_printed
 
+        '''if not debug_printed:
+            I_all = intensity.intensity
+            lines_selected = np.where(np.logical_and(lam_all > self._lam_min - select_border,
+                                                 lam_all < self._lam_max + select_border))[0]
+            print("Before we get to the flux calculation, lets check some parameters my dude:")
+            print("Hey pookie, here are the lines that were selected:")
+            print(lines_selected)
+            print("And here are the intensities that were selected:")
+            print(I_all[lines_selected])
+        
+        if not debug_printed:
+            print("And here are the scaled intensities that were calculated:")
+            print(I_scaled)'''
+
         if not debug_printed:
             print("Hey man! Here are the parameters of the spectrum right now:")
             print(f"  - lam_min: {self._lam_min}")
@@ -127,6 +152,9 @@ class Spectrum:
             print("And here are the components that were added:")
             for comp in self._components:
                 print(f"  - {comp['name']} (t_kin: {comp['t_kin']}, n_mol: {comp['n_mol']}, dv: {comp['dv']}, area: {comp['area']})")
+            print("And here are the intensities and wavelengths that were added:")
+            print(f"  - self._I_list: {self._I_list}")
+            print(f"  - self._lam_list: {self._lam_list}")
             print("Now let's calculate the flux...")
 
         # 1. summarize intensities at the (exactly) same wavelength, this improves performance, as only

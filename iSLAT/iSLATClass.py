@@ -102,52 +102,6 @@ class iSLAT:
                                            model_line_width = model_line_width,
                                            dist = dist)
 
-        '''for mol_entry in molecules_data:
-            mol_name = mol_entry["name"]
-            mol_filepath = mol_entry["file"]
-            mol_label = mol_entry["label"]
-            mol_name_lower = mol_name.lower()
-
-            # Load the molecule line data
-            mol_data = MolData(mol_name, mol_filepath)
-
-            # Get precomputed parameters
-            params = self.initial_molecule_parameters[mol_name]
-            scale_exponent = params["scale_exponent"]
-            scale_number = params["scale_number"]
-            t_kin = params["t_kin"]
-            radius_init = params["radius_init"]
-            n_mol_init = float(scale_number * (10 ** scale_exponent))
-
-            # Intensity calculation
-            mol_data.calc_intensity(t_kin, n_mol_init, dv=intrinsic_line_width)
-
-            # Spectrum creation
-            mol_spectrum = Spectrum(
-                lam_min=self.wave_range[0],
-                lam_max=self.wave_range[1],
-                dlambda=model_pixel_res,
-                R=model_line_width,
-                distance=dist
-            )
-
-            # Adding intensity to the spectrum
-            mol_spectrum.add_intensity(mol_data.intensity, radius_init ** 2 * np.pi)
-
-            # Store in structured dicts
-            self.molecules[mol_name] = mol_spectrum
-            self.initial_values[mol_name] = {
-                "scale_exponent": scale_exponent,
-                "scale_number": scale_number,
-                "t_kin": t_kin,
-                "radius_init": radius_init,
-                "n_mol_init": n_mol_init,
-                "fluxes": mol_spectrum.flux_jy,
-                "lambdas": mol_spectrum.lamgrid
-            }
-
-            print(f"Molecule Initialized: {mol_name}")'''
-
     def run(self):
         """
         Run the iSLAT application.
@@ -280,52 +234,6 @@ class iSLAT:
             print(f"Loaded spectrum from {file_path}")
         else:
             print("No file selected.")
-    
-    '''def generate_population_diagram(self):
-        if not hasattr(self, 'selected_lines') or not self.selected_lines:
-            print("No selected lines to build population diagram.")
-            return None, None
-
-        energies = []
-        pops = []
-        dist_pc = self.user_settings.get("distance_pc", 140)
-        dist_cm = dist_pc * 3.086e18  # parsec to cm
-
-        for wave in self.selected_lines:
-            for mol_name, mol in self.molecules.items():
-                try:
-                    int_pars = mol.intensity.get_table()
-                except AttributeError:
-                    continue
-
-                # Find closest line in wavelength
-                idx_closest = (np.abs(int_pars['lam'] - wave)).idxmin()
-                line_data = int_pars.iloc[idx_closest]
-
-                # Extract required parameters
-                e_up = line_data['e_up']
-                g_u = line_data['g_up']
-                a_stein = line_data['a_stein']
-                lam = line_data['lam']
-                freq = 3e10 / lam  # Convert wavelength to frequency in cm/s
-                radius_au = self.initial_values[mol_name]["radius_init"]
-                area_cm2 = np.pi * (radius_au * 1.496e13)**2
-                F = line_data.get('intens', 1) * area_cm2 / (dist_cm**2)
-
-                try:
-                    pop_val = np.log(4 * np.pi * F / (a_stein * 6.626e-27 * freq * g_u))
-                    energies.append(e_up)
-                    pops.append(pop_val)
-                except (ValueError, ZeroDivisionError):
-                    continue
-
-        # Sort energies and populations for plotting
-        if energies and pops:
-            sorted_indices = np.argsort(energies)
-            energies = np.array(energies)[sorted_indices]
-            pops = np.array(pops)[sorted_indices]
-
-        return energies, pops'''
     
     def run_single_slab_fit(self):
         loader = DataLoader(self.molecules_data_default)

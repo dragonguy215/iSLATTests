@@ -50,6 +50,8 @@ class iSLATPlot:
 
         self.model_lines = []
 
+        self.update_population_diagram()
+
     def clear_model_lines(self):
         # remove previously plotted lines
         for line in self.model_lines:
@@ -68,8 +70,19 @@ class iSLATPlot:
         #(self, lam_min=None, lam_max=None, dlambda=None, R=None, distance=None):
         model_flux = molecule_obj.spectrum.flux_jy
 
+        if molecule_obj.name == "H2O":
+            print("hey bro, here are the current values for h20:")
+            print(f"temp: {molecule_obj.temp}, radius: {molecule_obj.radius}")
+            print(f"n_mol: {molecule_obj.n_mol}, scale_exponent: {molecule_obj.scale_exponent}, scale_number: {molecule_obj.scale_number}")
+            print(f"t_kin: {molecule_obj.t_kin}, intrinsic_line_width: {molecule_obj.intrinsic_line_width}, model_pixel_res: {molecule_obj.model_pixel_res}")
+            print(f"model_line_width: {molecule_obj.model_line_width}, distance: {molecule_obj.distance}, wavelength_range: {molecule_obj.wavelength_range}")
+
         #line, = self.ax1.plot(self.wave_data, model_flux, linestyle='-', color=color, alpha=0.7, label=f"{mol_name}")
         line, = self.ax1.plot(molecule_obj.spectrum.lamgrid, model_flux, linestyle='-', color=color, alpha=0.7, label=f"{mol_name}")
+        print("Here is the lamgrid for the model line:")
+        print(molecule_obj.spectrum.lamgrid)
+        print("And here is the model flux:")
+        print(model_flux)
         self.model_lines.append(line)
         self.ax1.legend()
         self.canvas.draw_idle()

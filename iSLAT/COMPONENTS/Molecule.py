@@ -45,6 +45,7 @@ class Molecule:
         self.wavelength_range = wavelength_range #if wavelength_range is not ((None, None) or None) else (0.3, 1000)
         #print("Wavelength range:", self.wavelength_range)
         
+        print("Here is the file path for the molecule data:", filepath)
         self.mol_data = MolData(name, filepath)  # Load molecule data from file
         
         self.intensity = Intensity(self.mol_data)
@@ -69,5 +70,4 @@ class Molecule:
             t_kin=self.t_kin,
             n_mol=self.n_mol,
             dv=self.intrinsic_line_width
-            #method='default'
         )
