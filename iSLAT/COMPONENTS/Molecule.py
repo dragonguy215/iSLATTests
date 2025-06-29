@@ -5,7 +5,7 @@ from iSLAT.ir_model.constants import constants as c
 import numpy as np
 
 class Molecule:
-    def __init__(self, name, displaylabel, filepath, initial_molecule_parameters, intrinsic_line_width, model_pixel_res, model_line_width, distance, is_visible, wavelength_range, color, temp = None, n_mol= None, radius= None):
+    def __init__(self, name, intrinsic_line_width, model_pixel_res, model_line_width, distance, wavelength_range, hitran_data, is_visible = True, color= None, displaylabel= None, filepath= None, initial_molecule_parameters = None, temp = None, n_mol= None, radius= None):
         """Initialize a molecule with its parameters.
 
         Parameters
@@ -22,19 +22,26 @@ class Molecule:
             Area scaling factor for the intensity component
         """
         self.name = name
-        self.displaylabel = displaylabel
+        #self.displaylabel = displaylabel
+        self.displaylabel = displaylabel if displaylabel is not None else name  # Display label for the molecule
         self.filepath = filepath
         self.color = color
+
+        self.mol_data = MolData(name, filepath)  # Load molecule data from file
+
+        self.hitran_data = hitran_data
+
+        print("Initial parameters for molecule:", initial_molecule_parameters)
 
         self.t_kin = initial_molecule_parameters.get('t_kin', temp)  # Kinetic temperature in Kelvin
         self.scale_exponent = initial_molecule_parameters.get('scale_exponent', 1.0)  # Scaling exponent for the intensity
         self.scale_number = initial_molecule_parameters.get('scale_number', 1.0)  # Scaling number for the intensity
         self.radius_init = initial_molecule_parameters.get('radius_init', radius)  # Initial radius
 
-        self.temp = temp
-        self.radius = radius
-        self.n_mol = n_mol
+        self.temp = temp if temp is not None else self.t_kin  # Kinetic temperature in Kelvin
+        self.radius = radius if radius is not None else self.radius_init  # Radius of the molecule
         self.n_mol_init = float(self.scale_number * (10**self.scale_exponent))
+        self.n_mol = n_mol if n_mol is not None else self.n_mol_init
         self.is_visible = is_visible
 
         self.intrinsic_line_width = intrinsic_line_width
@@ -42,8 +49,6 @@ class Molecule:
         self.model_line_width = model_line_width  # Line width for the model spectrum
         self.distance = distance
         self.wavelength_range = wavelength_range #if wavelength_range is not ((None, None) or None) else (0.3, 1000)
-        
-        self.mol_data = MolData(name, filepath)  # Load molecule data from file
         
         self.intensity = Intensity(self.mol_data)
         self.calculate_intensity()

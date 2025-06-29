@@ -34,11 +34,17 @@ class ControlPanel:
         self.molecule_var = tk.StringVar(self.frame)
         self.molecule_var.set(dropdown_options[0])  # Default to the first option
 
-        dropdown = ttk.Combobox(self.frame, textvariable=self.molecule_var, values=dropdown_options)
-        dropdown.grid(row=row, column=column + 1, padx=5, pady=5)
+        self.dropdown = ttk.Combobox(self.frame, textvariable=self.molecule_var, values=dropdown_options)
+        self.dropdown.grid(row=row, column=column + 1, padx=5, pady=5)
 
         # Update self.islat.active_molecule when a new molecule is selected
-        dropdown.bind("<<ComboboxSelected>>", lambda event: setattr(self.islat, 'active_molecule', self.molecule_var.get()))
+        self.dropdown.bind("<<ComboboxSelected>>", lambda event: setattr(self.islat, 'active_molecule', self.molecule_var.get()))
+
+    def reload_molecule_dropdown(self):
+        dropdown_options = list(self.islat.molecules_dict.keys()) + ["SUM", "ALL"]
+        self.dropdown['values'] = dropdown_options
+        if self.molecule_var.get() not in dropdown_options:
+            self.molecule_var.set(dropdown_options[0])
 
     def create_entry(self, label_text, row, column, attribute_name, callback):
         label = tk.Label(self.frame, text=label_text)

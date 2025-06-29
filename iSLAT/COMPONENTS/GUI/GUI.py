@@ -34,7 +34,7 @@ class GUI:
         file_frame.pack(fill="x", padx=5, pady=5)
         self.file_label = tk.Label(file_frame, text="Loaded: File")
         self.file_label.pack()
-        tk.Button(file_frame, text="Load Spectrum", command=self.load_spectrum_file).pack()
+        tk.Button(file_frame, text="Load Spectrum", command=self.islat_class.load_spectrum).pack()
 
         # Control panel for input parameters
         control_panel_frame = tk.LabelFrame(parent, text="Control Panel")
@@ -71,7 +71,7 @@ class GUI:
         self.create_window()
         self.window.mainloop()
 
-    def load_spectrum_file(self):
+    '''def load_spectrum_file(self):
         file_path = filedialog.askopenfilename(title="Select spectrum CSV")
         if file_path:
             self.islat_class.load_spectrum(file_path)
@@ -80,4 +80,4 @@ class GUI:
             self.plot.flux_data = self.islat_class.flux_data
             self.plot.ax1.clear()
             self.plot.ax1.plot(self.plot.wave_data, self.plot.flux_data, color=self.theme["foreground"])
-            self.plot.canvas.draw_idle()
+            self.plot.canvas.draw_idle()'''

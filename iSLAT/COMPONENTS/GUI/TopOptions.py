@@ -33,7 +33,7 @@ class TopOptions:
         print("Default molecules loaded")
 
     def add_molecule(self):
-        print("Heyyy")
+        self.islat.load_HITRAN_data()
 
     def save_parameters(self):
         print("Save parameters to file")

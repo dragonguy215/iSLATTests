@@ -23,6 +23,8 @@ class MoleculeWindow:
         for col, text in enumerate(headers):
             tk.Label(self.frame, text=text).grid(row=0, column=col)
 
+    def update_table(self):
+        print("finna gonna reload table")
         for i, mol_name in enumerate(self.molecules_dict.keys()):
             mol_data = self.molecules_dict[mol_name]
 
@@ -45,19 +47,18 @@ class MoleculeWindow:
             on_btn = tk.Checkbutton(self.frame, variable=on_var, command=self.update_lines)
             on_btn.grid(row=i+1, column=4)
 
-            color = self.theme["default_molecule_colors"][i]
+            color = self.theme["default_molecule_colors"][i % len(self.theme["default_molecule_colors"])] 
             color_btn = tk.Button(self.frame, bg=color, width=4, command=lambda m=mol_name: self.pick_color(m))
             color_btn.grid(row=i+1, column=5)
 
             self.molecules[mol_name] = {
-            "temp_entry": temp_entry,
-            "rad_entry": rad_entry,
-            "dens_entry": dens_entry,
-            "on_var": on_var,
-            "color": color
+                "temp_entry": temp_entry,
+                "rad_entry": rad_entry,
+                "dens_entry": dens_entry,
+                "on_var": on_var,
+                "color": color
             }
 
-        # initially draw
         self.update_lines()
 
     def pick_color(self, mol_name):

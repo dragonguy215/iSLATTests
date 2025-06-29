@@ -121,16 +121,16 @@ def read_HITRAN_data(file_path):
     Returns the contents as a list of lines (or processes to DataFrame if needed).
     """
     if not os.path.exists(file_path):
-        print(f"HITRAN file '{file_path}' does not exist.")
+        #print(f"HITRAN file '{file_path}' does not exist.")
         return []
 
     try:
         with open(file_path, 'r') as f:
             lines = f.readlines()
-        print(f"Successfully read HITRAN data from {file_path}")
+        #print(f"Successfully read HITRAN data from {file_path}")
         return lines
     except Exception as e:
-        print(f"Failed to read HITRAN file '{file_path}': {e}")
+        #print(f"Failed to read HITRAN file '{file_path}': {e}")
         return []
 
 def read_line_saves(file_path=save_folder_path, file_name=line_saves_file_name):

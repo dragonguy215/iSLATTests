@@ -7,7 +7,7 @@ class MoleculeDict(dict):
         super().__init__(*args, **kwargs)
         self.fluxes = {}
 
-    def add_molecule(self, mol_entry, intrinsic_line_width, wavelength_range, model_pixel_res, model_line_width, dist):
+    def add_molecule(self, mol_entry, intrinsic_line_width, wavelength_range, model_pixel_res, model_line_width, distance, hitran_data):
         """Add a new molecule to the dictionary using molecule entry data."""
         mol_name = mol_entry["name"]
 
@@ -24,11 +24,13 @@ class MoleculeDict(dict):
             model_pixel_res=model_pixel_res,
             model_line_width=model_line_width,
             
-            distance = self.save_file_data.get(mol_name, {}).get("Dist", dist),
+            distance = self.save_file_data.get(mol_name, {}).get("Dist", distance),
             radius = self.save_file_data.get(mol_name, {}).get("Rad", None),
             temp = self.save_file_data.get(mol_name, {}).get("Temp", None),
             n_mol = self.save_file_data.get(mol_name, {}).get("N_Mol", None),
-            is_visible=self.save_file_data.get(mol_name, {}).get("Vis", True)
+            is_visible=self.save_file_data.get(mol_name, {}).get("Vis", True),
+
+            hitran_data=hitran_data
         )
 
         # Store the molecule in the dictionary
@@ -37,7 +39,19 @@ class MoleculeDict(dict):
         print(f"Molecule Initialized: {mol_name}")
         return molecule
 
-    def load_molecules_data(self, molecules_data, initial_molecule_parameters, save_file_data, wavelength_range, intrinsic_line_width, model_pixel_res, model_line_width, dist):
+    def add_molecules(self, *molecules):
+        """Add multiple molecules to the dictionary."""
+        print("Here is what I got chief:")
+        print(molecules)
+        for mol in molecules:
+            print("Here is the current mol:", mol[0])
+            if isinstance(mol[0], Molecule):
+                print("Adding molecule:", mol[0])
+                self[mol[0].name] = mol[0]
+            else:
+                raise TypeError("Expected a Molecule instance.")
+
+    def load_molecules_data(self, molecules_data, initial_molecule_parameters, save_file_data, wavelength_range, intrinsic_line_width, model_pixel_res, model_line_width, distance, hitran_data):
         """Load multiple molecules data into the dictionary."""
         self.initial_molecule_parameters = initial_molecule_parameters
         self.save_file_data = save_file_data
@@ -48,5 +62,6 @@ class MoleculeDict(dict):
                 wavelength_range=wavelength_range,
                 model_pixel_res=model_pixel_res,
                 model_line_width=model_line_width,
-                dist=dist
+                distance=distance,
+                hitran_data = hitran_data[mol_entry["name"]] if mol_entry["name"] in hitran_data else None
             )
