@@ -78,6 +78,8 @@ class iSLATPlot:
                 fig_bottom_height = np.nanmin(range_flux_cnts)
             self.ax1.set_ylim(ymin=fig_bottom_height, ymax=fig_height + (fig_height / 8))
 
+            self.canvas.draw_idle()
+
     def make_span_selector(self):
         """
         Creates a SpanSelector for the main plot to select a region for line inspection.
@@ -120,14 +122,10 @@ class iSLATPlot:
         self.ax1.plot(self.wave_data, self.flux_data, color=self.theme["foreground"], label="Data")
 
         # plot each molecule if it is turned on
-        #self.compute_sum_flux()  # Compute the summed flux using the existing function
-
         for mol_name, molecule_obj in self.islat.molecules_dict.items():
             if molecule_obj.is_visible:
                 #model_flux = molecule_obj.get_flux(self.wave_data)
                 self.ax1.fill_between(
-                    #molecule_obj.spectrum.lamgrid, 
-                    #self.summed_flux,  # Use the computed summed flux
                     molecule_obj.spectrum.lamgrid,
                     molecule_obj.spectrum.flux_jy,
                     color=molecule_obj.color, 
@@ -216,7 +214,6 @@ class iSLATPlot:
 
         # Fit and update line
         self.fit_result = self.islat.fit_selected_line(xmin, xmax)
-        #self.update_line_inspection_plot(self.selected_wave, self.selected_flux, self.fit_result)
         self.update_line_inspection_plot(xmin, xmax)
 
         self.update_population_diagram()
@@ -240,8 +237,6 @@ class iSLATPlot:
             mol_mask = (wavegrid >= xmin) & (wavegrid <= xmax)
             data = wavegrid[mol_mask]
             flux = active_molecule.spectrum.flux_jy[mol_mask]
-            #flux = active_molecule.get_flux(self.wave_data[mask])
-            #self.ax2.plot(self.wave_data[mask], flux, color=active_molecule.color, linestyle="--", label=active_molecule.name)
             self.ax2.plot(data, flux, color=active_molecule.color, linestyle="--", label=active_molecule.name)
             #max_y = np.nanmax([np.nanmax(self.flux_data[mask]), np.nanmax(flux)])
             max_y = np.nanmax(self.flux_data[mask])

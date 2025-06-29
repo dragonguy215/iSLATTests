@@ -53,7 +53,7 @@ class iSLAT:
         self.isot = [1, 2, 1, 2, 1, 2, 1, 2, 3, 1, 1, 2, 1, 1, 1, 2, 1, 1, 1, 1]
 
         self.wavelength_range = wavelength_range
-        self.display_range = (23.52, 25.41)
+        self._display_range = (23.52, 25.41)
 
         self.min_vu = 1 / (self.wavelength_range[0] / 1E6) / 100.
         self.max_vu = 1 / (self.wavelength_range[1] / 1E6) / 100.
@@ -343,3 +343,21 @@ class iSLAT:
 
         except (ValueError, TypeError) as e:
             print(f"Error setting active molecule: {e}")
+        
+    @property
+    def display_range(self):
+        """tuple: Display range for the spectrum plot."""
+        return self._display_range
+    
+    @display_range.setter
+    def display_range(self, value):
+        """
+        Sets the display range for the spectrum plot.
+        The value should be a tuple of two floats representing the start and end wavelengths.
+        """
+        if isinstance(value, tuple) and len(value) == 2:
+            self._display_range = value
+            if hasattr(self, "GUI") and hasattr(self.GUI, "plot"):
+                self.GUI.plot.match_display_range()
+        else:
+            raise ValueError("Display range must be a tuple of two floats (start, end).")
