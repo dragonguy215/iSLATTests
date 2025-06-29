@@ -15,9 +15,10 @@ class ControlPanel:
         #self.create_entry("Plot range:", 0, 2, "ax1_range_x", self.update_xp1_rng)
         self.create_plot_start(0, 0)
         self.create_plot_range(0, 2)
+        self.create_wavelength_range(1, 0, 1, 2)
         
-        self.create_entry("Min. Wave:", 1, 0, "min_wavelength", self.update_initvals)
-        self.create_entry("Max. Wave:", 1, 2, "max_wavelength", self.update_initvals)
+        #self.create_entry("Min. Wave:", 1, 0, "min_wavelength", self.update_initvals)
+        #self.create_entry("Max. Wave:", 1, 2, "max_wavelength", self.update_initvals)
         self.create_entry("Distance:", 2, 0, "distance", self.update_initvals)
         self.create_entry("Stellar RV:", 2, 2, "star_rv", self.update_initvals)
         self.create_entry("FWHM:", 3, 0, "fwhm", self.update_initvals)
@@ -90,6 +91,33 @@ class ControlPanel:
             print(f"Updated display_range to start: {xp1_value}, range: {rng_value}")
         except ValueError:
             print("Invalid input for xp1 or rng")
+
+    def create_wavelength_range(self, minrow, mincolumn, maxrow, maxcolumn):
+        label = tk.Label(self.frame, text="Min. Wave:")
+        label.grid(row=minrow, column=mincolumn, padx=5, pady=5)
+        self.min_wavelength = tk.Entry(self.frame, bg='lightgray', width=8)
+        self.min_wavelength.grid(row=minrow, column=mincolumn + 1, padx=5, pady=5)
+        self.min_wavelength.insert(0, str(self.islat.wavelength_range[0]))
+        self.min_wavelength.bind("<Return>", lambda _: self.update_wavelength_range())
+
+        label = tk.Label(self.frame, text="Max. Wave:")
+        label.grid(row=maxrow, column=maxcolumn, padx=5, pady=5)
+        self.max_wavelength = tk.Entry(self.frame, bg='lightgray', width=8)
+        self.max_wavelength.grid(row=maxrow, column=maxcolumn + 1, padx=5, pady=5)
+        self.max_wavelength.insert(0, str(self.islat.wavelength_range[1]))
+        self.max_wavelength.bind("<Return>", lambda _: self.update_wavelength_range())
+
+    def update_wavelength_range(self):
+        try:
+            min_wave = float(self.min_wavelength.get())
+            max_wave = float(self.max_wavelength.get())
+            if min_wave < max_wave:
+                self.islat.wavelength_range = (min_wave, max_wave)
+                print(f"Updated wavelength range to: {self.islat.wavelength_range}")
+            else:
+                print("Min wavelength must be less than max wavelength")
+        except ValueError:
+            print("Invalid input for wavelength range")
 
     def update_initvals(self):
         # Placeholder for initialization values update logic

@@ -6,6 +6,8 @@ from .MoleculeWindow import MoleculeWindow
 from .Tooltips import CreateToolTip
 from .GUIFunctions import GUIHandlers
 from .ControlPanel import ControlPanel
+from .TopOptions import TopOptions
+from .BottomOptions import BottomOptions
 import os
 
 class GUI:
@@ -18,31 +20,18 @@ class GUI:
         self.theme = config["theme"]
         self.islat_class = islat_class_ref
 
-    def create_button(self, frame, text, command, row, column):
-        btn_theme = self.theme["buttons"].get(
-            text.replace(" ", ""), self.theme["buttons"]["DefaultBotton"]
-        )
-        btn = tk.Button(
-            frame, text=text,
-            bg=btn_theme["background"],
-            fg=self.theme["foreground"],
-            activebackground=btn_theme["active_background"],
-            command=command
-        )
-        btn.grid(row=row, column=column, padx=2, pady=2, sticky="nsew")
-        CreateToolTip(btn, f"{text} button")
-        return btn
-
     def build_left_panel(self, parent):
-        # Configure the left panel
-        control_frame = tk.Frame(parent)
+        # Top control buttons
+        self.top_options = TopOptions(parent, self.islat_class, theme=self.theme)
+        self.top_options.frame.pack(fill="x")
+        '''control_frame = tk.Frame(parent)
         control_frame.pack(fill="x")
         self.create_button(control_frame, "Default Molecules", self.default_molecules, 0, 0)
         self.create_button(control_frame, "Load Parameters", self.load_parameters, 0, 1)
         self.create_button(control_frame, "Save Parameters", self.save_parameters, 0, 2)
         self.create_button(control_frame, "HITRAN Query", self.hitran_query, 1, 0)
         self.create_button(control_frame, "Export Models", self.export_models, 1, 1)
-        self.create_button(control_frame, "Toggle Legend", self.toggle_legend, 1, 2)
+        self.create_button(control_frame, "Toggle Legend", self.toggle_legend, 1, 2)'''
 
         # Molecule table
         self.molecule_table = MoleculeWindow("Molecule Table", parent, self.molecule_data, self.plot, self.config, self.islat_class)
@@ -83,38 +72,21 @@ class GUI:
         self.build_left_panel(left_frame)
 
         # Bottom function buttons
-        func_frame = tk.Frame(self.window)
+        #self.handlers = GUIHandlers(self.plot, self.data_field, self.config, self.islat_class)
+        self.bottom_options = BottomOptions(self.window, self.islat_class, self.theme, self.plot, self.data_field, self.config)
+        self.bottom_options.frame.grid(row=1, column=0, columnspan=2, sticky="ew")
+        '''func_frame = tk.Frame(self.window)
         func_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
         self.handlers = GUIHandlers(self.plot, self.data_field, self.config, self.islat_class)
         self.create_button(func_frame, "Save Line", self.handlers.save_line, 0, 0)
         self.create_button(func_frame, "Fit Line", self.handlers.fit_selected_line, 0, 1)
         self.create_button(func_frame, "Find Single Lines", self.handlers.find_single_lines, 0, 2)
         self.create_button(func_frame, "Line De-blender", lambda: self.handlers.fit_selected_line(deblend=True), 0, 3)
-        self.create_button(func_frame, "Single Slab Fit", self.handlers.single_slab_fit, 0, 4)
+        self.create_button(func_frame, "Single Slab Fit", self.handlers.single_slab_fit, 0, 4)'''
 
     def start(self):
         self.create_window()
         self.window.mainloop()
-
-    # Callbacks for top buttons
-    def default_molecules(self):
-        print("Default molecules loaded")
-
-    def load_parameters(self):
-        print("Load parameters from file")
-
-    def save_parameters(self):
-        print("Save parameters to file")
-
-    def hitran_query(self):
-        print("Perform HITRAN query")
-
-    def export_models(self):
-        print("Export models to file")
-
-    def toggle_legend(self):
-        print("Toggled legend on plot")
-        self.plot.toggle_legend()
 
     def load_spectrum_file(self):
         file_path = filedialog.askopenfilename(title="Select spectrum CSV")
