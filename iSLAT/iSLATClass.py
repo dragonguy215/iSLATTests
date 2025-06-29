@@ -129,64 +129,39 @@ class iSLAT:
         #self.err_data = np.full_like(self.flux_data, np.nanmedian(self.flux_data)/100)
         self.init_gui()
 
-    '''def load_user_settings(self):
-        """ load_user_settings() loads the user settings from the UserSettings.json file."""
-        user_settings_file = "CONFIG/UserSettings.json"
-        if os.path.exists(user_settings_file):
-            with open(user_settings_file, 'r') as f:
-                user_settings = json.load(f)
-        else:
-            # If the file does not exist, return default settings and save them as a new json file
-            default_settings = {
-                "first_startup": True,
-                "reload_default_files": True,
-                "theme": "LightTheme"
-            }
-            with open(user_settings_file, 'w') as f:
-                json.dump(default_settings, f, indent=4)
-            user_settings = default_settings
-        
-        # append theme information to the user settings dictonary
-        theme_file = f"CONFIG/GUIThemes/{user_settings['theme']}.json"
-        if os.path.exists(theme_file):
-            with open(theme_file, 'r') as f:
-                theme_settings = json.load(f)
-            user_settings["theme"] = theme_settings
-        return user_settings'''
+    '''def check_HITRAN(self, print_statments = True):
+        """ check_HITRAN(print_statments=True) checks if the HITRAN files are present and downloads them if necessary.
+        If print_statments is True, it will print the status of the HITRAN files to the console."""
+        if print_statments: print('\nChecking for HITRAN files: ...')
+        if self.user_settings["first_startup"] or self.user_settings["reload_default_files"]:
+            print('First startup or reload_default_files is True. Downloading default HITRAN files ...')
+            for mol, bm, iso in zip(self.mols, self.basem, self.isot):
+                save_folder = 'HITRANdata'
+                file_path = os.path.join(save_folder, "data_Hitran_2020_{:}.par".format(mol))
 
-    '''def update_default_molecule_parameters(self):
-        """
-        update_default_molecule_parameters() updates the default molecule parameters from the DefaultMoleculeParameters.json file.
-        """
-        with open("CONFIG/DefaultMoleculeParameters.json", 'r') as f:
-            default_molecule_parameters = json.load(f)["default_initial_params"]
-        self.default_initial_parameters = default_molecule_parameters
+                if os.path.exists(file_path):
+                    print("File already exists for mol: {:}. Skipping.".format(mol))
+                    continue
+
+                print("Downloading data for mol: {:}".format(mol))
+                Htbl, qdata, M, G = get_Hitran_data(bm, iso, self.min_vu, self.max_vu)
+
+                with open(file_path, 'w') as fh:
+                    fh.write("# HITRAN 2020 {:}; id:{:}; iso:{:};gid:{:}\n".format(mol, M, iso, G))
+                    fh.write("# Downloaded from the Hitran website\n")
+                    fh.write("# {:s}\n".format(str(datetime.date.today())))
+                    fh = write_partition_function(fh, qdata)
+                    fh = write_line_data(fh, Htbl)
+
+                print("Data for Mol: {:} downloaded and saved.".format(mol))
+
+            self.user_settings["first_startup"] = False
+            self.user_settings["reload_default_files"] = False
+            with open("UserSettings.json", 'w') as f:
+                json.dump(self.user_settings, f, indent=4)
+        else:
+            print('Not the first startup and reload_default_files is False. Skipping HITRAN files download.')'''
     
-    def update_initial_molecule_parameters(self):
-        """
-        update_initial_molecule_parameters() updates the initial molecule parameters from the DefaultMoleculeParameters.json file.
-        """
-        with open("CONFIG/DefaultMoleculeParameters.json", 'r') as f:
-            initial_molecule_parameters = json.load(f)["initial_parameters"]
-        self.initial_molecule_parameters = initial_molecule_parameters
-
-    def get_save_data(self):
-        """
-        get_save_data() loads the save data from the SAVES folder.
-        It returns a list of dictionaries with the save data.
-        """
-        save_file = os.path.join("SAVES", "molecules_list.csv")
-        if os.path.exists(save_file):
-            try:
-                df = pd.read_csv(save_file)
-                self.savedata = {row['Molecule Name']: {col: row[col] for col in df.columns if col != 'Molecule Name'} for _, row in df.iterrows()}
-            except Exception as e:
-                print(f"Error reading save file: {e}")
-                self.savedata = []
-        else:
-            print("No save file found.")
-            self.savedata = []'''
-
     def check_HITRAN(self, print_statments = True):
         """ check_HITRAN(print_statments=True) checks if the HITRAN files are present and downloads them if necessary.
         If print_statments is True, it will print the status of the HITRAN files to the console."""
@@ -261,12 +236,6 @@ class iSLAT:
         self.slab_model = ModelFitting(loader)
         result = self.slab_model.fit()
         return result.summary()
-
-    '''def save_line(self, line_info):
-        df = pd.DataFrame([line_info])
-        file = os.path.join("SAVES", "lines_saved.csv")
-        df.to_csv(file, mode='a', header=not os.path.exists(file), index=False)
-        print(f"Line saved to {file}")'''
 
     def get_line_data_in_range(self, xmin, xmax):
         selected_mol = self.active_molecule

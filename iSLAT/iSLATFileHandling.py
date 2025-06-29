@@ -115,6 +115,27 @@ def read_save_data(file_path = save_folder_path, file_name=molecule_list_file_na
         savedata = {}
         return savedata
 
+def read_HITRAN_data(file_path=save_folder_path, file_name=None):
+    """
+    read_HITRAN_data() reads the HITRAN data from .par files.
+    If no file name is provided, it reads the default molecule files.
+    """
+    if file_name is None:
+        file_name = "default_molecules.par"
+    file = os.path.join(file_path, file_name)
+    if os.path.exists(file):
+        try:
+            with open(file, 'r') as f:
+                data = f.readlines()
+            # Process the data as needed
+            return data
+        except FileNotFoundError:
+            print(f"File {file} not found.")
+            return []
+    else:
+        print(f"File {file} does not exist.")
+        return []
+
 def read_line_saves(file_path=save_folder_path, file_name=line_saves_file_name):
     filename = os.path.join(file_path, file_name)
     if os.path.exists(file_path):
@@ -125,3 +146,16 @@ def read_line_saves(file_path=save_folder_path, file_name=line_saves_file_name):
         except FileNotFoundError:
             pass
     return []
+
+def save_line(line_info, file_path=save_folder_path, file_name=line_saves_file_name):
+    """Save a line to the line saves file."""
+    filename = os.path.join(file_path, file_name)
+    #print(f"Saving line to {filename}")
+    df = pd.DataFrame([line_info])
+    
+    # Ensure the directory exists
+    os.makedirs(file_path, exist_ok=True)
+    
+    # Save the line to the CSV file
+    df.to_csv(filename, mode='a', header=not os.path.exists(filename), index=False)
+    print(f"Saved line at ~{line_info['lam']:.4f} μm to {filename}")

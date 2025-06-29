@@ -1,8 +1,9 @@
 import numpy as np
 import tkinter as tk
-import pandas as pd
-import os
+#import pandas as pd
+#import os
 #from tkinter import ttk
+import iSLAT.iSLATFileHandling as ifh
 from .GUIFunctions import create_button
 
 class BottomOptions:
@@ -33,32 +34,69 @@ class BottomOptions:
             self.data_field.insert_text("No line selected to save.\n")
             return
         line_info = {
-            "wavelength": np.mean(self.main_plot.selected_wave),
-            "flux": np.max(self.main_plot.selected_flux)
+            #"wavelength": np.mean(self.main_plot.selected_wave),
+            #"flux": np.max(self.main_plot.selected_flux)
+            "species": self.islat.active_molecule.name,
+            "lev_up": self.islat.active_molecule.name,
+            "lev_low": self.islat.active_molecule.name,
+            "lam": np.mean(self.main_plot.selected_wave),
+            "tau": np.max(self.main_plot.selected_flux),
+            "intens": np.max(self.main_plot.selected_flux) * self.main_plot.ax1.get_xlim()[1] * 1e-6,  # Convert to correct units
+            "a_stein": self.islat.active_molecule.name,
+            "e_up": self.islat.active_molecule.name,
+            "g_up": self.islat.active_molecule.name,
+            "xmin": self.main_plot.ax1.get_xlim()[0],
+            "xmax": self.main_plot.ax1.get_xlim()[1],
+            #"lev_up": self.islat.molecules_dict[self.islat.active_molecule].lev_up,
+            #"lev_low": self.islat.molecules_dict[self.islat.active_molecule].lev_low,
+            #"lam": np.mean(self.main_plot.selected_wave),
+            #"tau": np.max(self.main_plot.selected_flux),
+            #"intens": np.max(self.main_plot.selected_flux) * self.main_plot.ax1.get_xlim()[1] * 1e-6,  # Convert to correct units
+            #"a_stein": self.islat.molecules_dict[self.islat.active_molecule].a_stein,
+            #"e_up": self.islat.molecules_dict[self.islat.active_molecule].e_up,
+            #"g_up": self.islat.molecules_dict[self.islat.active_molecule].g_up,
+            #xmin": self.main_plot.ax1.get_xlim()[0],
+            #xmax": self.main_plot.ax1.get_xlim()[1],
         }
-        #self.islat.save_line(line_info)
-        df = pd.DataFrame([line_info])
-        #working_dir = os.path.dirname(os.path.abspath(__file__))
-        working_dir = self.islat.directorypath
-        working_dir = os.path.join(working_dir, self.config["line_save_directory"])
-        file = os.path.join(working_dir, self.config["line_save_file_name"])
-        print(f"Saving line to {file}")
-        df.to_csv(file, mode='a', header=not os.path.exists(file), index=False)
-        self.data_field.insert_text(f"Saved line at ~{line_info['wavelength']:.4f} μm\n")
+        ifh.save_line(line_info)
+        self.data_field.insert_text(f"Saved line at ~{line_info['lam']:.4f} μm\n")
 
     def show_saved_lines(self): ####
-        self.data_field.clear()
-        saved_lines = self.islat.get_saved_lines()
-        if not saved_lines:
-            self.data_field.insert_text("No saved lines available.\n")
+        #self.data_field.clear()
+
+        '''try:
+            linelistfile = ifh.read_line_saves()
+        except AttributeError:
+            self.data_field.insert_text("Input line list is not defined!\n")
+            return'''
+
+        '''# Initialize variables
+        self.main_plot.default_line = None
+        self.main_plot.green_lines = []
+        self.main_plot.green_scatter = []'''
+
+        # Load saved lines
+        try:
+            svd_lns = ifh.read_line_saves()
+        except Exception as e:
+            self.data_field.insert_text(f"Error loading saved lines: {e}\n")
             return
 
-        self.data_field.insert_text("Saved Lines:\n")
-        for line in saved_lines:
-            self.data_field.insert_text(f"Wavelength: {line['wavelength']:.4f} μm, Flux: {line['flux']:.4f}\n")
-        
-        # Optionally, plot the saved lines on the main plot
-        self.main_plot.plot_saved_lines(saved_lines)
+        self.main_plot.plot_saved_lines(svd_lns)
+
+        '''svd_lamb = np.array(svd_lns['lam'])
+        x_min = np.array(svd_lns['xmin']) if 'xmin' in svd_lns else None
+        x_max = np.array(svd_lns['xmax']) if 'xmax' in svd_lns else None
+
+        # Plot vertical lines in the main plot for saved lines
+        for i in range(len(svd_lamb)):
+            self.main_plot.ax1.vlines(svd_lamb[i], -2, 10, linestyles='dashed', color='red')
+            if x_min is not None and x_max is not None:
+                self.main_plot.ax1.vlines(x_min[i], -2, 10, color='coral', alpha=0.5)
+                self.main_plot.ax1.vlines(x_max[i], -2, 10, color='coral', alpha=0.5)
+
+        self.data_field.insert_text("Saved lines retrieved from file.\n")
+        self.main_plot.canvas.draw()'''
 
     def fit_selected_line(self, deblend=False):
         self.data_field.clear()
@@ -77,7 +115,7 @@ class BottomOptions:
 
     def fit_saved_lines(self): ########
         self.data_field.clear()
-        saved_lines = self.islat.get_saved_lines()
+        saved_lines = ifh.read_line_saves()
         if not saved_lines:
             self.data_field.insert_text("No saved lines to fit.\n")
             return
@@ -85,8 +123,8 @@ class BottomOptions:
         self.data_field.insert_text("Fitting saved lines...\n")
         fit_results = []
         for line in saved_lines:
-            self.main_plot.selected_wave = [line['wavelength']]
-            self.main_plot.selected_flux = [line['flux']]
+            self.main_plot.selected_wave = [line['lam']]
+            self.main_plot.selected_flux = [line['tau']]
             fit_result = self.main_plot.compute_fit_line()
             if fit_result:
                 fit_results.append(fit_result)

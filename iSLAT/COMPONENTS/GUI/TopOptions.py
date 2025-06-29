@@ -33,7 +33,7 @@ class TopOptions:
         print("Default molecules loaded")
 
     def add_molecule(self):
-        print("Add molecule from file")
+        
 
     def save_parameters(self):
         print("Save parameters to file")
