@@ -52,10 +52,10 @@ class iSLAT:
         self.basem = ["H2", "H2", "H2O", "H2O", "CO2", "CO2", "CO", "CO", "CO", "CH4", "HCN", "HCN", "NH3", "OH", "C2H2", "C2H2", "C2H4", "C4H2", "C2H6", "HC3N"]
         self.isot = [1, 2, 1, 2, 1, 2, 1, 2, 3, 1, 1, 2, 1, 1, 1, 2, 1, 1, 1, 1]
 
-        self.wave_range = wavelength_range
+        self.wavelength_range = wavelength_range
 
-        self.min_vu = 1 / (self.wave_range[0] / 1E6) / 100.
-        self.max_vu = 1 / (self.wave_range[1] / 1E6) / 100.
+        self.min_vu = 1 / (self.wavelength_range[0] / 1E6) / 100.
+        self.max_vu = 1 / (self.wavelength_range[1] / 1E6) / 100.
 
         # Check for HITRAN files and download if necessary
         self.check_HITRAN()
@@ -96,11 +96,19 @@ class iSLAT:
         self.molecules_dict.load_molecules_data(molecules_data=self.molecules_data_default,
                                                 initial_molecule_parameters=self.initial_molecule_parameters,
                                                 save_file_data = self.savedata,
-                                                wavelength_range = self.wave_range, 
+                                                wavelength_range = self.wavelength_range, 
                                            intrinsic_line_width = intrinsic_line_width, 
                                            model_pixel_res = model_pixel_res, 
                                            model_line_width = model_line_width,
                                            dist = dist)
+        
+        # Initialize the active molecule based on user settings
+        active_molecule_name = self.user_settings.get("default_active_molecule", "H2O")
+        if active_molecule_name in self.molecules_dict:
+            self._active_molecule = self.molecules_dict[active_molecule_name]
+        else:
+            print(f"Active molecule '{active_molecule_name}' not found in the dictionary. Defaulting to 'H2O'.")
+            self._active_molecule = self.molecules_dict.get("H2O", None)
 
     def run(self):
         """
@@ -236,7 +244,7 @@ class iSLAT:
     def update_model_spectrum(self):
         summed_flux = np.zeros_like(self.wave_data)
         for mol in self.molecules_dict.values():
-            if mol.is_active:
+            if mol.is_visible:
                 mol_flux = mol.get_flux(self.wave_data)
                 summed_flux += mol_flux
         self.sum_spectrum_flux = summed_flux
@@ -292,12 +300,12 @@ class iSLAT:
         print(fit_result.fit_report())
 
         return fit_result   
-    
+
     def get_line_data_in_range(self, xmin, xmax):
-        selected_mol = self.get_selected_molecule()  # implement however you track active molecule
+        selected_mol = self.active_molecule
         if not selected_mol:
             return None
-        lines_df = selected_mol.intensity.get_table()
+        lines_df = selected_mol.intensity.get_table
         subset = lines_df[(lines_df['lam'] >= xmin) & (lines_df['lam'] <= xmax)]
         if subset.empty:
             return None
@@ -306,3 +314,31 @@ class iSLAT:
                 subset['e_up'].values,
                 subset['a_stein'].values,
                 subset['g_up'].values)
+    
+    @property
+    def active_molecule(self):
+        return self._active_molecule
+    
+    @active_molecule.setter
+    def active_molecule(self, molecule):
+        """
+        Sets the active molecule based on the provided name or object.
+        If the molecule is not found, it throws an error and does not update the active molecule.
+        """
+        try:
+            if isinstance(molecule, Molecule):
+                self._active_molecule = molecule
+            elif isinstance(molecule, str):
+                if molecule in self.molecules_dict:
+                    self._active_molecule = self.molecules_dict[molecule]
+                else:
+                    raise ValueError(f"Molecule '{molecule}' not found in the dictionary.")
+            else:
+                raise TypeError("Active molecule must be a Molecule object or a string representing the molecule name.")
+            
+            if hasattr(self, "GUI") and hasattr(self.GUI, "plot"):
+                self.GUI.plot.update_population_diagram()
+                #self.GUI.plot.update_line_inspection_plot()
+
+        except (ValueError, TypeError) as e:
+            print(f"Error setting active molecule: {e}")

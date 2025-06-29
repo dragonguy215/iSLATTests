@@ -16,6 +16,8 @@ class MoleculeDict(dict):
             name=mol_name,
             filepath=mol_entry["file"],
             displaylabel=mol_entry["label"],
+            color = self.save_file_data.get(mol_name, {}).get("Color"),
+
             initial_molecule_parameters=self.initial_molecule_parameters.get(mol_name, {}),
             wavelength_range = wavelength_range,
             intrinsic_line_width=self.save_file_data[mol_name]["Broad"],
@@ -26,7 +28,7 @@ class MoleculeDict(dict):
             radius = self.save_file_data.get(mol_name, {}).get("Rad", None),
             temp = self.save_file_data.get(mol_name, {}).get("Temp", None),
             n_mol = self.save_file_data.get(mol_name, {}).get("N_Mol", None),
-            is_active=self.save_file_data.get(mol_name, {}).get("Vis", True)
+            is_visible=self.save_file_data.get(mol_name, {}).get("Vis", True)
         )
 
         # Store the molecule in the dictionary

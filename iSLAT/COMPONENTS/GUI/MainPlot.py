@@ -25,15 +25,23 @@ class iSLATPlot:
         self.ax2.set_title("Line inspection plot")
         self.ax3.set_title("Population diagram")
 
-        # Set default zoom similar to old behavior
+        '''# Set default zoom similar to old behavior
         wmin, wmax = np.min(self.wave_data), np.max(self.wave_data)
-        self.ax1.set_xlim(wmin, wmin + 0.25*(wmax - wmin))
+        self.ax1.set_xlim(wmin, wmin + 0.25*(wmax - wmin))'''
 
-        self.span = SpanSelector(
+        # Set default zoom to make the wavelength_range given in the islat_class_ref
+        #self.match_wavelength_range()
+
+        # Set default zoom to the full range of the data
+        #self.ax1.set_xlim(np.min(self.wave_data), np.max(self.wave_data))
+
+        '''self.span = SpanSelector(
             self.ax1, self.onselect, "horizontal",
             useblit=True, interactive=True,
             props=dict(alpha=0.5, facecolor=self.theme["selection_color"])
-        )
+        )'''
+
+        self.make_span_selector()
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=parent_frame)
         self.toolbar = NavigationToolbar2Tk(self.canvas, parent_frame)
@@ -47,11 +55,27 @@ class iSLATPlot:
 
         self.model_lines = []
 
-        self.plot_model_lines()  # Initial plot of model lines
-        self.plot_data_line(self.wave_data, self.flux_data, label="Observed Spectrum", color=self.theme["foreground"])
+        #self.plot_model_lines()  # Initial plot of model lines
+        #self.plot_data_line(self.wave_data, self.flux_data, label="Observed Spectrum", color=self.theme["foreground"])
         self.compute_sum_flux()
         self.islat.update_model_spectrum()
         self.update_population_diagram()
+
+    def match_wavelength_range(self):
+        if hasattr(self.islat, 'wavelength_range') and self.islat.wavelength_range:
+            print("Setting xlim to islat wavelength range:", self.islat.wavelength_range)
+            wmin, wmax = self.islat.wavelength_range
+            self.ax1.set_xlim(wmin, wmax)
+
+    def make_span_selector(self):
+        """
+        Creates a SpanSelector for the main plot to select a region for line inspection.
+        """
+        self.span = SpanSelector(
+            self.ax1, self.onselect, "horizontal",
+            useblit=True, interactive=True,
+            props=dict(alpha=0.5, facecolor=self.theme["selection_color"])
+        )
 
     def clear_model_lines(self):
         # remove previously plotted lines
@@ -60,14 +84,32 @@ class iSLATPlot:
         self.model_lines.clear()
         self.canvas.draw_idle()
 
+    def plot_model_lines(self):
+        """
+        Plots all model lines for the molecules in the islat.molecules_dict.
+        Assumes the islat.molecules_dict has the MolData instances for calc.
+        """
+        self.clear_model_lines()
+        for mol_name, molecule_obj in self.islat.molecules_dict.items():
+            if molecule_obj.is_visible:
+                self.add_model_line(
+                    mol_name,
+                    temp=molecule_obj.temp,
+                    radius=molecule_obj.radius,
+                    density=molecule_obj.n_mol_init,
+                )
+
     def update_model_plot(self):
         self.ax1.clear()
+        self.match_wavelength_range()
+        self.plot_model_lines()
+        self.make_span_selector()
         # plot the data line
         self.ax1.plot(self.wave_data, self.flux_data, color=self.theme["foreground"], label="Data")
 
         # plot each molecule if it is turned on
         for mol in self.islat.molecules_dict.values():
-            if mol.is_active:
+            if mol.is_visible:
                 model_flux = mol.get_flux(self.wave_data)
                 self.ax1.fill_between(self.wave_data, model_flux, alpha=0.3, color=mol.color, label=mol.name)
 
@@ -87,27 +129,12 @@ class iSLATPlot:
         model_flux = molecule_obj.spectrum.flux_jy
 
         if color is None:
-            color = molecule_obj.line_color if hasattr(molecule_obj, "line_color") else self.theme["default_molecule_colors"][len(self.model_lines) % len(self.theme["default_molecule_colors"])]
+            color = molecule_obj.color
         line, = self.ax1.plot(molecule_obj.spectrum.lamgrid, model_flux, linestyle='-', color=color, alpha=0.7, label=f"{mol_name}")
 
         self.model_lines.append(line)
         self.ax1.legend()
         self.canvas.draw_idle()
-
-    def plot_model_lines(self):
-        """
-        Plots all model lines for the molecules in the islat.molecules_dict.
-        Assumes the islat.molecules_dict has the MolData instances for calc.
-        """
-        self.clear_model_lines()
-        for mol_name, molecule_obj in self.islat.molecules_dict.items():
-            if molecule_obj.is_active:
-                self.add_model_line(
-                    mol_name,
-                    temp=molecule_obj.temp,
-                    radius=molecule_obj.radius,
-                    density=molecule_obj.n_mol_init,
-                )
 
     def plot_data_line(self, wave, flux, label=None, color=None):
         """
@@ -132,7 +159,7 @@ class iSLATPlot:
         """
         summed_flux = np.zeros_like(self.wave_data)
         for mol in self.islat.molecules_dict.values():
-            if mol.is_active:
+            if mol.is_visible:
                 mol_flux = mol.get_flux(self.wave_data)
                 summed_flux += mol_flux
         return summed_flux
@@ -212,13 +239,23 @@ class iSLATPlot:
         mask = (self.wave_data >= xmin) & (self.wave_data <= xmax)
         self.ax2.plot(self.wave_data[mask], self.flux_data[mask], color="black", label="Observed")
 
-        # Plot each active molecule in zoom
+        '''# Plot each the active molecule in zoom
+        active_molecule = self.islat.active_molecule
         max_y = np.nanmax(self.flux_data[mask])
         for mol in self.islat.molecules_dict.values():
-            if mol.is_active:
+            if mol.is_visible:
                 flux = mol.get_flux(self.wave_data[mask])
                 self.ax2.plot(self.wave_data[mask], flux, color=mol.color, linestyle="--", label=mol.name)
-                max_y = max(max_y, np.nanmax(flux))
+                max_y = max(max_y, np.nanmax(flux))'''
+        
+        # plot the active molecule in the line inspection plot
+        active_molecule = self.islat.active_molecule
+        if active_molecule is not None:
+            flux = active_molecule.get_flux(self.wave_data[mask])
+            self.ax2.plot(self.wave_data[mask], flux, color=active_molecule.color, linestyle="--", label=active_molecule.name)
+            max_y = np.nanmax([np.nanmax(self.flux_data[mask]), np.nanmax(flux)])
+        else:
+            max_y = np.nanmax(self.flux_data[mask])
 
         self.ax2.set_ylim(0, max_y * 1.1)
         self.ax2.legend()
@@ -230,8 +267,8 @@ class iSLATPlot:
         line_data = self.islat.get_line_data_in_range(xmin, xmax)
         if line_data:
             lambs, intens, eups, a_steins, g_ups = line_data
-            area = np.pi * (mol.radius * au * 1e2) ** 2
-            dist_cm = mol.distance * pc
+            area = np.pi * (active_molecule.radius * au * 1e2) ** 2
+            dist_cm = active_molecule.distance * pc
             beam_s = area / dist_cm ** 2
             F = intens * beam_s
             freq = ccum / lambs
@@ -249,7 +286,8 @@ class iSLATPlot:
         self.ax3.set_xlabel(r'$E_{u}$ (K)')
         self.ax3.set_title('Population diagram', fontsize='medium')
 
-        molecule_obj = self.islat.molecules_dict["H2O"]
+        molecule_obj = self.islat.active_molecule
+        #molecule_obj = self.islat.molecules_dict["H2O"]
         int_pars = molecule_obj.intensity.get_table
         int_pars.index = range(len(int_pars.index))
 

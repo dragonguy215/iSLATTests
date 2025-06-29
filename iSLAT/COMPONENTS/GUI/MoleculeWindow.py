@@ -41,7 +41,7 @@ class MoleculeWindow:
             dens_entry.insert(0, f"{mol_data.n_mol_init:.1e}")
             dens_entry.grid(row=i+1, column=3)
 
-            on_var = tk.BooleanVar(value=mol_data.is_active)
+            on_var = tk.BooleanVar(value=mol_data.is_visible)
             on_btn = tk.Checkbutton(self.frame, variable=on_var, command=self.update_lines)
             on_btn.grid(row=i+1, column=4)
 
@@ -80,7 +80,10 @@ class MoleculeWindow:
                 m_obj.radius = rad
                 m_obj.n_mol_init = dens
                 m_obj.color = color
-                self.plot.add_model_line(mol, temp, rad, dens, color)
+                m_obj.is_visible = True
+                #self.plot.add_model_line(mol, temp, rad, dens, color)
+            elif not props["on_var"].get():
+                m_obj = self.islat.molecules_dict[mol].is_visible = False
         self.islat.update_model_spectrum()
         self.plot.update_model_plot()
 

@@ -5,6 +5,7 @@ from .Data_field import DataField
 from .MoleculeWindow import MoleculeWindow
 from .Tooltips import CreateToolTip
 from .GUIFunctions import GUIHandlers
+from .ControlPanel import ControlPanel
 import os
 
 class GUI:
@@ -43,6 +44,10 @@ class GUI:
         self.create_button(control_frame, "Export Models", self.export_models, 1, 1)
         self.create_button(control_frame, "Toggle Legend", self.toggle_legend, 1, 2)
 
+        # Molecule table
+        self.molecule_table = MoleculeWindow("Molecule Table", parent, self.molecule_data, self.plot, self.config, self.islat_class)
+        self.molecule_table.frame.pack(fill="both", expand=True, padx=5, pady=5)
+
         # Spectrum file selector
         file_frame = tk.LabelFrame(parent, text="Spectrum File")
         file_frame.pack(fill="x", padx=5, pady=5)
@@ -50,9 +55,10 @@ class GUI:
         self.file_label.pack()
         tk.Button(file_frame, text="Load Spectrum", command=self.load_spectrum_file).pack()
 
-        # Molecule table
-        self.molecule_table = MoleculeWindow("Molecule Table", parent, self.molecule_data, self.plot, self.config, self.islat_class)
-        self.molecule_table.frame.pack(fill="both", expand=True, padx=5, pady=5)
+        # Control panel for input parameters
+        control_panel_frame = tk.LabelFrame(parent, text="Control Panel")
+        control_panel_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.control_panel = ControlPanel(control_panel_frame, self.islat_class)
 
         # Main data field
         self.data_field = DataField("Main Data Field", "", parent)
