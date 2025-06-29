@@ -56,7 +56,7 @@ class iSLATPlot:
 
         self.plot_model_lines()  # Initial plot of model lines
         self.plot_data_line(self.wave_data, self.flux_data, label="Observed Spectrum", color=self.theme["foreground"])
-        self.plot_sum_line(self.wave_data, np.zeros_like(self.wave_data), label="Sum Line", color=self.theme["highlight"])
+        self.compute_sum_flux()
         self.islat.update_model_spectrum()
         #self.draw_plot()  # Initial draw of the main plot
         #print("ax1 lines:", self.ax1.lines)
@@ -165,16 +165,29 @@ class iSLATPlot:
         self.ax1.legend()
         self.canvas.draw_idle()
     
-    def plot_sum_line(self, wave, flux, label=None, color=None):
+    def compute_sum_flux(self):
         """
-        Plots a summed line on the main plot.
+        Computes the sum of all model fluxes and updates the sum line.
         """
+        summed_flux = np.zeros_like(self.wave_data)
+        for mol in self.islat.molecules_dict.values():
+            if mol.is_active:
+                mol_flux = mol.get_flux(self.wave_data)
+                summed_flux += mol_flux
+        return summed_flux
+
+    def plot_sum_line(self, wave, flux, label=None, color=None, compute = True):
+        """
+        Plots the sum line on the main plot.
+        """
+        if compute:
+            flux = self.compute_sum_flux()
         if label is None:
             label = "Sum Line"
         if color is None:
             color = self.theme["highlight"]
         
-        line, = self.ax1.plot(wave, flux, linestyle='-', color=color, alpha=0.7, label=label)
+        line, = self.ax1.plot(wave, flux, linestyle='--', color=color, alpha=0.7, label=label)
         self.model_lines.append(line)
         self.ax1.legend()
         self.canvas.draw_idle()
