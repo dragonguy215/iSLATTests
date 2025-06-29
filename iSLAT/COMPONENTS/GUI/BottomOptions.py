@@ -1,8 +1,7 @@
 import numpy as np
 import tkinter as tk
-from tkinter import ttk
+#from tkinter import ttk
 from .GUIFunctions import create_button
-from lmfit.models import GaussianModel
 
 class BottomOptions:
     def __init__(self, master, islat, theme, main_plot, data_field, config):
@@ -52,16 +51,13 @@ class BottomOptions:
             self.data_field.insert_text("Fit failed or insufficient data.\n")
 
     def find_single_lines(self):
-        '''lines = self.islat.find_single_lines()
+        self.main_plot.find_single_lines()
+        lines = self.main_plot.single_lines_list
         if lines:
             self.data_field.insert_text(f"Found {len(lines)} isolated lines.\n")
-        else:
-            self.data_field.insert_text("No lines found.\n")'''
-        lines = self.main_plot.find_single_lines()
-        if lines:
-            self.data_field.insert_text(f"Found {len(lines)} isolated lines.\n")
-            for line in lines:
-                self.data_field.insert_text(f"Line at {line['wavelength']:.4f} μm with flux {line['flux']:.4f}\n")
+            self.main_plot.plot_single_lines()
+            #for line in lines:
+            #    self.data_field.insert_text(f"Line at {line['wavelength']:.4f} μm with flux {line['flux']:.4f}\n")
         else:
             self.data_field.insert_text("No isolated lines found.\n")
 

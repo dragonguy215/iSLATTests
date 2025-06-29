@@ -2,7 +2,7 @@
     "first_startup": false,
     "reload_default_files": false,
     "fit_line_uncertainty": 1,
-    "line_threshold": 0.03,
+    "line_threshold": 0.10,
     "default_active_molecule": "H2O",
     "theme": "LightTheme"
 }

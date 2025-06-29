@@ -256,21 +256,6 @@ class iSLAT:
         result = self.slab_model.fit()
         return result.summary()
 
-    '''def find_single_lines(self):
-        """ find_single_lines() identifies spectral lines in the flux data based on a threshold.
-        It returns a list of wavelengths where the flux exceeds the threshold.
-        The threshold is calculated as a fraction of the maximum flux value."""
-        threshold = self.user_settings.get("line_threshold", 0.03) * np.max(self.flux_data)
-        sep = 0.1
-        found = []
-        for i, val in enumerate(self.flux_data):
-            if val > threshold:
-                if len(found) == 0 or (self.wave_data[i] - found[-1]) > sep:
-                    found.append(self.wave_data[i])
-        self.selected_lines = found
-        print(f"Found {len(found)} lines.")
-        return found'''
-
     def save_line(self, line_info):
         df = pd.DataFrame([line_info])
         file = os.path.join("SAVES", "lines_saved.csv")

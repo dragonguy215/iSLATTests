@@ -401,7 +401,8 @@ class iSLATPlot:
         max_threshold = max_intens * self.islat.user_settings.get("line_threshold", 0.03)
 
         #specsep = self.islat.specsep
-        counter = 0
+        #counter = 0
+        self.single_lines_list = []  # List to store single lines found
 
         # Main function to find single lines
         for j in int_pars_line.index:
@@ -421,17 +422,36 @@ class iSLATPlot:
                     if k_intens >= loc_threshold and k_intens != j_intens:  # Exclude non-single lines
                         include = False
 
-            if include:  # If the line is single, plot it
-                self.ax1.vlines(j_lam, self.ax1.get_ylim()[0], self.ax1.get_ylim()[1], linestyles='dashed', color='blue')
-                counter += 1
+            if include:  # If the line is single, store it as a vline object
+                vline = {"wavelength": j_lam, "ylim": self.ax1.get_ylim()}
+                self.single_lines_list.append(vline)
+            
+            '''if include:  # If the line is single, plot it
+                self.single_lines_list
+                #self.ax1.vlines(j_lam, self.ax1.get_ylim()[0], self.ax1.get_ylim()[1], linestyles='dashed', color='blue')
+                #counter += 1'''
 
-        # Print the number of isolated lines found in the range
+        '''# Print the number of isolated lines found in the range
         if counter == 0:
-            #self.islat.data_field.insert('1.0', 'No single lines found in the current wavelength range.')
             print("No single lines found in the current wavelength range.")
         else:
-            #self.islat.data_field.insert('1.0', f'There are {counter} single lines found in the current wavelength range.')
-            print(f"There are {counter} single lines found in the current wavelength range.")
+            print(f"There are {counter} single lines found in the current wavelength range.")'''
+
+        self.canvas.draw_idle()
+
+    def plot_single_lines(self):
+        """
+        Plots single lines on the main plot.
+        This function is called after finding single lines.
+        """
+        self.update_model_plot()
+        if not hasattr(self, 'single_lines_list') or not self.single_lines_list:
+            print("No single lines to plot.")
+            return
+        for vline in self.single_lines_list:
+            # Plot each single line as a vertical dashed line
+            self.ax1.vlines(vline['wavelength'], vline['ylim'][0], vline['ylim'][1],
+                            linestyles='dashed', color='blue')
 
         self.canvas.draw_idle()
 
