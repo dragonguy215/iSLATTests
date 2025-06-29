@@ -4,5 +4,7 @@
     "fit_line_uncertainty": 1,
     "line_threshold": 0.10,
     "default_active_molecule": "H2O",
+    "line_save_directory": "LINESAVES",
+    "line_save_file_name": "saved_lines.csv",
     "theme": "LightTheme"
 }

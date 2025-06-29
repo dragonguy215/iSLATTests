@@ -8,7 +8,7 @@ import pandas as pd
 import os
 import json
 
-from lmfit.models import GaussianModel
+#from lmfit.models import GaussianModel
 import tkinter as tk
 from tkinter import filedialog
 import ssl
@@ -16,6 +16,8 @@ import certifi
 import datetime
 
 context = ssl.create_default_context(cafile=certifi.where ())
+
+from .iSLATFileHandling import load_user_settings, read_from_csv, read_default_csv, read_from_user_csv, read_default_molecule_parameters, read_initial_molecule_parameters, read_save_data
 
 from .ir_model import *
 from .COMPONENTS.chart_window import MoleculeSelector
@@ -26,7 +28,7 @@ from .COMPONENTS.slabfit_config import *
 from .COMPONENTS.slabfit_loader import *
 from .COMPONENTS.slabfit_runner import *
 from .iSLATDefaultInputParms import *
-from .iSLATCSVHandling import *
+#from .iSLATFileHandling import *
 from .COMPONENTS.GUI import *
 from .COMPONENTS.Molecule import Molecule
 from .COMPONENTS.MoleculeDict import MoleculeDict
@@ -41,12 +43,17 @@ class iSLAT:
         """
         Initialize the iSLAT application.
         """
+        self.directorypath = os.path.dirname(os.path.abspath(__file__))
+        #print(f"iSLAT directory path: {self.directorypath}")
         self.create_folders()
 
         # Load settings
-        self.user_settings = self.load_user_settings()
-        self.update_default_molecule_parameters()
-        self.update_initial_molecule_parameters()
+        #self.user_settings = self.load_user_settings()
+        self.user_settings = load_user_settings()
+        #self.update_default_molecule_parameters()
+        #self.update_initial_molecule_parameters()
+        self.initial_molecule_parameters = read_initial_molecule_parameters()
+        self.molecules_data_default = read_default_molecule_parameters()
         
         self.mols = ["H2", "HD", "H2O", "H218O", "CO2", "13CO2", "CO", "13CO", "C18O", "CH4", "HCN", "H13CN", "NH3", "OH", "C2H2", "13CCH2", "C2H4", "C4H2", "C2H6", "HC3N"]
         self.basem = ["H2", "H2", "H2O", "H2O", "CO2", "CO2", "CO", "CO", "CO", "CH4", "HCN", "HCN", "NH3", "OH", "C2H2", "C2H2", "C2H4", "C4H2", "C2H6", "HC3N"]
@@ -92,7 +99,6 @@ class iSLAT:
 
     def init_molecules(self):
         self.molecules_dict = MoleculeDict()
-        #self.initial_values = {}
 
         self.molecules_dict.load_molecules_data(molecules_data=self.molecules_data_default,
                                                 initial_molecule_parameters=self.initial_molecule_parameters,
@@ -117,13 +123,13 @@ class iSLAT:
         This function starts the main event loop of the Tkinter application.
         """
         # Start the main event loop
-        self.get_save_data()
+        self.savedata = read_save_data()
         self.load_spectrum()
         self.init_molecules()
         #self.err_data = np.full_like(self.flux_data, np.nanmedian(self.flux_data)/100)
         self.init_gui()
 
-    def load_user_settings(self):
+    '''def load_user_settings(self):
         """ load_user_settings() loads the user settings from the UserSettings.json file."""
         user_settings_file = "CONFIG/UserSettings.json"
         if os.path.exists(user_settings_file):
@@ -146,9 +152,9 @@ class iSLAT:
             with open(theme_file, 'r') as f:
                 theme_settings = json.load(f)
             user_settings["theme"] = theme_settings
-        return user_settings
+        return user_settings'''
 
-    def update_default_molecule_parameters(self):
+    '''def update_default_molecule_parameters(self):
         """
         update_default_molecule_parameters() updates the default molecule parameters from the DefaultMoleculeParameters.json file.
         """
@@ -179,7 +185,7 @@ class iSLAT:
                 self.savedata = []
         else:
             print("No save file found.")
-            self.savedata = []
+            self.savedata = []'''
 
     def check_HITRAN(self, print_statments = True):
         """ check_HITRAN(print_statments=True) checks if the HITRAN files are present and downloads them if necessary.
@@ -256,11 +262,11 @@ class iSLAT:
         result = self.slab_model.fit()
         return result.summary()
 
-    def save_line(self, line_info):
+    '''def save_line(self, line_info):
         df = pd.DataFrame([line_info])
         file = os.path.join("SAVES", "lines_saved.csv")
         df.to_csv(file, mode='a', header=not os.path.exists(file), index=False)
-        print(f"Line saved to {file}")
+        print(f"Line saved to {file}")'''
 
     def get_line_data_in_range(self, xmin, xmax):
         selected_mol = self.active_molecule

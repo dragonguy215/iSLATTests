@@ -1,5 +1,7 @@
 import numpy as np
 import tkinter as tk
+import pandas as pd
+import os
 #from tkinter import ttk
 from .GUIFunctions import create_button
 
@@ -19,10 +21,12 @@ class BottomOptions:
 
         # Create buttons for top options
         create_button(self.frame, self.theme, "Save Line", self.save_line, 0, 0)
-        create_button(self.frame, self.theme, "Fit Line", self.fit_selected_line, 0, 1)
-        create_button(self.frame, self.theme, "Find Single Lines", self.find_single_lines, 0, 2)
-        create_button(self.frame, self.theme, "Line De-blender", lambda: self.fit_selected_line(deblend=True), 0, 3)
-        create_button(self.frame, self.theme, "Single Slab Fit", self.single_slab_fit, 0, 4)
+        create_button(self.frame, self.theme, "Show Saved Lines", self.show_saved_lines, 0, 1)
+        create_button(self.frame, self.theme, "Fit Line", self.fit_selected_line, 0, 2)
+        create_button(self.frame, self.theme, "Fit Saved Lines", self.fit_saved_lines, 0, 3)
+        create_button(self.frame, self.theme, "Find Single Lines", self.find_single_lines, 0, 4)
+        create_button(self.frame, self.theme, "Line De-blender", lambda: self.fit_selected_line(deblend=True), 0, 5)
+        create_button(self.frame, self.theme, "Single Slab Fit", self.single_slab_fit, 0, 6)
     
     def save_line(self):
         if self.main_plot.selected_wave is None:
@@ -32,8 +36,29 @@ class BottomOptions:
             "wavelength": np.mean(self.main_plot.selected_wave),
             "flux": np.max(self.main_plot.selected_flux)
         }
-        self.islat.save_line(line_info)
+        #self.islat.save_line(line_info)
+        df = pd.DataFrame([line_info])
+        #working_dir = os.path.dirname(os.path.abspath(__file__))
+        working_dir = self.islat.directorypath
+        working_dir = os.path.join(working_dir, self.config["line_save_directory"])
+        file = os.path.join(working_dir, self.config["line_save_file_name"])
+        print(f"Saving line to {file}")
+        df.to_csv(file, mode='a', header=not os.path.exists(file), index=False)
         self.data_field.insert_text(f"Saved line at ~{line_info['wavelength']:.4f} μm\n")
+
+    def show_saved_lines(self): ####
+        self.data_field.clear()
+        saved_lines = self.islat.get_saved_lines()
+        if not saved_lines:
+            self.data_field.insert_text("No saved lines available.\n")
+            return
+
+        self.data_field.insert_text("Saved Lines:\n")
+        for line in saved_lines:
+            self.data_field.insert_text(f"Wavelength: {line['wavelength']:.4f} μm, Flux: {line['flux']:.4f}\n")
+        
+        # Optionally, plot the saved lines on the main plot
+        self.main_plot.plot_saved_lines(saved_lines)
 
     def fit_selected_line(self, deblend=False):
         self.data_field.clear()
@@ -49,6 +74,28 @@ class BottomOptions:
             self.data_field.insert_text(fit_result)
         else:
             self.data_field.insert_text("Fit failed or insufficient data.\n")
+
+    def fit_saved_lines(self): ########
+        self.data_field.clear()
+        saved_lines = self.islat.get_saved_lines()
+        if not saved_lines:
+            self.data_field.insert_text("No saved lines to fit.\n")
+            return
+
+        self.data_field.insert_text("Fitting saved lines...\n")
+        fit_results = []
+        for line in saved_lines:
+            self.main_plot.selected_wave = [line['wavelength']]
+            self.main_plot.selected_flux = [line['flux']]
+            fit_result = self.main_plot.compute_fit_line()
+            if fit_result:
+                fit_results.append(fit_result)
+                self.data_field.insert_text(f"Fit for line at {line['wavelength']:.4f} μm: {fit_result}\n")
+            else:
+                self.data_field.insert_text(f"Fit failed for line at {line['wavelength']:.4f} μm.\n")
+
+        if fit_results:
+            self.main_plot.update_line_inspection_plot()
 
     def find_single_lines(self):
         self.main_plot.find_single_lines()
