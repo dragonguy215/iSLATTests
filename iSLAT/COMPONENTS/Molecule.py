@@ -32,10 +32,8 @@ class Molecule:
 
         self.temp = temp
         self.radius = radius
-        #self.n_mol = n_mol if n_mol is not None else float(self.scale_number * (10**self.scale_exponent))  # Number density in cm^-3
         self.n_mol = n_mol
         self.n_mol_init = float(self.scale_number * (10**self.scale_exponent))
-        #self.line_color = line_color
         self.is_active = is_active
 
         self.intrinsic_line_width = intrinsic_line_width
@@ -43,9 +41,7 @@ class Molecule:
         self.model_line_width = model_line_width  # Line width for the model spectrum
         self.distance = distance
         self.wavelength_range = wavelength_range #if wavelength_range is not ((None, None) or None) else (0.3, 1000)
-        #print("Wavelength range:", self.wavelength_range)
         
-        #print("Here is the file path for the molecule data:", filepath)
         self.mol_data = MolData(name, filepath)  # Load molecule data from file
         
         self.intensity = Intensity(self.mol_data)

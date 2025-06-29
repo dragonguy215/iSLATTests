@@ -25,13 +25,6 @@ class iSLATPlot:
         self.ax2.set_title("Line inspection plot")
         self.ax3.set_title("Population diagram")
 
-        #self.ax1.plot(self.wave_data, self.flux_data, color=self.theme["foreground"], label="Observed Spectrum")
-        #self.ax1.set_ylabel("Flux (Jy)")
-
-        '''print("Here is the wave and flux data for the main plot:")
-        print("Wavelength:", self.wave_data)
-        print("Flux:", self.flux_data)'''
-
         # Set default zoom similar to old behavior
         wmin, wmax = np.min(self.wave_data), np.max(self.wave_data)
         self.ax1.set_xlim(wmin, wmin + 0.25*(wmax - wmin))
@@ -58,24 +51,7 @@ class iSLATPlot:
         self.plot_data_line(self.wave_data, self.flux_data, label="Observed Spectrum", color=self.theme["foreground"])
         self.compute_sum_flux()
         self.islat.update_model_spectrum()
-        #self.draw_plot()  # Initial draw of the main plot
-        #print("ax1 lines:", self.ax1.lines)
         self.update_population_diagram()
-
-    '''@property
-    def model_lines(self):
-        """
-        Returns the list of model lines currently plotted on the main plot.
-        """
-        return self._model_lines
-    
-    @model_lines.setter
-    def model_lines(self, value):
-        """
-        reloads the plot whenever model_lines is set.
-        """
-        self._model_lines = value
-        self.canvas.'''
 
     def clear_model_lines(self):
         # remove previously plotted lines
@@ -108,26 +84,11 @@ class iSLATPlot:
         Assumes the islat.molecules dict has the MolData instances for calc.
         """
         molecule_obj = self.islat.molecules_dict[mol_name]
-        #model_flux = mol_obj.calculate_spectrum(temp, radius, density, self.wave_data)  # Ensure the method name matches the actual implementation in MolData
-        #model_flux = Spectrum(lam_min=self.wave_data[0], lam_max=self.wave_data[-1], dlambda=model_pixel_res, R=model_line_width, distance=dist).flux_jy
-        #(self, lam_min=None, lam_max=None, dlambda=None, R=None, distance=None):
         model_flux = molecule_obj.spectrum.flux_jy
-
-        '''if molecule_obj.name == "H2O":
-            print("hey bro, here are the current values for h20:")
-            print(f"temp: {molecule_obj.temp}, radius: {molecule_obj.radius}")
-            print(f"n_mol: {molecule_obj.n_mol}, scale_exponent: {molecule_obj.scale_exponent}, scale_number: {molecule_obj.scale_number}")
-            print(f"t_kin: {molecule_obj.t_kin}, intrinsic_line_width: {molecule_obj.intrinsic_line_width}, model_pixel_res: {molecule_obj.model_pixel_res}")
-            print(f"model_line_width: {molecule_obj.model_line_width}, distance: {molecule_obj.distance}, wavelength_range: {molecule_obj.wavelength_range}")'''
 
         if color is None:
             color = molecule_obj.line_color if hasattr(molecule_obj, "line_color") else self.theme["default_molecule_colors"][len(self.model_lines) % len(self.theme["default_molecule_colors"])]
-        #line, = self.ax1.plot(self.wave_data, model_flux, linestyle='-', color=color, alpha=0.7, label=f"{mol_name}")
         line, = self.ax1.plot(molecule_obj.spectrum.lamgrid, model_flux, linestyle='-', color=color, alpha=0.7, label=f"{mol_name}")
-        '''print("Here is the lamgrid for the model line:")
-        print(molecule_obj.spectrum.lamgrid)
-        print("And here is the model flux:")
-        print(model_flux)'''
 
         self.model_lines.append(line)
         self.ax1.legend()
@@ -225,7 +186,6 @@ class iSLATPlot:
 
         if len(self.selected_wave) < 5:
             self.ax2.clear()
-            #self.ax2.set_title("Line inspection plot")
             self.canvas.draw_idle()
             return
 
@@ -258,15 +218,8 @@ class iSLATPlot:
         self.ax3.set_xlabel(r'$E_{u}$ (K)')
         self.ax3.set_title('Population diagram', fontsize='medium')
 
-        #molecule_obj = self.islat.molecules_dict[mol_name]
-        #print("Whats good, here is the molecules dict:")
-        #print(self.islat.molecules_dict)
         molecule_obj = self.islat.molecules_dict["H2O"]
-        #print("And here is the molecule object:")
-        #print(molecule_obj)
         int_pars = molecule_obj.intensity.get_table
-        #print("Hey man heres that table you wanted:")
-        #print(int_pars)
         int_pars.index = range(len(int_pars.index))
 
         # Parsing the components of the lines in int_pars

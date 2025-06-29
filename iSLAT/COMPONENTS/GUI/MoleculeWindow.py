@@ -10,9 +10,6 @@ class MoleculeWindow:
         self.theme = config["theme"]
         self.islat = islat
 
-        #self.molecule_list = list(self.islat.molecules_dict.keys())
-        #print("Molecule list keys:", self.molecule_list)
-        #print("molecule list:", self.islat.molecules_dict)
         self.molecules_dict = self.islat.molecules_dict
         self.molecules = {}
 
@@ -48,7 +45,6 @@ class MoleculeWindow:
             on_btn = tk.Checkbutton(self.frame, variable=on_var, command=self.update_lines)
             on_btn.grid(row=i+1, column=4)
 
-            #color = mol_data.color or self.theme["default_molecule_colors"][i]
             color = self.theme["default_molecule_colors"][i]
             color_btn = tk.Button(self.frame, bg=color, width=4, command=lambda m=mol_name: self.pick_color(m))
             color_btn.grid(row=i+1, column=5)

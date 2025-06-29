@@ -143,7 +143,6 @@ class iSLAT:
         """
         update_default_molecule_parameters() updates the default molecule parameters from the DefaultMoleculeParameters.json file.
         """
-        #global default_molecule_parameters
         with open("CONFIG/DefaultMoleculeParameters.json", 'r') as f:
             default_molecule_parameters = json.load(f)["default_initial_params"]
         self.default_initial_parameters = default_molecule_parameters
@@ -152,7 +151,6 @@ class iSLAT:
         """
         update_initial_molecule_parameters() updates the initial molecule parameters from the DefaultMoleculeParameters.json file.
         """
-        #global initial_molecule_parameters
         with open("CONFIG/DefaultMoleculeParameters.json", 'r') as f:
             initial_molecule_parameters = json.load(f)["initial_parameters"]
         self.initial_molecule_parameters = initial_molecule_parameters
@@ -167,7 +165,6 @@ class iSLAT:
             try:
                 df = pd.read_csv(save_file)
                 self.savedata = {row['Molecule Name']: {col: row[col] for col in df.columns if col != 'Molecule Name'} for _, row in df.iterrows()}
-                #print("self.savedata:", self.savedata)
             except Exception as e:
                 print(f"Error reading save file: {e}")
                 self.savedata = []
@@ -179,7 +176,6 @@ class iSLAT:
         """ check_HITRAN(print_statments=True) checks if the HITRAN files are present and downloads them if necessary.
         If print_statments is True, it will print the status of the HITRAN files to the console."""
         if print_statments: print('\nChecking for HITRAN files: ...')
-        # If this is the first startup or reload_default_files is True, download the default HITRAN files
         if self.user_settings["first_startup"] or self.user_settings["reload_default_files"]:
             print('First startup or reload_default_files is True. Downloading default HITRAN files ...')
             for mol, bm, iso in zip(self.mols, self.basem, self.isot):
