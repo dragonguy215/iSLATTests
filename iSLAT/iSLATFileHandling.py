@@ -115,25 +115,22 @@ def read_save_data(file_path = save_folder_path, file_name=molecule_list_file_na
         savedata = {}
         return savedata
 
-def read_HITRAN_data(file_path=save_folder_path, file_name=None):
+def read_HITRAN_data(file_path):
     """
-    read_HITRAN_data() reads the HITRAN data from .par files.
-    If no file name is provided, it reads the default molecule files.
+    read_HITRAN_data(file_path) reads the HITRAN .par file at the given path.
+    Returns the contents as a list of lines (or processes to DataFrame if needed).
     """
-    if file_name is None:
-        file_name = "default_molecules.par"
-    file = os.path.join(file_path, file_name)
-    if os.path.exists(file):
-        try:
-            with open(file, 'r') as f:
-                data = f.readlines()
-            # Process the data as needed
-            return data
-        except FileNotFoundError:
-            print(f"File {file} not found.")
-            return []
-    else:
-        print(f"File {file} does not exist.")
+    if not os.path.exists(file_path):
+        print(f"HITRAN file '{file_path}' does not exist.")
+        return []
+
+    try:
+        with open(file_path, 'r') as f:
+            lines = f.readlines()
+        print(f"Successfully read HITRAN data from {file_path}")
+        return lines
+    except Exception as e:
+        print(f"Failed to read HITRAN file '{file_path}': {e}")
         return []
 
 def read_line_saves(file_path=save_folder_path, file_name=line_saves_file_name):

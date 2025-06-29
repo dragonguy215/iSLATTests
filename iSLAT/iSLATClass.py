@@ -17,7 +17,7 @@ import datetime
 
 context = ssl.create_default_context(cafile=certifi.where ())
 
-from .iSLATFileHandling import load_user_settings, read_from_csv, read_default_csv, read_from_user_csv, read_default_molecule_parameters, read_initial_molecule_parameters, read_save_data
+from .iSLATFileHandling import load_user_settings, read_default_molecule_parameters, read_initial_molecule_parameters, read_save_data, read_HITRAN_data
 
 from .ir_model import *
 from .COMPONENTS.chart_window import MoleculeSelector
@@ -162,38 +162,37 @@ class iSLAT:
         else:
             print('Not the first startup and reload_default_files is False. Skipping HITRAN files download.')'''
     
-    def check_HITRAN(self, print_statments = True):
-        """ check_HITRAN(print_statments=True) checks if the HITRAN files are present and downloads them if necessary.
-        If print_statments is True, it will print the status of the HITRAN files to the console."""
-        if print_statments: print('\nChecking for HITRAN files: ...')
+    def check_HITRAN(self):
+        """
+        Checks that all expected HITRAN files are present,
+        loads them using read_HITRAN_data, and optionally
+        stores them in self.hitran_data.
+        """
+        print("\nChecking HITRAN files:")
+
         if self.user_settings["first_startup"] or self.user_settings["reload_default_files"]:
             print('First startup or reload_default_files is True. Downloading default HITRAN files ...')
-            for mol, bm, iso in zip(self.mols, self.basem, self.isot):
-                save_folder = 'HITRANdata'
-                file_path = os.path.join(save_folder, "data_Hitran_2020_{:}.par".format(mol))
+            self.hitran_data = {}  # option: central dict holding lines by molecule name
 
-                if os.path.exists(file_path):
-                    print("File already exists for mol: {:}. Skipping.".format(mol))
+            for mol, bm, iso in zip(self.mols, self.basem, self.isot):
+                hitran_file = f"HITRANdata/data_Hitran_2020_{mol}.par"
+                if not os.path.exists(hitran_file):
+                    print(f"WARNING: HITRAN file for {mol} not found at {hitran_file}")
+                    self.hitran_data[mol] = []
                     continue
 
-                print("Downloading data for mol: {:}".format(mol))
-                Htbl, qdata, M, G = get_Hitran_data(bm, iso, self.min_vu, self.max_vu)
-
-                with open(file_path, 'w') as fh:
-                    fh.write("# HITRAN 2020 {:}; id:{:}; iso:{:};gid:{:}\n".format(mol, M, iso, G))
-                    fh.write("# Downloaded from the Hitran website\n")
-                    fh.write("# {:s}\n".format(str(datetime.date.today())))
-                    fh = write_partition_function(fh, qdata)
-                    fh = write_line_data(fh, Htbl)
-
-                print("Data for Mol: {:} downloaded and saved.".format(mol))
-
-            self.user_settings["first_startup"] = False
-            self.user_settings["reload_default_files"] = False
-            with open("UserSettings.json", 'w') as f:
-                json.dump(self.user_settings, f, indent=4)
+                # Try to read the data using your new robust loader
+                lines = read_HITRAN_data(hitran_file)
+                if lines:
+                    #print(f"Loaded HITRAN file for {mol}: {len(lines)} lines.")
+                    self.hitran_data[mol] = lines
+                else:
+                    #print(f"WARNING: HITRAN file for {mol} could not be parsed.")
+                    self.hitran_data[mol] = []
         else:
             print('Not the first startup and reload_default_files is False. Skipping HITRAN files download.')
+
+        print("Finished HITRAN file check.\n")
 
     def create_folders(self): # see if we need this one and/or add config for directories
         """
