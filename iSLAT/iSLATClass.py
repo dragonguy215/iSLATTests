@@ -256,7 +256,7 @@ class iSLAT:
         result = self.slab_model.fit()
         return result.summary()
 
-    def find_single_lines(self):
+    '''def find_single_lines(self):
         """ find_single_lines() identifies spectral lines in the flux data based on a threshold.
         It returns a list of wavelengths where the flux exceeds the threshold.
         The threshold is calculated as a fraction of the maximum flux value."""
@@ -269,38 +269,13 @@ class iSLAT:
                     found.append(self.wave_data[i])
         self.selected_lines = found
         print(f"Found {len(found)} lines.")
-        return found
+        return found'''
 
     def save_line(self, line_info):
         df = pd.DataFrame([line_info])
         file = os.path.join("SAVES", "lines_saved.csv")
         df.to_csv(file, mode='a', header=not os.path.exists(file), index=False)
         print(f"Line saved to {file}")
-
-    '''def fit_selected_line(self, xmin, xmax, deblend=False):
-        x_fit = self.wave_data[(self.wave_data >= xmin) & (self.wave_data <= xmax)]
-        y_fit = self.flux_data[(self.wave_data >= xmin) & (self.wave_data <= xmax)]
-        err = self.err_data[(self.wave_data >= xmin) & (self.wave_data <= xmax)]
-
-        if len(x_fit) < 5:
-            print("Not enough data points to fit.")
-            return None
-
-        print(f"Fitting line in range: {xmin:.4f}-{xmax:.4f}, points: {len(x_fit)}")
-
-        if deblend:
-            g1 = GaussianModel(prefix='g1_')
-            g2 = GaussianModel(prefix='g2_')
-            model = g1 + g2
-            params = g1.guess(y_fit, x=x_fit) + g2.guess(y_fit, x=x_fit)
-        else:
-            model = GaussianModel()
-            params = model.guess(y_fit, x=x_fit)
-
-        fit_result = model.fit(y_fit, params, x=x_fit, weights=1/err, nan_policy='omit')
-        print(fit_result.fit_report())
-
-        return fit_result  ''' 
 
     def get_line_data_in_range(self, xmin, xmax):
         selected_mol = self.active_molecule

@@ -7,7 +7,7 @@ from matplotlib.widgets import SpanSelector
 import numpy as np
 from lmfit.models import GaussianModel
 from iSLAT.ir_model import Spectrum
-from iSLAT.iSLATDefaultInputParms import dist, au, pc, ccum, hh, fwhm
+from iSLAT.iSLATDefaultInputParms import dist, au, pc, ccum, hh, specsep
 
 class iSLATPlot:
     def __init__(self, parent_frame, wave_data, flux_data, theme, islat_class_ref):
@@ -17,7 +17,7 @@ class iSLATPlot:
         self.islat = islat_class_ref
 
         self.fig = plt.Figure(figsize=(10, 7))
-        gs = GridSpec(2, 2, height_ratios=[2, 1], figure=self.fig)
+        gs = GridSpec(2, 2, height_ratios=[2, 3], figure=self.fig)
         self.ax1 = self.full_spectrum = self.fig.add_subplot(gs[0, :])
         self.ax2 = self.line_inspection = self.fig.add_subplot(gs[1, 0])
         self.ax3 = self.population_diagram = self.fig.add_subplot(gs[1, 1])
@@ -370,6 +370,69 @@ class iSLATPlot:
 
         # Populating the population diagram graph with the lines
         self.ax3.scatter(eu, rd_yax, s=0.5, color='#838B8B')
+        self.canvas.draw_idle()
+
+    def find_single_lines(self, xmin=None, xmax=None):
+        """
+        Finds single lines in the selected range and updates the line inspection plot.
+        """
+        if xmin is None or xmax is None:
+            if hasattr(self, 'current_selection') and self.current_selection:
+                xmin, xmax = self.current_selection
+            else:
+                print("No selection made for finding single lines.")
+                return
+
+        # Resetting the text feed box
+        #self.islat.data_field.delete('1.0', "end")
+
+        # Getting all the lines in the range of xmin and xmax
+        int_pars_line = self.islat.active_molecule.intensity.get_table
+        int_pars_line = int_pars_line[(int_pars_line['lam'] > xmin) & (int_pars_line['lam'] < xmax)]
+        int_pars_line.index = range(len(int_pars_line.index))
+
+        # Parsing the wavelengths and intensities of the lines in int_pars_line
+        lamb_cnts = int_pars_line['lam']
+        intensities = int_pars_line['intens']
+
+        # Determining a max threshold for lines we may want to consider
+        max_intens = intensities.max()
+        #max_threshold = max_intens * self.islat.line_threshold  # Filter out weak lines
+        max_threshold = max_intens * self.islat.user_settings.get("line_threshold", 0.03)
+
+        #specsep = self.islat.specsep
+        counter = 0
+
+        # Main function to find single lines
+        for j in int_pars_line.index:
+            include = True  # Boolean for determining if the line is single
+            j_lam = lamb_cnts[int_pars_line.index[j]]  # Wavelength of line of interest
+            sub_xmin = j_lam - specsep
+            sub_xmax = j_lam + specsep
+            j_intens = intensities[int_pars_line.index[j]]  # Intensity of line of interest
+            loc_threshold = j_intens * 0.1  # Local threshold for determining if the line is single
+
+            if j_intens >= max_threshold:  # Filter out weak lines
+                chk_range = int_pars_line[(int_pars_line['lam'] > sub_xmin) & (int_pars_line['lam'] < sub_xmax)]
+                range_intens = chk_range['intens']  # Intensities of lines within specsep range
+
+                for k in range(len(range_intens)):
+                    k_intens = range_intens.iloc[k]
+                    if k_intens >= loc_threshold and k_intens != j_intens:  # Exclude non-single lines
+                        include = False
+
+            if include:  # If the line is single, plot it
+                self.ax1.vlines(j_lam, self.ax1.get_ylim()[0], self.ax1.get_ylim()[1], linestyles='dashed', color='blue')
+                counter += 1
+
+        # Print the number of isolated lines found in the range
+        if counter == 0:
+            #self.islat.data_field.insert('1.0', 'No single lines found in the current wavelength range.')
+            print("No single lines found in the current wavelength range.")
+        else:
+            #self.islat.data_field.insert('1.0', f'There are {counter} single lines found in the current wavelength range.')
+            print(f"There are {counter} single lines found in the current wavelength range.")
+
         self.canvas.draw_idle()
 
     def toggle_legend(self):

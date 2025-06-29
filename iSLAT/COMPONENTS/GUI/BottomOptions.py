@@ -52,11 +52,18 @@ class BottomOptions:
             self.data_field.insert_text("Fit failed or insufficient data.\n")
 
     def find_single_lines(self):
-        lines = self.islat.find_single_lines()
+        '''lines = self.islat.find_single_lines()
         if lines:
             self.data_field.insert_text(f"Found {len(lines)} isolated lines.\n")
         else:
-            self.data_field.insert_text("No lines found.\n")
+            self.data_field.insert_text("No lines found.\n")'''
+        lines = self.main_plot.find_single_lines()
+        if lines:
+            self.data_field.insert_text(f"Found {len(lines)} isolated lines.\n")
+            for line in lines:
+                self.data_field.insert_text(f"Line at {line['wavelength']:.4f} μm with flux {line['flux']:.4f}\n")
+        else:
+            self.data_field.insert_text("No isolated lines found.\n")
 
     def single_slab_fit(self):
         result_text = self.islat.run_single_slab_fit()
