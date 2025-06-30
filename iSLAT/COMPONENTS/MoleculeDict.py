@@ -41,13 +41,14 @@ class MoleculeDict(dict):
 
     def add_molecules(self, *molecules):
         """Add multiple molecules to the dictionary."""
-        print("Here is what I got chief:")
-        print(molecules)
+        #print("Here is what I got chief:")
+        #print(molecules)
+        molecules = molecules[0]
         for mol in molecules:
-            print("Here is the current mol:", mol[0])
-            if isinstance(mol[0], Molecule):
-                print("Adding molecule:", mol[0])
-                self[mol[0].name] = mol[0]
+            #print("Here is the current mol:", mol)
+            if isinstance(mol, Molecule):
+                #print("Adding molecule:", mol)
+                self[mol.name] = mol
             else:
                 raise TypeError("Expected a Molecule instance.")
 

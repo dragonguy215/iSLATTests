@@ -31,7 +31,7 @@ class Molecule:
 
         self.hitran_data = hitran_data
 
-        print("Initial parameters for molecule:", initial_molecule_parameters)
+        #print("Initial parameters for molecule:", initial_molecule_parameters)
 
         self.t_kin = initial_molecule_parameters.get('t_kin', temp)  # Kinetic temperature in Kelvin
         self.scale_exponent = initial_molecule_parameters.get('scale_exponent', 1.0)  # Scaling exponent for the intensity
