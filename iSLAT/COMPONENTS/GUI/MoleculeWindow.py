@@ -14,6 +14,7 @@ class MoleculeWindow:
         self.molecules = {}
 
         self.build_table()
+        self.update_table()
 
     def build_table(self):
         self.frame = tk.LabelFrame(self.parent_frame, text="Molecules")

@@ -1,14 +1,10 @@
 import tkinter as tk
-from tkinter import filedialog
 from .MainPlot import iSLATPlot
 from .Data_field import DataField
 from .MoleculeWindow import MoleculeWindow
-#from .Tooltips import CreateToolTip
-#from .GUIFunctions import GUIHandlers
 from .ControlPanel import ControlPanel
 from .TopOptions import TopOptions
 from .BottomOptions import BottomOptions
-import os
 
 class GUI:
     def __init__(self, master, molecule_data, wave_data, flux_data, config, islat_class_ref):
@@ -70,14 +66,3 @@ class GUI:
     def start(self):
         self.create_window()
         self.window.mainloop()
-
-    '''def load_spectrum_file(self):
-        file_path = filedialog.askopenfilename(title="Select spectrum CSV")
-        if file_path:
-            self.islat_class.load_spectrum(file_path)
-            self.file_label.config(text=f"Loaded: {os.path.basename(file_path)}")
-            self.plot.wave_data = self.islat_class.wave_data
-            self.plot.flux_data = self.islat_class.flux_data
-            self.plot.ax1.clear()
-            self.plot.ax1.plot(self.plot.wave_data, self.plot.flux_data, color=self.theme["foreground"])
-            self.plot.canvas.draw_idle()'''

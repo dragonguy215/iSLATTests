@@ -24,7 +24,7 @@ class iSLATPlot:
 
         self.ax1.set_title("Full Spectrum with Line Inspection")
         self.ax2.set_title("Line inspection plot")
-        self.ax3.set_title("Population diagram")
+        self.ax3.set_title(f"{self.islat.active_molecule.displaylabel} Population diagram")
 
         self.make_span_selector()
 
@@ -43,6 +43,8 @@ class iSLATPlot:
         self.compute_sum_flux()
         self.islat.update_model_spectrum()
         self.update_population_diagram()
+        self.update_line_inspection_plot
+        self.update_model_plot()
 
     def match_display_range(self):
         if hasattr(self.islat, 'display_range') and self.islat.display_range:
@@ -357,7 +359,7 @@ class iSLATPlot:
         self.ax3.clear()
         self.ax3.set_ylabel(r'ln(4πF/(hν$A_{u}$$g_{u}$))')
         self.ax3.set_xlabel(r'$E_{u}$ (K)')
-        self.ax3.set_title('Population diagram', fontsize='medium')
+        self.ax3.set_title(f'{self.islat.active_molecule.displaylabel} Population diagram', fontsize='medium')
 
         molecule_obj = self.islat.active_molecule
         #molecule_obj = self.islat.molecules_dict["H2O"]

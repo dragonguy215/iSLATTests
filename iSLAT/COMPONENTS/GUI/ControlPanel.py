@@ -25,6 +25,7 @@ class ControlPanel:
         self.create_entry("Broadening:", 3, 2, "intrinsic_line_width", self.update_initvals)
 
         self.create_molecule_dropdown(4, 0)
+        self.reload_molecule_dropdown()
 
     def create_molecule_dropdown(self, row, column):
         label = tk.Label(self.frame, text="Molecule:")

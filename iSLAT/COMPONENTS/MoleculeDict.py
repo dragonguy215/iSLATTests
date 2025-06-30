@@ -66,3 +66,9 @@ class MoleculeDict(dict):
                 distance=distance,
                 hitran_data = hitran_data[mol_entry["name"]] if mol_entry["name"] in hitran_data else None
             )
+    
+    def clear(self):
+        """Clear the dictionary of all molecules."""
+        super().clear()
+        self.fluxes.clear()
+        print("MoleculeDict cleared.")
