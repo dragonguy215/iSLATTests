@@ -265,8 +265,8 @@ class MoleculeDict(dict):
                 continue
                 
             molecule = self[mol_name]
-            # Ensure molecule uses global wavelength range
-            molecule._wavelength_range = self._global_wavelength_range
+            # Ensure molecule uses global wavelength range (propagates to line list)
+            molecule.wavelength_range = self._global_wavelength_range
             
             try:
                 if use_interpolation:
@@ -453,8 +453,8 @@ class MoleculeDict(dict):
             start = time.perf_counter()
             try:
                 molecule = self[mol_name]
-                # Set wavelength range
-                molecule._wavelength_range = self._global_wavelength_range
+                # Set wavelength range (propagates to line list)
+                molecule.wavelength_range = self._global_wavelength_range
                 # Trigger lazy calculation
                 molecule._ensure_intensity_calculated()
                 elapsed = time.perf_counter() - start
@@ -567,7 +567,7 @@ class MoleculeDict(dict):
                 return (mol_name, None, None, 0.0)
             
             molecule = self[mol_name]
-            molecule._wavelength_range = self._global_wavelength_range
+            molecule.wavelength_range = self._global_wavelength_range
             
             try:
                 if use_interpolation:
@@ -1442,13 +1442,13 @@ class MoleculeDict(dict):
         old_value = self._global_wavelength_range
         if value != old_value:
             self._global_wavelength_range = value
-            # Update all molecules to use new range
+            # Update all molecules to use new range — this propagates through
+            # Molecule.wavelength_range → MoleculeLineList.wavelength_range
+            # so that each molecule only evaluates lines in the visible window.
             for molecule in self.values():
-                molecule._wavelength_range = value
-                if hasattr(molecule, '_dirty_flags'):
-                    molecule._dirty_flags['spectrum'] = True
+                molecule.wavelength_range = value
             
-            self.bulk_update_parameters({'wavelength_range': value})
+            self._summed_flux_cache.clear()
             self._notify_global_parameter_change('wavelength_range', old_value, value)
     
     @property

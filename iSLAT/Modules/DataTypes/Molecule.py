@@ -275,7 +275,8 @@ class Molecule:
         }
     
     def _compute_intensity_hash(self):
-        return hash((self._temp, self._n_mol, self._broad))
+        wavelength_tuple = tuple(self._wavelength_range) if self._wavelength_range else ()
+        return hash((self._temp, self._n_mol, self._broad, wavelength_tuple))
     
     def _compute_spectrum_hash(self):
         wavelength_tuple = tuple(self._wavelength_range) if self._wavelength_range else ()
@@ -344,11 +345,20 @@ class Molecule:
             start_time = time.perf_counter()
             if self.filepath:
                 debug_config.info('molecule_dict', f"Loading lines from filepath: {self.filepath}")
-                self.lines = MoleculeLineList(molecule_id=self.name, filename=self.filepath)
+                self.lines = MoleculeLineList(
+                    molecule_id=self.name, filename=self.filepath,
+                    wavelength_range=self._wavelength_range
+                )
             else:
                 print("Creating empty line list")
-                self.lines = MoleculeLineList(molecule_id=self.name)
+                self.lines = MoleculeLineList(
+                    molecule_id=self.name,
+                    wavelength_range=self._wavelength_range
+                )
             log_timing(f"Molecule._ensure_lines_loaded({self.name})", time.perf_counter() - start_time)
+        elif self.lines.wavelength_range != self._wavelength_range:
+            # Wavelength range changed — update the existing line list
+            self.lines.wavelength_range = self._wavelength_range
     
     def _ensure_intensity_calculated(self):
         if self._dirty_flags['intensity'] or self._intensity_cache['data'] is None:
@@ -378,7 +388,10 @@ class Molecule:
         section.mark("create_intensity_obj")
         if self.intensity is None:
             Intensity = _get_intensity_module()
-            self.intensity = Intensity(self.lines)
+            self.intensity = Intensity(self.lines, wavelength_range=self._wavelength_range)
+        elif self.intensity.wavelength_range != self._wavelength_range:
+            # Wavelength range changed — update the existing Intensity object
+            self.intensity.wavelength_range = self._wavelength_range
         
         print(f"Calculating intensity for {self.name}: T={self._temp}K, N_mol={self._n_mol:.2e}, dv={self._broad}")
         
@@ -452,7 +465,8 @@ class Molecule:
             lam_max=spectrum_lam_max,
             dlambda=self._model_pixel_res,
             R=spectral_resolution,
-            distance=self._distance
+            distance=self._distance,
+            wavelength_range=self._wavelength_range
         )
         
         area = np.pi * (self._radius) ** 2  # Area in AU^2 as expected by add_intensity
@@ -687,6 +701,12 @@ class Molecule:
     def wavelength_range(self, value):
         old_value = self._wavelength_range
         self._wavelength_range = value
+        # Propagate to existing line list and intensity so they filter
+        # to the new range without needing a full reload
+        if self.lines is not None:
+            self.lines.wavelength_range = value
+        if self.intensity is not None:
+            self.intensity.wavelength_range = value
         self._notify_my_parameter_change('wavelength_range', old_value, self._wavelength_range)
     
     @property

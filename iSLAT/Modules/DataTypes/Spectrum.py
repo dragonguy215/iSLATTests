@@ -52,11 +52,13 @@ class Spectrum:
         '_lam_min', '_lam_max', '_dlambda', '_R', '_distance',
         '_lamgrid', '_flux', '_flux_jy', '_I_arrays', '_lam_arrays', '_tau_arrays',
         '_components', '_flux_valid', '_convolution_cache',
-        '_kernel_cache', '_cache_stats', '_n_grid_points'
+        '_kernel_cache', '_cache_stats', '_n_grid_points', '_unique_cache',
+        '_wavelength_range'
     )
     
     def __init__(self, lam_min: float = None, lam_max: float = None, 
-                 dlambda: float = None, R: float = None, distance: float = None):
+                 dlambda: float = None, R: float = None, distance: float = None,
+                 wavelength_range: Optional[tuple] = None):
         """Initialize a spectrum class and prepare it to add intensity components
 
         Parameters
@@ -71,6 +73,10 @@ class Spectrum:
             Spectral resolution of the instrument in R = lambda/delta_lambda
         distance: float
             Distance to the disk in pc
+        wavelength_range: tuple of (float, float), optional
+            Wavelength range ``(lam_min, lam_max)`` in microns.  When set,
+            only lines within this range are included in the convolution.
+            Defaults to ``(lam_min, lam_max)`` when not provided.
         """
 
         # assure valid lambda grid range
@@ -83,6 +89,7 @@ class Spectrum:
         self._dlambda = dlambda
         self._R = R
         self._distance = distance
+        self._wavelength_range = wavelength_range if wavelength_range is not None else (lam_min, lam_max)
 
         # create wavelength grid with pre-calculated size
         n_points = int(1 + (lam_max - lam_min) / dlambda)
@@ -107,6 +114,23 @@ class Spectrum:
         self._convolution_cache = {}
         self._kernel_cache = {}
         self._cache_stats = {'hits': 0, 'misses': 0, 'invalidations': 0}
+        self._unique_cache = None  # Cached (key, lam, index_wavelength) from np.unique
+
+    def reset(self):
+        """Clear all accumulated intensity components, keeping the grid and kernel caches.
+
+        This is much cheaper than constructing a new Spectrum when only the
+        physical parameters (T, N, radius) change between evaluations,
+        because the wavelength grid and convolution kernels are preserved.
+        """
+        self._I_arrays.clear()
+        self._lam_arrays.clear()
+        self._tau_arrays.clear()
+        self._components.clear()
+        self._flux = None
+        self._flux_jy = None
+        self._flux_valid = False
+        self._unique_cache = None
 
     def add_intensity(self, intensity, dA: float):
         """Adds an intensity component to the spectrum
@@ -137,8 +161,9 @@ class Spectrum:
             return
 
         # 2. select only lines within the selected wavelength range using vectorized operations
-        select_border = 100 * self._lam_max / self._R
-        mask = (lam_all >= self._lam_min - select_border) & (lam_all <= self._lam_max + select_border)
+        wr_min, wr_max = self._wavelength_range
+        select_border = 100 * wr_max / self._R
+        mask = (lam_all >= wr_min - select_border) & (lam_all <= wr_max + select_border)
         
         if not np.any(mask):
             return  # No lines in range
@@ -162,7 +187,14 @@ class Spectrum:
         self._flux = None
         self._flux_jy = None
         self._flux_valid = False
+        self._unique_cache = None
         self._cache_stats['invalidations'] += 1
+
+    # Number of sigma bins for per-group kernel sizing.
+    # Lines are grouped by similar Gaussian width so narrow lines use a tighter
+    # kernel instead of the global maximum. More bins = tighter kernels per
+    # group (faster), but more loop iterations. 5 is a good balance.
+    _N_SIGMA_BINS = 5
 
     def _convol_flux(self):
         """Internal procedure to carry out the convolution, should never be called directly
@@ -179,62 +211,106 @@ class Spectrum:
             return np.zeros_like(self._lamgrid)
 
         # Concatenate all accumulated arrays at once (much faster than list extend)
-        I_array = np.concatenate(self._I_arrays).astype(np.float32)
-        lam_array = np.concatenate(self._lam_arrays).astype(np.float32)
+        I_array = np.concatenate(self._I_arrays)
+        lam_array = np.concatenate(self._lam_arrays)
 
-        # 1. summarize intensities at the (exactly) same wavelength, this improves performance, as only
-        #    one convolution kernel needs to be evaluated per line of a molecule (independent of intensity components)
-        lam, index_wavelength = np.unique(lam_array, return_inverse=True)
+        # 1. Summarize intensities at the (exactly) same wavelength. This improves
+        #    performance because only one convolution kernel needs to be evaluated per
+        #    unique line wavelength (independent of how many intensity components share it).
+        #
+        #    Cache the np.unique result: when the same Spectrum is reused in a fitting
+        #    loop (via reset()), the wavelength arrays don't change between calls -- only
+        #    the intensities do. Skipping the sort saves ~5-10% of convolution time.
+        lam_key = lam_array.data.tobytes()
+        if self._unique_cache is not None and self._unique_cache[0] == lam_key:
+            lam, index_wavelength = self._unique_cache[1], self._unique_cache[2]
+        else:
+            lam, index_wavelength = np.unique(lam_array, return_inverse=True)
+            self._unique_cache = (lam_key, lam, index_wavelength)
 
-        intens = np.zeros(lam.shape[0], dtype=np.float32)
-        np.add.at(intens, index_wavelength, I_array)
+        # np.bincount is ~5-20x faster than np.add.at for scatter-add accumulation
+        intens = np.bincount(index_wavelength, weights=I_array,
+                             minlength=lam.shape[0]).astype(np.float64)
         
         n_lines = lam.shape[0]
         n_grid = self._n_grid_points
 
-        # 2. calculate width and normalization of convolution kernel using pre-computed constants
+        # 2. Calculate width and normalization of convolution kernel
         fwhm = lam / self._R
         sigma = fwhm / self._FWHM_TO_SIGMA
         
         # Pre-compute terms that will be reused: norm * intens and 1/(2*sigma^2)
         norm_intens = (self._INV_SQRT_2PI / sigma) * intens  # shape: (n_lines,)
-        inv_2sigma_sq = 0.5 / (sigma ** 2)  # shape: (n_lines,)
+        inv_2sigma_sq = 0.5 / (sigma ** 2)                   # shape: (n_lines,)
 
-        # 3. Calculate kernel range and grid positions
-        max_sigma = np.nanmax(sigma)
-        kernel_range_size = int(15 * max_sigma / self._dlambda)
-        kernel_range = np.arange(-kernel_range_size, kernel_range_size + 1, dtype=np.int32)
-        kernel_size = kernel_range.shape[0]
-        
+        # Grid positions for each unique line wavelength
         lam_grid_position = (n_grid * (lam - self._lam_min) /
                              (self._lam_max - self._lam_min)).astype(np.int32)
 
-        # 4. Use 2D broadcasting approach - compute all (line, offset) pairs as 2D arrays
-        # grid_indices shape: (n_lines, kernel_size)
-        grid_indices = lam_grid_position[:, np.newaxis] + kernel_range[np.newaxis, :]
-        
-        # Create validity mask for in-bounds indices
-        valid_mask = (grid_indices >= 0) & (grid_indices < n_grid)
-        
-        # Compute wavelength differences using broadcasting
-        # delta_lam shape: (n_lines, kernel_size)
-        # Use clip to avoid out-of-bounds access, masked values will be zeroed later
-        safe_indices = np.clip(grid_indices, 0, n_grid - 1)
-        delta_lam = self._lamgrid[safe_indices] - lam[:, np.newaxis]
-        
-        # 5. Compute Gaussian kernel using broadcasting
-        # kernel shape: (n_lines, kernel_size)
-        kernel = norm_intens[:, np.newaxis] * np.exp(-delta_lam ** 2 * inv_2sigma_sq[:, np.newaxis])
-        
-        # Zero out invalid positions
-        kernel = np.where(valid_mask, kernel, 0.0)
+        # 3. Per-group kernel sizing
+        #    Instead of using the global max sigma for every line (which wastes
+        #    computation on narrow lines at short wavelengths), we bin lines by
+        #    similar sigma and use a tight kernel range per group.
+        flux = np.zeros(n_grid, dtype=np.float64)
 
-        # 6. Scatter-add to flux array
-        # Flatten for np.add.at (still the most efficient way for sparse accumulation)
-        flux = np.zeros(n_grid, dtype=np.float32)
-        np.add.at(flux, safe_indices.ravel(), kernel.ravel())
+        sigma_min = sigma.min()
+        sigma_max = sigma.max()
 
-        # 7. scale for distance and correct units for the area using pre-computed constant
+        if sigma_min == sigma_max or n_lines <= 1:
+            # All lines have the same width -- single group, no binning overhead
+            sigma_groups = [np.arange(n_lines)]
+            sigma_maxes = [sigma_max]
+        else:
+            # Create logarithmically-spaced bins so each group spans a similar
+            # ratio of sigma values (appropriate because sigma is proportional to wavelength).
+            bin_edges = np.geomspace(sigma_min * 0.999, sigma_max * 1.001,
+                                     num=self._N_SIGMA_BINS + 1)
+            group_ids = np.digitize(sigma, bin_edges) - 1  # 0-based bin index
+            group_ids = np.clip(group_ids, 0, self._N_SIGMA_BINS - 1)
+
+            unique_groups = np.unique(group_ids)
+            sigma_groups = [np.where(group_ids == g)[0] for g in unique_groups]
+            sigma_maxes = [sigma[idx].max() for idx in sigma_groups]
+
+        lamgrid = self._lamgrid  # local reference avoids repeated attribute lookup
+
+        for group_idx, group_sigma_max in zip(sigma_groups, sigma_maxes):
+            # Tight kernel range for this group
+            kernel_range_size = int(15.0 * group_sigma_max / self._dlambda)
+            kernel_range = np.arange(-kernel_range_size, kernel_range_size + 1,
+                                     dtype=np.int32)
+
+            g_pos = lam_grid_position[group_idx]          # (n_group,)
+            g_norm = norm_intens[group_idx]                # (n_group,)
+            g_inv2s = inv_2sigma_sq[group_idx]             # (n_group,)
+            g_lam = lam[group_idx]                         # (n_group,)
+
+            # 4. 2D broadcasting: compute all (line, offset) pairs
+            #    grid_indices shape: (n_group, kernel_size)
+            grid_indices = g_pos[:, np.newaxis] + kernel_range[np.newaxis, :]
+
+            # Validity mask for in-bounds indices
+            valid_mask = (grid_indices >= 0) & (grid_indices < n_grid)
+
+            # Clip to avoid out-of-bounds; masked values will be zeroed below
+            safe_indices = np.clip(grid_indices, 0, n_grid - 1)
+
+            # Wavelength differences
+            delta_lam = lamgrid[safe_indices] - g_lam[:, np.newaxis]
+
+            # 5. Gaussian kernel
+            kernel = (g_norm[:, np.newaxis]
+                      * np.exp(-delta_lam ** 2 * g_inv2s[:, np.newaxis]))
+
+            # Zero out invalid (out-of-grid) positions
+            kernel *= valid_mask  # in-place multiply is faster than np.where
+
+            # 6. Scatter-add via np.bincount (much faster than np.add.at)
+            flat_idx = safe_indices.ravel()
+            flat_wt = kernel.ravel()
+            flux += np.bincount(flat_idx, weights=flat_wt, minlength=n_grid)
+
+        # 7. Scale for distance and correct units for the area
         inv_dist_sq = 1.0 / (self._distance ** 2)
         scaled_flux = flux * (self._AU_PC_RATIO_SQ * inv_dist_sq)
 
@@ -259,6 +335,18 @@ class Spectrum:
             # Use pre-computed conversion factor
             self._flux_jy = flux_data * self._FLUX_JY_FACTOR * (self._lamgrid ** 2)
         return self._flux_jy
+
+    @property
+    def wavelength_range(self) -> tuple:
+        """tuple: Active wavelength range ``(lam_min, lam_max)`` in microns."""
+        return self._wavelength_range
+
+    @wavelength_range.setter
+    def wavelength_range(self, value: tuple):
+        """Set the wavelength range filter.  Invalidates cached flux."""
+        if value != self._wavelength_range:
+            self._wavelength_range = value
+            self._invalidate_flux_cache()
 
     @property
     def lamgrid(self) -> np.ndarray:
