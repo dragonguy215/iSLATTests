@@ -149,11 +149,28 @@ class BasePlot(ABC):
             return None, None
 
     @staticmethod
-    def get_intensity_data(molecule: "Molecule") -> Optional[pd.DataFrame]:
-        """
-        Return the Intensity table (DataFrame) from *molecule*.
+    def get_intensity_data(
+        molecule: "Molecule",
+        *,
+        full_range: bool = False,
+    ) -> Optional[pd.DataFrame]:
+        """Return the Intensity table (DataFrame) from *molecule*.
 
         Triggers calculation if needed.
+
+        Parameters
+        ----------
+        molecule : Molecule
+            Molecule object whose intensity data is requested.
+        full_range : bool, optional
+            If ``True``, return all lines in the underlying HITRAN
+            file with intensity computed for each.  Defaults to
+            ``False`` (active wavelength range only).
+
+        Returns
+        -------
+        Optional[pd.DataFrame]
+            Intensity table, or ``None`` when no data is available.
         """
         try:
             if molecule is None:
@@ -164,13 +181,20 @@ class BasePlot(ABC):
             intensity_obj = getattr(molecule, "intensity", None)
             if intensity_obj is None:
                 return None
-            table = getattr(intensity_obj, "get_table", None)
-            if table is not None:
+
+            # Prefer the new build_table() API when available
+            if hasattr(intensity_obj, "build_table"):
+                df = intensity_obj.build_table(full_range=full_range)
+            else:
+                # Fallback for older Intensity implementations
+                table = getattr(intensity_obj, "get_table", None)
+                if table is None:
+                    return None
                 df = table if isinstance(table, pd.DataFrame) else table
-                if hasattr(df, "index"):
-                    df.index = range(len(df.index))
-                return df
-            return None
+
+            if df is not None and hasattr(df, "index"):
+                df.index = range(len(df.index))
+            return df
         except Exception as exc:
             print(f"[BasePlot] Error getting intensity data: {exc}")
             return None

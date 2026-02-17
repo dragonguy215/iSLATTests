@@ -804,28 +804,26 @@ class Intensity:
         intensity, _ = self._calc_intensity_core(t_kin_vals, n_mol_vals, dv_vals, method)
         return intensity
 
-    def get_table_in_range(self, lam_min: float, lam_max: float) -> Any:
-        """Get a table with the lines in the specified wavelength range.
+    def get_table_in_range(self, lam_min: float, lam_max: float) -> "pandas.DataFrame":
+        """Get a table of lines within a specific wavelength window.
+
+        Convenience alias for ``build_table(wavelength_range=(lam_min, lam_max))``.
 
         Parameters
         ----------
-        lam_min: float
-            Minimum wavelength in microns
-        lam_max: float
-            Maximum wavelength in microns
+        lam_min : float
+            Minimum wavelength in microns.
+        lam_max : float
+            Maximum wavelength in microns.
 
         Returns
         -------
-        pd.DataFrame:
-            Dataframe with the lines in the specified range
+        pandas.DataFrame
+            DataFrame with line data and computed intensity/tau for
+            the requested sub-range.
         """
-        pd = _get_pandas()
-        if pd is None:
-            raise ImportError("Pandas required to create table")
+        return self.build_table(wavelength_range=(lam_min, lam_max))
 
-        mask = (self.molecule.lines_as_namedtuple.lam >= lam_min) & (self.molecule.lines_as_namedtuple.lam <= lam_max)
-        return self.get_table[mask]
-    
     def get_lines_in_range_with_intensity(self, lam_min: float, lam_max: float):
         """
         Get MoleculeLine objects in the specified wavelength range with computed intensity and tau values.
@@ -839,8 +837,8 @@ class Intensity:
             
         Returns
         -------
-        list
-            List of tuples (MoleculeLine, intensity, tau) within the range
+        list[tuple[MoleculeLine, float, float]]
+            List of ``(MoleculeLine, intensity, tau)`` tuples within the range.
         """
         # If no intensity calculated yet, return empty list
         if self._intensity is None or self._tau is None:
@@ -928,49 +926,195 @@ class Intensity:
         return f"Intensity(Mol-Name={self.molecule.name}, t_kin={self.t_kin} n_mol={self.n_mol} dv={self.dv}, " \
                f"tau={self.tau}, intensity={self.intensity})"
 
-    @property
-    def get_table(self) -> "pandas.DataFrame":
-        """pd.DataFrame: Pandas dataframe with line data"""
+    def build_table(
+        self,
+        *,
+        full_range: bool = False,
+        wavelength_range: Optional[tuple[float, float]] = None,
+    ) -> "pandas.DataFrame":
+        """Build a DataFrame of line data with computed intensity and tau.
+
+        By default returns only lines within the active wavelength range
+        (same behaviour as the legacy ``get_table`` property).  Use the
+        keyword arguments to widen or narrow the output.
+
+        Parameters
+        ----------
+        full_range : bool, optional
+            If ``True``, include all lines in the underlying HITRAN
+            file regardless of any wavelength filter on the
+            ``MoleculeLineList``.  Intensity and tau are computed for
+            every line using the current physical parameters.
+            Defaults to ``False`` (active wavelength range only).
+        wavelength_range : tuple[float, float], optional
+            ``(lam_min, lam_max)`` in microns.  When provided, the
+            returned table is filtered to this sub-window.
+            * If *full_range* is also ``True``, the sub-window is
+              applied to the full line list.
+            * If *full_range* is ``False``, the sub-window is applied
+              to the active (already-filtered) line list.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns: ``lev_up``, ``lev_low``, ``lam``, ``tau``,
+            ``intens``, ``a_stein``, ``e_up``, ``e_low``, ``g_up``,
+            ``g_low``.
+
+        Raises
+        ------
+        ImportError
+            If *pandas* is not installed.
+
+        Examples
+        --------
+        >>> # Active range only (default)
+        >>> df = intensity.build_table()
+
+        >>> # All lines in the HITRAN file with intensity computed for each
+        >>> df_full = intensity.build_table(full_range=True)
+
+        >>> # Narrow sub-window of the active range
+        >>> df_sub = intensity.build_table(wavelength_range=(4.9, 5.0))
+        """
         pd = _get_pandas()
         if pd is None:
             raise ImportError("Pandas required to create table")
 
-        # Use optimized approach with individual MoleculeLine objects for better performance
-        if hasattr(self.molecule, 'lines') and self.molecule.lines:
-            # Pre-calculate list comprehensions for better performance
-            tau_list = self.tau.tolist() if self.tau is not None else [None] * len(self.molecule.lines)
-            intens_list = self.intensity.tolist() if self.intensity is not None else [None] * len(self.molecule.lines)
-            
-            data_dict = {
-                'lev_up': [line.lev_up for line in self.molecule.lines],
-                'lev_low': [line.lev_low for line in self.molecule.lines],
-                'lam': [line.lam for line in self.molecule.lines],
-                'tau': tau_list,
-                'intens': intens_list,
-                'a_stein': [line.a_stein for line in self.molecule.lines],
-                'e_up': [line.e_up for line in self.molecule.lines],
-                'e_low': [line.e_low for line in self.molecule.lines],
-                'g_up': [line.g_up for line in self.molecule.lines],
-                'g_low': [line.g_low for line in self.molecule.lines]
-            }
-            return pd.DataFrame(data_dict)
+        df = self._build_table(pd, full_range=full_range)
 
-        # Fallback to namedtuple approach
-        lines = self.molecule.lines_as_namedtuple
+        # Apply optional wavelength sub-window
+        if wavelength_range is not None:
+            lam_min, lam_max = wavelength_range
+            mask = (df["lam"] >= lam_min) & (df["lam"] <= lam_max)
+            df = df.loc[mask].reset_index(drop=True)
+
+        return df
+
+    # ---- internal table builder -------------------------------------
+
+    # Column order used by all table-building paths
+    _TABLE_COLUMNS = ('lev_up', 'lev_low', 'lam', 'tau', 'intens',
+                      'a_stein', 'e_up', 'e_low', 'g_up', 'g_low')
+
+    def _build_table(self, pd, *, full_range: bool) -> "pandas.DataFrame":
+        """Unified table builder for both active-range and full-range modes.
+
+        Parameters
+        ----------
+        pd : module
+            The pandas module (already imported by caller).
+        full_range : bool
+            If ``True``, use all lines from the HITRAN file and
+            compute intensity and tau for every line, not just those
+            in the active wavelength window.  This reproduces the
+            behaviour from before wavelength-range filtering was
+            introduced.  If ``False``, use only the active lines.
+
+        Returns
+        -------
+        pandas.DataFrame
+        """
+        self.molecule._ensure_data_loaded()
+
+        if full_range:
+            raw = self.molecule._raw_lines_data
+        else:
+            raw = self.molecule._get_active_raw_data()
+
+        if raw is None or len(raw) == 0:
+            return pd.DataFrame(columns=list(self._TABLE_COLUMNS))
+
+        n_rows = len(raw)
+
+        # ---- intensity / tau mapping --------------------------------
+        if not full_range:
+            # Active range: computed arrays align 1-to-1 with *raw*
+            tau_col = self._tau if self._tau is not None else np.full(n_rows, np.nan)
+            intens_col = self._intensity if self._intensity is not None else np.full(n_rows, np.nan)
+        else:
+            # Full range: compute intensity for ALL lines so that the
+            # population diagram (and similar consumers) see the same
+            # data they did before wavelength-range filtering existed.
+            intens_col, tau_col = self._compute_full_range_intensity(raw)
+
         return pd.DataFrame({
-            'lev_up': lines.lev_up,
-            'lev_low': lines.lev_low,
-            'lam': lines.lam,
-            'tau': self.tau,
-            'intens': self.intensity,
-            'a_stein': lines.a_stein,
-            'e_up': lines.e_up,
-            'e_low': lines.e_low,
-            'g_up': lines.g_up,
-            'g_low': lines.g_low
+            'lev_up': raw['lev_up'],
+            'lev_low': raw['lev_low'],
+            'lam': raw['lam'],
+            'tau': tau_col,
+            'intens': intens_col,
+            'a_stein': raw['a_stein'],
+            'e_up': raw['e_up'],
+            'e_low': raw['e_low'],
+            'g_up': raw['g_up'].astype(int),
+            'g_low': raw['g_low'].astype(int),
         })
+
+    def _compute_full_range_intensity(self, raw) -> tuple:
+        """Compute intensity and tau for all lines in the HITRAN file.
+
+        Creates a temporary unfiltered MoleculeLineList and Intensity
+        object, then runs the standard calculation pipeline with the
+        same physical parameters (t_kin, n_mol, dv) stored on this
+        instance.  This avoids duplicating any calculation logic.
+
+        Parameters
+        ----------
+        raw : structured np.ndarray
+            The full ``_raw_lines_data`` array from the parent
+            MoleculeLineList.
+
+        Returns
+        -------
+        tuple of (np.ndarray, np.ndarray)
+            ``(intensity, tau)`` arrays with length ``len(raw)``.
+            Returns arrays filled with NaN if no parameters have
+            been set yet.
+        """
+        n_rows = len(raw)
+        if self._t_kin is None or self._n_mol is None or self._dv is None:
+            return np.full(n_rows, np.nan), np.full(n_rows, np.nan)
+
+        # Create a temporary unfiltered MoleculeLineList and Intensity
+        # so the full calculation pipeline runs over all lines.
+        from .MoleculeLineList import MoleculeLineList as _MLL
+        tmp_mll = _MLL(
+            molecule_id=self.molecule.molecule_id,
+            filename=self.molecule._filename,
+            wavelength_range=None,
+        )
+        tmp_intens = Intensity(tmp_mll, wavelength_range=None)
+        try:
+            tmp_intens.calc_intensity(
+                t_kin=self._t_kin,
+                n_mol=self._n_mol,
+                dv=self._dv,
+                method="curve_growth",
+            )
+            return (tmp_intens._intensity, tmp_intens._tau)
+        except Exception:
+            return np.full(n_rows, np.nan), np.full(n_rows, np.nan)
+
+    # ---- backward-compatible aliases --------------------------------
+
+    @property
+    def get_table(self) -> "pandas.DataFrame":
+        """pd.DataFrame: Line data for the active wavelength range.
+
+        .. deprecated::
+            Prefer ``build_table()`` which accepts ``full_range`` and
+            ``wavelength_range`` keyword arguments.  This property is
+            kept for backward compatibility.
+        """
+        return self.build_table()
+
+    @property
+    def table(self) -> "pandas.DataFrame":
+        """Alias for ``build_table()`` (active range only)."""
+        return self.build_table()
 
     def _repr_html_(self) -> Optional[str]:
         # noinspection PyProtectedMember
         pd = _get_pandas()
-        return self.get_table._repr_html_() if pd is not None else None
+        return self.build_table()._repr_html_() if pd is not None else None

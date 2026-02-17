@@ -1555,7 +1555,12 @@ class PlotRenderer:
             traceback.print_exc()
             return False
     
-    def get_intensity_data(self, molecule: 'Molecule') -> Optional[pd.DataFrame]:
+    def get_intensity_data(
+        self,
+        molecule: 'Molecule',
+        *,
+        full_range: bool = False,
+    ) -> Optional[pd.DataFrame]:
         """
         Get intensity table from molecule's caching system.
         
@@ -1566,13 +1571,16 @@ class PlotRenderer:
         ----------
         molecule : Molecule
             Molecule object with internal caching
+        full_range : bool, optional
+            If ``True``, include all lines regardless of the active
+            wavelength range.  Defaults to ``False``.
             
         Returns
         -------
         Optional[pd.DataFrame]
             Intensity table with columns: lam, intens, a_stein, g_up, e_up, etc.
         """
-        table = BasePlot.get_intensity_data(molecule)
+        table = BasePlot.get_intensity_data(molecule, full_range=full_range)
         if table is not None:
             debug_config.verbose("plot_renderer",
                                f"Retrieved intensity table for {self._get_molecule_display_name(molecule)}",

@@ -76,7 +76,7 @@ class PopulationDiagramPlot(BasePlot):
             ax.set_title("No molecule selected")
             return
 
-        int_pars = self.get_intensity_data(mol)
+        int_pars = self.get_intensity_data(mol, full_range=True)
         if int_pars is None:
             ax.set_title(
                 f"{self.get_molecule_display_name(mol)} - No intensity data",
