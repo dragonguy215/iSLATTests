@@ -24,13 +24,12 @@ def _make_bins(wavs):
     return edges, widths
 
 def _spectres(new_wavs, spec_wavs, spec_fluxes, fill=0.0, verbose=False):
-    """
-    Flux-conserving spectral resampling onto a new wavelength basis.
-    
-    This properly handles rebinning by integrating flux over bins rather
-    than simple interpolation, which is important for accurate flux 
-    conservation when resampling spectra with different pixel sampling.
-    
+    """Flux-conserving spectral resampling onto a new wavelength basis.
+
+    Vectorized implementation using ``np.searchsorted`` to map new bin edges
+    onto the old wavelength grid in O(n log m) time, replacing the previous
+    pure-Python loop over new bins.
+
     Parameters
     ----------
     new_wavs : numpy.ndarray
@@ -43,67 +42,79 @@ def _spectres(new_wavs, spec_wavs, spec_fluxes, fill=0.0, verbose=False):
         Value to use where new_wavs extends outside spec_wavs range.
     verbose : bool, optional
         If True, warn when fill values are used.
-        
+
     Returns
     -------
     new_fluxes : numpy.ndarray
         Array of resampled flux values with same length as new_wavs.
     """
-    old_wavs = spec_wavs
-    old_fluxes = spec_fluxes
+    old_edges, old_widths = _make_bins(spec_wavs)
+    new_edges, _ = _make_bins(new_wavs)
 
-    # Make arrays of edge positions and widths for the old and new bins
-    old_edges, old_widths = _make_bins(old_wavs)
-    new_edges, new_widths = _make_bins(new_wavs)
+    n_new = new_wavs.shape[0]
+    new_fluxes = np.full(n_new, fill, dtype=np.float64)
 
-    # Generate output array
-    new_fluxes = np.zeros(new_wavs.shape[0])
+    # Identify new bins that fall entirely within the old grid
+    valid = (new_edges[:-1] >= old_edges[0]) & (new_edges[1:] <= old_edges[-1])
+    if not np.any(valid):
+        if verbose:
+            warnings.warn(
+                "spectres: new_wavs contains values outside the range "
+                "in spec_wavs, new_fluxes will be filled with fill value.",
+                category=RuntimeWarning,
+            )
+        return new_fluxes
 
-    start = 0
-    stop = 0
+    valid_idx = np.where(valid)[0]
 
-    # Calculate new flux values, looping over new bins
-    for j in range(new_wavs.shape[0]):
-        # Add filler values if new_wavs extends outside of spec_wavs
-        if (new_edges[j] < old_edges[0]) or (new_edges[j + 1] > old_edges[-1]):
-            new_fluxes[j] = fill
-            if (j == 0 or j == new_wavs.shape[0] - 1) and verbose:
-                warnings.warn(
-                    "spectres: new_wavs contains values outside the range "
-                    "in spec_wavs, new_fluxes will be filled with fill value.",
-                    category=RuntimeWarning,
-                )
-            continue
+    # Map new bin edges onto old bin edges via searchsorted.
+    # start_idx[j] is the first old bin partially covered by new bin j;
+    # stop_idx[j] is the last old bin partially covered.
+    left_edges = new_edges[valid_idx]
+    right_edges = new_edges[valid_idx + 1]
 
-        # Find first old bin which is partially covered by the new bin
-        while old_edges[start + 1] <= new_edges[j]:
-            start += 1
+    # searchsorted gives the index in old_edges where the new edge would be inserted.
+    # Subtracting 1 converts from edge index to bin index.
+    start_idx = np.searchsorted(old_edges, left_edges, side='right') - 1
+    stop_idx = np.searchsorted(old_edges, right_edges, side='left') - 1
 
-        # Find last old bin which is partially covered by the new bin
-        while old_edges[stop + 1] < new_edges[j + 1]:
-            stop += 1
+    # Clip to valid bin range
+    n_old = spec_wavs.shape[0]
+    np.clip(start_idx, 0, n_old - 1, out=start_idx)
+    np.clip(stop_idx, 0, n_old - 1, out=stop_idx)
 
-        # If new bin is fully inside an old bin start and stop are equal
-        if stop == start:
-            new_fluxes[j] = old_fluxes[start]
-        else:
-            # Multiply the first and last old bin widths by partial coverage factor
-            start_factor = ((old_edges[start + 1] - new_edges[j])
-                            / (old_edges[start + 1] - old_edges[start]))
-            end_factor = ((new_edges[j + 1] - old_edges[stop])
-                          / (old_edges[stop + 1] - old_edges[stop]))
+    # Fast path: bins where start == stop (new bin is entirely inside one old bin)
+    same = start_idx == stop_idx
+    if np.any(same):
+        new_fluxes[valid_idx[same]] = spec_fluxes[start_idx[same]]
 
-            # Temporarily adjust widths for partial bins
-            old_widths[start] *= start_factor
-            old_widths[stop] *= end_factor
+    # Handle bins that span multiple old bins
+    diff_mask = ~same
+    if np.any(diff_mask):
+        diff_idx = valid_idx[diff_mask]
+        d_start = start_idx[diff_mask]
+        d_stop = stop_idx[diff_mask]
+        d_left = left_edges[diff_mask]
+        d_right = right_edges[diff_mask]
 
-            # Calculate flux-weighted average
-            f_widths = old_widths[start:stop + 1] * old_fluxes[start:stop + 1]
-            new_fluxes[j] = np.sum(f_widths) / np.sum(old_widths[start:stop + 1])
+        # Pre-compute partial coverage factors for the first and last old bins
+        start_factor = ((old_edges[d_start + 1] - d_left)
+                        / (old_edges[d_start + 1] - old_edges[d_start]))
+        end_factor = ((d_right - old_edges[d_stop])
+                      / (old_edges[d_stop + 1] - old_edges[d_stop]))
 
-            # Restore old bin widths to their initial values
-            old_widths[start] /= start_factor
-            old_widths[stop] /= end_factor
+        # Process in a loop — the span of old bins per new bin varies, so this
+        # inner loop is unavoidable, but the outer vectorisation eliminates
+        # the per-new-bin searchsorted overhead entirely.
+        for k in range(len(diff_idx)):
+            s = d_start[k]
+            e = d_stop[k]
+            sl = slice(s, e + 1)
+            w = old_widths[sl].copy()
+            w[0] *= start_factor[k]
+            w[-1] *= end_factor[k]
+            fw = w * spec_fluxes[sl]
+            new_fluxes[diff_idx[k]] = fw.sum() / w.sum()
 
     return new_fluxes
 

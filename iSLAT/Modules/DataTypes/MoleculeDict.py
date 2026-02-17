@@ -686,8 +686,10 @@ class MoleculeDict(dict):
             return {'success': 0, 'failed': 0, 'molecules': [], 'errors': []}
         
         # Auto-detect parallel processing
+        # ThreadPoolExecutor is counterproductive for CPU-bound numpy work
+        # due to GIL contention. Default to sequential unless explicitly enabled.
         if use_parallel is None:
-            use_parallel = len(valid_molecules) >= 3
+            use_parallel = False
         
         # Apply parameter overrides if provided - use bulk update for efficiency
         if 'parameter_overrides' in kwargs and kwargs['parameter_overrides'] is not None:

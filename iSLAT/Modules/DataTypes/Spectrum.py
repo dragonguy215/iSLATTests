@@ -232,7 +232,6 @@ class Spectrum:
         intens = np.bincount(index_wavelength, weights=I_array,
                              minlength=lam.shape[0]).astype(np.float64)
         
-        n_lines = lam.shape[0]
         n_grid = self._n_grid_points
 
         # 2. Calculate width and normalization of convolution kernel
@@ -256,9 +255,9 @@ class Spectrum:
         sigma_min = sigma.min()
         sigma_max = sigma.max()
 
-        if sigma_min == sigma_max or n_lines <= 1:
+        if sigma_min == sigma_max or lam.shape[0] <= 1:
             # All lines have the same width -- single group, no binning overhead
-            sigma_groups = [np.arange(n_lines)]
+            sigma_groups = [np.arange(lam.shape[0])]
             sigma_maxes = [sigma_max]
         else:
             # Create logarithmically-spaced bins so each group spans a similar
@@ -295,15 +294,15 @@ class Spectrum:
             # Clip to avoid out-of-bounds; masked values will be zeroed below
             safe_indices = np.clip(grid_indices, 0, n_grid - 1)
 
-            # Wavelength differences
-            delta_lam = lamgrid[safe_indices] - g_lam[:, np.newaxis]
-
-            # 5. Gaussian kernel
-            kernel = (g_norm[:, np.newaxis]
-                      * np.exp(-delta_lam ** 2 * g_inv2s[:, np.newaxis]))
+            # Wavelength differences -> Gaussian kernel (in-place)
+            kernel = lamgrid[safe_indices] - g_lam[:, np.newaxis]  # delta_lam
+            np.multiply(kernel, kernel, out=kernel)                 # delta_lam^2
+            kernel *= -g_inv2s[:, np.newaxis]                       # -delta_lam^2 / (2*sigma^2)
+            np.exp(kernel, out=kernel)                              # exp(...)
+            kernel *= g_norm[:, np.newaxis]                         # norm * exp(...)
 
             # Zero out invalid (out-of-grid) positions
-            kernel *= valid_mask  # in-place multiply is faster than np.where
+            kernel *= valid_mask
 
             # 6. Scatter-add via np.bincount (much faster than np.add.at)
             flat_idx = safe_indices.ravel()
