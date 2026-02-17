@@ -3,8 +3,6 @@ from typing import (
     Iterator, ItemsView, ValuesView, overload,
 )
 import numpy as np
-import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import time
 import os
 
@@ -464,6 +462,7 @@ class MoleculeDict(dict):
                 return (mol_name, False, elapsed, str(e))
         
         # Execute in parallel
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(calculate_single_molecule, name): name 
                       for name in valid_molecules}
@@ -596,6 +595,7 @@ class MoleculeDict(dict):
         else:
             flux_workers = max_workers
         
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         with ThreadPoolExecutor(max_workers=flux_workers) as executor:
             futures = {executor.submit(get_molecule_flux, name): name for name in molecules}
             
@@ -745,6 +745,8 @@ class MoleculeDict(dict):
     def _process_molecules_parallel(self, operation: str, molecule_names: List[str], 
                                    max_workers: Optional[int] = None, **kwargs) -> Dict[str, Any]:
         """Process molecules in parallel."""
+        import multiprocessing as mp
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         if max_workers is None:
             max_workers = min(len(molecule_names), mp.cpu_count())
         
@@ -979,6 +981,8 @@ class MoleculeDict(dict):
                                 initial_molecule_parameters: Dict[str, Dict[str, Any]],
                                 max_workers: Optional[int] = None) -> Dict[str, Any]:
         """Load molecules in parallel using multiprocessing."""
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor, as_completed
         if max_workers is None:
             max_workers = min(len(molecules_data), mp.cpu_count())
         

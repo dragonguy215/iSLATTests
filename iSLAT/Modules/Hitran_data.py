@@ -1,22 +1,12 @@
-from astroquery import hitran
-import pandas as pd
-import urllib.request
-import ssl
-#from .hitran_utils import get_molecule_identifier
-#from .global_identifier import get_global_identifier
-from astropy import units as un
-
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, TYPE_CHECKING
 import os
 import datetime
 from pathlib import Path
-#from .Hitran_data import get_Hitran_data
 from .FileHandling.partition_function_writer import write_partition_function
 from .FileHandling.line_data_writer import write_line_data
 
-context = ssl.create_default_context()
-context.check_hostname = False
-context.verify_mode = ssl.CERT_NONE
+if TYPE_CHECKING:
+    import pandas as pd
 
 def get_global_identifier(molecule_name, isotopologue_number=1):
     '''                                                                                                                                
@@ -125,12 +115,23 @@ def get_molecule_identifier(molecule_name):
     return(int(trans[molecule_name]))
 
 def get_molar_mass(molecule_name, isotopologue_number):
+    from astroquery import hitran
     M = get_molecule_identifier(molecule_name)
     ISO_Info = hitran.Hitran.ISO[(M, isotopologue_number)]
     molar_mass = ISO_Info[-2]
     return molar_mass
 
 def get_Hitran_data(Molecule_name, isotopologue_number, min_vu, max_vu):
+    import ssl
+    import urllib.request
+    import pandas as pd
+    from astroquery import hitran
+    from astropy import units as un
+
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+
     try:
         M = get_molecule_identifier(Molecule_name)
 
@@ -166,7 +167,7 @@ def get_Hitran_data(Molecule_name, isotopologue_number, min_vu, max_vu):
         print(f"Error: {error_msg}")
         raise RuntimeError(error_msg) from e
 
-def _parse_header_overrides(header: Optional[pd.DataFrame]) -> dict:
+def _parse_header_overrides(header: "Optional[pd.DataFrame]") -> dict:
     """Extract non-None values from a single-row header DataFrame into a plain dict."""
     if header is None or header.empty:
         return {}
@@ -182,10 +183,10 @@ def write_par_file(
     base_mol: str,
     isotopologue: int,
     Htbl,
-    qdata: pd.DataFrame,
+    qdata: "pd.DataFrame",
     M: int,
     G: int,
-    header: Optional[pd.DataFrame] = None,
+    header: "Optional[pd.DataFrame]" = None,
 ) -> None:
     """Write HITRAN line data and partition function to a .par file.
 

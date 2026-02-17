@@ -13,9 +13,7 @@ from .Modules.Debug.PerformanceLogger import (
 from .Modules.FileHandling.iSLATFileHandling import load_user_settings, save_user_settings, read_default_molecule_parameters, read_initial_molecule_parameters, read_full_molecule_parameters, read_HITRAN_data, read_from_user_csv, read_default_csv, read_spectral_data
 from .Modules.FileHandling.iSLATFileHandling import molsave_file_name, save_folder_path, hitran_data_folder_path, hitran_data_folder_name, example_data_folder_path
 
-from .Modules.Hitran_data import download_hitran_data
-
-import iSLAT.Constants as c
+from . import Constants as c
 # GUI is imported lazily in init_gui() to speed up startup
 from .Modules.DataTypes.Molecule import Molecule
 from .Modules.DataTypes.MoleculeDict import MoleculeDict
@@ -335,6 +333,7 @@ class iSLAT:
 
         if is_first or reload_files:
             print('First startup or reload_default_files is True. Loading default HITRAN files ...')
+            from .Modules.Hitran_data import download_hitran_data
             
             for mol, bm, iso in zip(self.mols, self.basem, self.isot):
                 hitran_file = f"DATAFILES/HITRANdata/data_Hitran_{mol}.par"

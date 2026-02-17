@@ -1,15 +1,26 @@
-from .Intensity import Intensity
-from .Spectrum import Spectrum
-from .Molecule import Molecule
-from .MoleculeDict import MoleculeDict
-from .MoleculeLineList import MoleculeLineList
-from .MoleculeLine import MoleculeLine
-
 __all__ = [
     "Intensity",
     "Spectrum",
     "Molecule",
     "MoleculeDict",
     "MoleculeLineList",
-    "MoleculeLine"
+    "MoleculeLine",
 ]
+
+_LAZY_IMPORTS = {
+    "Intensity": ".Intensity",
+    "Spectrum": ".Spectrum",
+    "Molecule": ".Molecule",
+    "MoleculeDict": ".MoleculeDict",
+    "MoleculeLineList": ".MoleculeLineList",
+    "MoleculeLine": ".MoleculeLine",
+}
+
+def __getattr__(name):
+    if name in _LAZY_IMPORTS:
+        import importlib
+        module = importlib.import_module(_LAZY_IMPORTS[name], __name__)
+        attr = getattr(module, name)
+        globals()[name] = attr
+        return attr
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
