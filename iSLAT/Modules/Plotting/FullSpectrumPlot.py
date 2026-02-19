@@ -6,6 +6,8 @@ showing the observed data, individual molecule models, summed model
 spectrum, and optionally line-list annotations and atomic lines.
 
 Can be used standalone (notebook / script) or embedded in a GUI layout.
+The interactive :class:`FullSpectrumView` composes an instance of this
+class for rendering, adding span-selectors and toggle sync on top.
 """
 
 from typing import Optional, Tuple, List, Dict, Any, Union, TYPE_CHECKING
@@ -13,9 +15,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 
 from .BasePlot import BasePlot
 
@@ -108,12 +110,52 @@ class FullSpectrumPlot(BasePlot):
         self.subplots: Dict[int, Axes] = {}
 
     # ------------------------------------------------------------------
+    # Public data mutators (for interactive reuse)
+    # ------------------------------------------------------------------
+    def update_data(
+        self,
+        wave_data: np.ndarray,
+        flux_data: np.ndarray,
+        molecules: Optional["MoleculeDict"] = None,
+        error_data: Optional[np.ndarray] = None,
+        line_list: Optional[pd.DataFrame] = None,
+        atomic_lines: Optional[pd.DataFrame] = None,
+    ) -> bool:
+        """Replace the data arrays and recompute panel layout.
+
+        Returns *True* if the panel edges changed (caller should rebuild
+        subplots); *False* if only the data values changed.
+        """
+        self.wave_data = np.asarray(wave_data)
+        self.flux_data = np.asarray(flux_data)
+        if molecules is not None:
+            self.molecules = molecules
+        self.error_data = np.asarray(error_data) if error_data is not None else None
+        if line_list is not None:
+            self.line_list = line_list
+        if atomic_lines is not None:
+            self.atomic_lines = atomic_lines
+
+        old_edges = self._panel_edges.copy()
+
+        self._xlim_start = float(np.nanmin(self.wave_data))
+        self._xlim_end = float(np.nanmax(self.wave_data))
+        self._step = (self._xlim_end - self._xlim_start) / max(self.n_panels, 1)
+        self._panel_edges = np.arange(self._xlim_start, self._xlim_end, self._step)
+
+        return (
+            len(old_edges) != len(self._panel_edges)
+            or not np.allclose(old_edges, self._panel_edges, atol=1e-6)
+        )
+
+    # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
         """Build the multi-panel figure."""
         n = len(self._panel_edges)
         self._ensure_figure()
         # Clear previous axes so regeneration doesn't stack on top
         self.fig.clf()
+        self.subplots.clear()
 
         # Compute summed flux once (if molecules are available)
         summed_wave: Optional[np.ndarray] = None
@@ -170,6 +212,13 @@ class FullSpectrumPlot(BasePlot):
                 if np.any(s_mask):
                     self._plot_summed_spectrum(ax, summed_wave[s_mask], summed_flux[s_mask])
 
+            # --- axes config (set BEFORE annotations so they read
+            #     correct ylim / xlim for label positioning) -------------
+            ax.set_xlim(*xr)
+            ax.set_ylim(ymin, ymax)
+            ax.tick_params(axis="x", labelsize=7)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=6, prune="both"))
+
             # --- line annotations ---------------------------------------
             if self.line_list is not None and len(self.line_list) > 0:
                 self._plot_line_annotations(ax, self.line_list, xr, ymin, ymax)
@@ -177,11 +226,6 @@ class FullSpectrumPlot(BasePlot):
             # --- atomic lines -------------------------------------------
             if self.atomic_lines is not None and len(self.atomic_lines) > 0:
                 self._plot_atomic_lines(ax, self.atomic_lines, xr=xr)
-
-            # --- axes config --------------------------------------------
-            ax.set_xlim(*xr)
-            ax.set_ylim(ymin, ymax)
-            ax.tick_params(axis="x", labelsize=7)
 
         # --- global labels & legend ------------------------------------
         if self.subplots:

@@ -17,7 +17,7 @@ from iSLAT.Modules.FileHandling.iSLATFileHandling import (
     write_molecules_to_csv, generate_csv, line_saves_file_path,
     line_saves_file_name, example_data_folder_path
 )
-from iSLAT.Modules.FileHandling.OutputFullSpectrum import output_full_spectrum
+from iSLAT.Modules.Plotting.FullSpectrumView import output_full_spectrum
 from iSLAT.Modules.DataProcessing.Slabfit import SlabFit as SlabModel
 from iSLAT.Modules.DataProcessing.BatchFittingService import BatchFittingService
 from iSLAT.Modules.DataProcessing.DeblendingService import DeblendingService
@@ -170,9 +170,10 @@ class TopBar(ResizableFrame):
             self.data_field.insert_text("No saved lines found.\n")
             return
         try:
-            self.line_toggle = not self.line_toggle
-            # Delegate to MainPlot's active view via the unified API
-            self.main_plot.active_view.toggle_saved_lines(self.line_toggle, loaded_lines=loaded_lines)
+            # Let MainPlot flip the toggle and forward to the active view
+            self.main_plot.toggle_saved_lines(loaded_lines=loaded_lines)
+            # Keep TopBar in sync for any legacy readers
+            self.line_toggle = self.main_plot.line_toggle
             
         except Exception as e:
             self.data_field.insert_text(f"Error loading saved lines: {e}\n")
@@ -598,9 +599,10 @@ class TopBar(ResizableFrame):
         Show atomic lines as vertical dashed lines on the plot.
         """
         try:
-            self.atomic_toggle = not self.atomic_toggle
-            # Delegate to MainPlot's active view via the unified API
-            self.main_plot.active_view.toggle_atomic_lines(self.atomic_toggle)
+            # Let MainPlot flip the toggle and forward to the active view
+            self.main_plot.toggle_atomic_lines()
+            # Keep TopBar in sync for any legacy readers
+            self.atomic_toggle = self.main_plot.atomic_toggle
 
         except Exception as e:
             self.data_field.insert_text(f"Error displaying atomic lines: {e}\n")

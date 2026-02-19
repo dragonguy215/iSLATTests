@@ -7,6 +7,8 @@ from matplotlib.gridspec import GridSpec
 
 import numpy as np
 
+from typing import Optional
+
 import iSLAT.Constants as c
 
 from .PlotRenderer import PlotRenderer
@@ -69,8 +71,16 @@ class iSLATPlot:
         self.active_lines = []  # List of (line, text, scatter, values) tuples for active molecular lines
         self.atomic_lines = []
         self.saved_lines = []
-        self.atomic_toggle: bool = False
-        self.summed_toggle: bool = True  # Summed spectrum visible by default
+
+        # Single source of truth for every overlay toggle.
+        # Views read this dict on activate() to reconcile their visual state.
+        self.toggle_state: dict = {
+            "atomic_lines": False,
+            "saved_lines":  False,
+            "summed":       True,
+            "legend":       True,
+            "current_selection": None,   # (xmin, xmax) or None
+        }
 
         #self.fig = plt.Figure(figsize=(15, 8.5))
         self.fig = plt.Figure(constrained_layout=True)
@@ -103,7 +113,7 @@ class iSLATPlot:
         # --- View strategy pattern ---
         # The active_view is the current rendering strategy.
         # ThreePanelView delegates to the existing axes + PlotRenderer.
-        # FullSpectrumView wraps the multi-panel OutputFullSpectrum.
+        # FullSpectrumView provides the self-contained multi-panel full spectrum layout.
         self._three_panel_view: PlotView = ThreePanelView(self)
         self._full_spectrum_view: PlotView = FullSpectrumView(self)
         self.active_view: PlotView = self._three_panel_view
@@ -132,6 +142,33 @@ class iSLATPlot:
         # This prevents triggering molecule calculations before window is visible
         # self._set_initial_zoom_range()
     
+    # ------------------------------------------------------------------
+    # Backward-compatible properties — read / write the toggle_state dict
+    # ------------------------------------------------------------------
+    @property
+    def atomic_toggle(self) -> bool:
+        return self.toggle_state["atomic_lines"]
+
+    @atomic_toggle.setter
+    def atomic_toggle(self, value: bool) -> None:
+        self.toggle_state["atomic_lines"] = value
+
+    @property
+    def line_toggle(self) -> bool:
+        return self.toggle_state["saved_lines"]
+
+    @line_toggle.setter
+    def line_toggle(self, value: bool) -> None:
+        self.toggle_state["saved_lines"] = value
+
+    @property
+    def summed_toggle(self) -> bool:
+        return self.toggle_state["summed"]
+
+    @summed_toggle.setter
+    def summed_toggle(self, value: bool) -> None:
+        self.toggle_state["summed"] = value
+
     def initialize_data(self):
         """
         Initialize data-dependent plot elements.
@@ -159,16 +196,6 @@ class iSLATPlot:
     def create_toolbar(self, frame):
         self.toolbar = NavigationToolbar2Tk(self.canvas, window = frame)
         return self.toolbar
-    
-    '''def toggle_legend(self):
-        if self.ax1.legend_ is None:
-            handles, labels = self.ax1.get_legend_handles_labels()
-            if handles:
-                ncols = 2 if len(handles) > 8 else 1 # maybe make this some global variable (MAX_LEGEND_LEN)
-            self.ax1.legend(ncols = ncols)
-        else:
-            self.ax1.legend_.remove()
-        self.canvas.draw_idle()'''
 
     def _apply_plot_theming(self):
         """Apply theme colors to matplotlib figure and toolbar"""
@@ -208,11 +235,12 @@ class iSLATPlot:
     # ------------------------------------------------------------------
     # Backward-compatibility properties for external code that still
     # references full_spectrum_plot / full_spectrum_plot_canvas directly.
+    # Now the FullSpectrumView *is* the plot (no inner _fsp wrapper).
     # ------------------------------------------------------------------
     @property
     def full_spectrum_plot(self):
-        """Return the underlying FullSpectrumPlot if it exists."""
-        return self._full_spectrum_view._fsp
+        """Return the FullSpectrumView (replaces the old FullSpectrumPlot)."""
+        return self._full_spectrum_view
 
     @property
     def full_spectrum_plot_canvas(self):
@@ -361,19 +389,21 @@ class iSLATPlot:
         Updates the main spectrum plot with observed data, model spectra, and summed flux.
 
         Delegates to the active view so the correct panel layout is refreshed.
-        The three-panel view also keeps the underlying axes current so a switch
-        back from full-spectrum mode will be up-to-date.
+        The inactive view is marked stale so it re-renders on the next activate().
         """
         # Always update the active view
         self.active_view.update_model_plot()
 
-        # If full-spectrum mode is active, also silently update the 3-panel
-        # data (axes, renderer state) so it's ready when the user switches back.
+        # Mark the *other* view as needing a refresh next time it's activated,
+        # instead of doing an expensive silent update now.
         if self.is_full_spectrum:
-            self._three_panel_view._do_update_model_plot()
+            self._three_panel_view._needs_refresh = True
+        else:
+            self._full_spectrum_view._needs_refresh = True
 
     def onselect(self, xmin, xmax):
         self.current_selection = (xmin, xmax)
+        self.toggle_state["current_selection"] = (xmin, xmax)
         mask = (self.islat.wave_data >= xmin) & (self.islat.wave_data <= xmax)
         self.selected_wave = self.islat.wave_data[mask]
         self.selected_flux = self.islat.flux_data[mask]
@@ -556,6 +586,7 @@ class iSLATPlot:
 
     def clear_selection(self):
         self.current_selection = None
+        self.toggle_state["current_selection"] = None
         self.clear_active_lines()
         self.ax2.clear()
         # Refresh population diagram without active line dots
@@ -657,6 +688,40 @@ class iSLATPlot:
         )
         # Don't call canvas.draw_idle() here - let caller batch it
 
+    def toggle_atomic_lines(self, show: Optional[bool] = None) -> None:
+        """
+        Toggle atomic line annotations on the active view.
+
+        Parameters
+        ----------
+        show : bool or None
+            If *None* the toggle is flipped; otherwise the explicit state
+            is forwarded.
+        """
+        if show is None:
+            self.atomic_toggle = not self.atomic_toggle
+        else:
+            self.atomic_toggle = show
+        self.active_view.toggle_atomic_lines(self.atomic_toggle)
+
+    def toggle_saved_lines(self, show: Optional[bool] = None, loaded_lines=None) -> None:
+        """
+        Toggle saved-line annotations on the active view.
+
+        Parameters
+        ----------
+        show : bool or None
+            If *None* the toggle is flipped; otherwise the explicit state
+            is forwarded.
+        loaded_lines : DataFrame or None
+            Pre-loaded line data.  If *None* the view will load from disk.
+        """
+        if show is None:
+            self.line_toggle = not self.line_toggle
+        else:
+            self.line_toggle = show
+        self.active_view.toggle_saved_lines(self.line_toggle, loaded_lines=loaded_lines)
+
     def toggle_legend(self):
         self.active_view.toggle_legend()
 
@@ -714,25 +779,14 @@ class iSLATPlot:
         self.canvas.draw_idle()
     
     def remove_atomic_lines(self):
-        self.plot_renderer.remove_atomic_lines(self.atomic_lines)
-        self.canvas.draw()
+        """Remove atomic lines — delegates to the active view."""
+        self.atomic_toggle = False
+        self.active_view.toggle_atomic_lines(False)
 
-    def plot_atomic_lines(self, data_field = None, atomic_lines = load_atomic_lines()):
-        if atomic_lines.empty:
-                if data_field: 
-                    self.data_field.insert_text("No atomic lines data found.\n")
-                return
-        
-        # Get wavelength and other data from the atomic lines DataFrame 
-        wavelengths = atomic_lines['wave'].values
-        species = atomic_lines['species'].values
-        line_ids = atomic_lines['line'].values
-                
-        self.plot_renderer.render_atomic_lines(self.atomic_lines, self.ax1, 
-        wavelengths, species, line_ids)
-
-        self.canvas.draw()
-        return wavelengths
+    def plot_atomic_lines(self, data_field=None, atomic_lines=None):
+        """Plot atomic lines — delegates to the active view."""
+        self.atomic_toggle = True
+        self.active_view.toggle_atomic_lines(True)
 
     def plot_vertical_lines(self, wavelengths, heights=None, colors=None, labels=None):
         """
@@ -990,21 +1044,15 @@ class iSLATPlot:
         # Delegate to PlotRenderer for plotting
         self.plot_renderer.plot_single_lines(wavelengths)
     
-    def plot_saved_lines(self, loaded_lines = None, data_field = None):
-        """Plot saved lines using PlotRenderer with delegation."""
-        # Load saved lines from file
-        if loaded_lines is None:
-            loaded_lines = ifh.read_line_saves(file_name=self.islat.input_line_list)
-            if loaded_lines.empty:    
-                if data_field:
-                    data_field.insert_text("No saved lines found.\n")
-                return
-        
-        self.plot_renderer.plot_saved_lines(loaded_lines, self.saved_lines)
-        #data_field.insert_text(f"Displayed {len(self.saved_lines)} saved lines on plot.\n")
-    
+    def plot_saved_lines(self, loaded_lines=None, data_field=None):
+        """Plot saved lines — delegates to the active view."""
+        self.line_toggle = True
+        self.active_view.toggle_saved_lines(True, loaded_lines=loaded_lines)
+
     def remove_saved_lines(self):
-        self.plot_renderer.remove_saved_lines(self.saved_lines)
+        """Remove saved lines — delegates to the active view."""
+        self.line_toggle = False
+        self.active_view.toggle_saved_lines(False)
 
     def apply_theme(self, theme=None):
         """Apply theme to the plot and update colors"""
