@@ -230,12 +230,36 @@ class BasePlot(ABC):
         error_data: Optional[np.ndarray] = None,
         color: str = "black",
         label: str = "Data",
+        deduplicate: bool = False,
     ) -> None:
-        """Plot observed spectrum data on *ax*."""
+        """Plot observed spectrum data on *ax*.
+
+        Parameters
+        ----------
+        ax : Axes
+            Target axes.
+        wave_data, flux_data : np.ndarray
+            Observed wavelength / flux arrays.
+        error_data : np.ndarray, optional
+            Error bars.
+        color : str
+            Line / marker colour.
+        label : str
+            Legend label.
+        deduplicate : bool
+            When *True*, remove any existing artists tagged with
+            ``_islat_observed`` before plotting new ones, and tag the
+            newly created artists.  Useful in GUI contexts where the
+            method may be called repeatedly on the same axes.
+        """
         if flux_data is None or len(flux_data) == 0:
             return
+
+        if deduplicate:
+            BasePlot._clear_tagged_artists(ax, "_islat_observed")
+
         if error_data is not None and len(error_data) == len(flux_data):
-            ax.errorbar(
+            container = ax.errorbar(
                 wave_data,
                 flux_data,
                 yerr=error_data,
@@ -247,8 +271,15 @@ class BasePlot(ABC):
                 elinewidth=0.5,
                 capsize=0,
             )
+            if deduplicate:
+                # Tag every part of the ErrorbarContainer for later removal
+                container[0]._islat_observed = True
+                for cap in container[1]:
+                    cap._islat_observed = True
+                for bar_col in container[2]:
+                    bar_col._islat_observed = True
         else:
-            ax.plot(
+            (line,) = ax.plot(
                 wave_data,
                 flux_data,
                 color=color,
@@ -256,6 +287,8 @@ class BasePlot(ABC):
                 label=label,
                 zorder=self._get_theme_value("zorder_observed", 2),
             )
+            if deduplicate:
+                line._islat_observed = True
 
     def _plot_summed_spectrum(
         self,
@@ -264,12 +297,24 @@ class BasePlot(ABC):
         summed_flux: np.ndarray,
         color: Optional[str] = None,
         label: str = "Sum",
+        deduplicate: bool = False,
     ) -> None:
-        """Plot the summed model spectrum as a filled area on *ax*."""
+        """Plot the summed model spectrum as a filled area on *ax*.
+
+        Parameters
+        ----------
+        deduplicate : bool
+            When *True*, remove any existing ``_islat_summed``-tagged
+            collections before plotting a new fill.
+        """
         if summed_flux is None or len(summed_flux) == 0:
             return
         if not np.any(summed_flux > 0):
             return
+
+        if deduplicate:
+            BasePlot._clear_tagged_artists(ax, "_islat_summed", lines=False)
+
         fill_color = color or self._get_theme_value("summed_spectra_color", "lightgray")
         fill = ax.fill_between(
             wave_data,
@@ -372,20 +417,121 @@ class BasePlot(ABC):
             if legend is not None:
                 legend.remove()
 
+    @staticmethod
+    def _clear_tagged_artists(
+        ax: Axes,
+        tag: str,
+        *,
+        lines: bool = True,
+        collections: bool = True,
+        texts: bool = False,
+    ) -> None:
+        """Remove every artist on *ax* that carries the attribute *tag*.
+
+        Parameters
+        ----------
+        ax : Axes
+            Target axes.
+        tag : str
+            Attribute name to look for (e.g. ``'_islat_observed'``).
+        lines : bool
+            Search ``ax.lines`` (includes ``Line2D`` artists).
+        collections : bool
+            Search ``ax.collections`` (includes ``LineCollection``,
+            ``PolyCollection``, etc.).
+        texts : bool
+            Search ``ax.texts``.
+        """
+        if lines:
+            for artist in ax.lines[:]:
+                if hasattr(artist, tag):
+                    artist.remove()
+        if collections:
+            for artist in ax.collections[:]:
+                if hasattr(artist, tag):
+                    artist.remove()
+        if texts:
+            for artist in ax.texts[:]:
+                if hasattr(artist, tag):
+                    artist.remove()
+
+    @staticmethod
+    def _plot_gaussian_fit(
+        ax: Axes,
+        gauss_fit: Any,
+        fitted_wave: np.ndarray,
+        fitted_flux: np.ndarray,
+        color: str = "lime",
+        linewidth: float = 2,
+        zorder: int = 10,
+        uncertainty_sigma: float = 3.0,
+        fill_alpha: float = 0.3,
+    ) -> None:
+        """Plot a Gaussian fit result with uncertainty band on *ax*.
+
+        Parameters
+        ----------
+        ax : Axes
+            Target matplotlib Axes.
+        gauss_fit : lmfit.model.ModelResult
+            The fitted model result (must support ``eval_uncertainty``).
+        fitted_wave, fitted_flux : np.ndarray
+            Wavelength / flux arrays produced by the fit.
+        color : str
+            Line and fill colour.
+        linewidth : float
+            Width of the fit curve.
+        zorder : int
+            Drawing order for the fit curve.
+        uncertainty_sigma : float
+            Number of sigma for the uncertainty envelope.
+        fill_alpha : float
+            Transparency of the uncertainty band.
+        """
+        if gauss_fit is None or fitted_wave is None or fitted_flux is None:
+            return
+        ax.plot(
+            fitted_wave,
+            fitted_flux,
+            color=color,
+            linewidth=linewidth,
+            zorder=zorder,
+            linestyle="--",
+        )
+        try:
+            dely = gauss_fit.eval_uncertainty(sigma=uncertainty_sigma)
+            ax.fill_between(
+                fitted_wave,
+                fitted_flux - dely,
+                fitted_flux + dely,
+                color=color,
+                alpha=fill_alpha,
+            )
+        except Exception:
+            pass  # Uncertainty evaluation may fail for some fits
+
+    @staticmethod
     def _plot_line_annotations(
-        self,
         ax: Axes,
         line_data: pd.DataFrame,
         xr: Tuple[float, float],
         ymin: float,
         ymax: float,
         offset_label: float = 0.003,
+        tag: Optional[str] = None,
     ) -> None:
         """
         Draw vertical dotted lines + labels for a line list DataFrame.
 
         The DataFrame must contain at least ``wave`` (or ``lam``) and
         ``species`` columns.
+
+        Parameters
+        ----------
+        tag : str, optional
+            When provided every created artist is stamped with
+            ``setattr(artist, tag, True)`` so callers can later remove
+            them with :meth:`_clear_tagged_artists`.
         """
         if line_data is None or len(line_data) == 0:
             return
@@ -398,8 +544,8 @@ class BasePlot(ABC):
 
         for i, lam in enumerate(lam_arr):
             if xr[0] < lam < xr[1]:
-                ax.vlines(lam, ymin, ymax, linestyles="dotted", color="grey", linewidth=0.7)
-                ax.text(
+                vl = ax.vlines(lam, ymin, ymax, linestyles="dotted", color="grey", linewidth=0.7)
+                txt = ax.text(
                     lam + offset_label,
                     ymax,
                     f"{species_arr[i]} {line_id_arr[i]}",
@@ -409,14 +555,26 @@ class BasePlot(ABC):
                     ha="left",
                     color="grey",
                 )
+                if tag is not None:
+                    setattr(vl, tag, True)
+                    setattr(txt, tag, True)
 
+    @staticmethod
     def _plot_atomic_lines(
-        self,
         ax: Axes,
         atomic_df: pd.DataFrame,
         xr: Optional[Tuple[float, float]] = None,
+        tag: Optional[str] = None,
     ) -> None:
-        """Draw atomic line markers on *ax*."""
+        """Draw atomic line markers on *ax*.
+
+        Parameters
+        ----------
+        tag : str, optional
+            When provided every created artist is stamped with
+            ``setattr(artist, tag, True)`` so callers can later remove
+            them with :meth:`_clear_tagged_artists`.
+        """
         if atomic_df is None or len(atomic_df) == 0:
             return
         if xr is not None:
@@ -424,10 +582,10 @@ class BasePlot(ABC):
                 (atomic_df["wave"] >= xr[0]) & (atomic_df["wave"] <= xr[1])
             ]
         for _, row in atomic_df.iterrows():
-            ax.axvline(row["wave"], linestyle="--", color="tomato", alpha=0.7)
+            line_artist = ax.axvline(row["wave"], linestyle="--", color="tomato", alpha=0.7)
             ylim = ax.get_ylim()
             xlim = ax.get_xlim()
-            ax.text(
+            text_artist = ax.text(
                 row["wave"] + 0.006 * (xlim[1] - xlim[0]),
                 ylim[1],
                 f"{row['species']} {row.get('line', '')}",
@@ -437,6 +595,53 @@ class BasePlot(ABC):
                 ha="left",
                 color="tomato",
             )
+            if tag is not None:
+                setattr(line_artist, tag, True)
+                setattr(text_artist, tag, True)
+
+    @staticmethod
+    def _plot_saved_line_markers(
+        ax: Axes,
+        loaded_lines: pd.DataFrame,
+        tag: str = "_islat_saved_line",
+        lam_color: str = "red",
+        range_color: str = "orange",
+        alpha: float = 0.7,
+    ) -> None:
+        """Plot saved-line markers on *ax* with artist tagging.
+
+        Handles both point markers (``lam`` column) and range markers
+        (``xmin`` / ``xmax`` columns).  Every created artist is stamped
+        with *tag* so it can be removed later via
+        :meth:`_clear_tagged_artists`.
+
+        Parameters
+        ----------
+        ax : Axes
+            Target axes.
+        loaded_lines : DataFrame
+            Saved-line data.  Expected columns: ``lam`` and optionally
+            ``xmin``, ``xmax``.
+        tag : str
+            Attribute name stamped onto every created artist.
+        lam_color, range_color : str
+            Colours for the centre-wavelength and range-boundary markers.
+        alpha : float
+            Transparency of the markers.
+        """
+        if loaded_lines is None or loaded_lines.empty:
+            return
+        for _, line in loaded_lines.iterrows():
+            if "lam" in line:
+                art = ax.axvline(
+                    line["lam"], color=lam_color, alpha=alpha,
+                    linestyle=":",
+                )
+                setattr(art, tag, True)
+            if "xmin" in line and "xmax" in line:
+                for val in (line["xmin"], line["xmax"]):
+                    art = ax.axvline(val, color=range_color, alpha=alpha)
+                    setattr(art, tag, True)
 
     # ------------------------------------------------------------------
     # Abstract API — subclasses must implement
@@ -449,11 +654,54 @@ class BasePlot(ABC):
     # ------------------------------------------------------------------
     # Public convenience methods
     # ------------------------------------------------------------------
+    @staticmethod
+    def _in_notebook() -> bool:
+        """Return *True* when running inside a Jupyter / IPython kernel.
+
+        Safe to call even when IPython is not installed.
+        """
+        try:
+            from IPython import get_ipython  # noqa: F811
+        except ImportError:
+            return False
+        try:
+            shell = get_ipython()
+            if shell is None:
+                return False
+            return type(shell).__name__ == "ZMQInteractiveShell"
+        except Exception:
+            return False
+
     def show(self, block: bool = False) -> None:
-        """Display the plot interactively."""
+        """Display the plot interactively.
+
+        In a Jupyter notebook the figure is rendered inline via
+        ``IPython.display.display``.  Outside of a notebook, the figure
+        is temporarily registered with pyplot so ``plt.show()`` can
+        display it in a window.
+        """
         if self.fig is None:
             self.generate_plot()
-        plt.show(block=block)
+
+        if self._in_notebook():
+            try:
+                from IPython.display import display as ipy_display  # noqa: F811
+                ipy_display(self.fig)
+            except ImportError:
+                plt.show(block=block)
+            return
+
+        # Non-notebook: register the figure with pyplot so plt.show()
+        # can display it in a GUI window.
+        try:
+            num = id(self.fig)
+            if num not in [m.num for m in plt._pylab_helpers.Gcf.get_all_fig_managers()]:
+                manager = plt._backend_mod.new_figure_manager_given_figure(num, self.fig)
+                plt._pylab_helpers.Gcf.set_active(manager)
+            plt.show(block=block)
+        except Exception:
+            # Last-resort fallback
+            plt.show(block=block)
 
     def save(
         self,

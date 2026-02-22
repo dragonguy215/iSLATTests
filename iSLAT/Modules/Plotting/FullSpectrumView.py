@@ -27,6 +27,7 @@ from matplotlib.widgets import SpanSelector
 
 from .PlotView import PlotView
 from .FullSpectrumPlot import FullSpectrumPlot
+from .BasePlot import BasePlot
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -112,12 +113,16 @@ class FullSpectrumView(PlotView):
     # Data loading
     # ==================================================================
     def _load_spectrum_data(self) -> Tuple[np.ndarray, np.ndarray]:
-        """Load and RV-correct the observed spectrum. Returns (wave, flux)."""
-        spectrum_data = pd.read_csv(self._islat.loaded_spectrum_file, sep=",")
+        """Return RV-corrected observed spectrum from in-memory iSLAT data.
+
+        Uses the already-loaded arrays on the iSLAT class instead of
+        re-reading the CSV from disk, which is a significant speed-up on
+        every call to ``_rebuild_plot`` / ``_create_plot``.
+        """
         rv = self._islat.molecules_dict.global_stellar_rv
-        wave = spectrum_data["wave"].values
+        wave = np.array(self._islat.wave_data_original, copy=True)
         wave = wave - (wave / SPEED_OF_LIGHT_KMS * rv)
-        flux = spectrum_data["flux"].values
+        flux = np.array(self._islat.flux_data, copy=True)
         return wave, flux
 
     def _load_line_data(self) -> Optional[pd.DataFrame]:
@@ -149,6 +154,9 @@ class FullSpectrumView(PlotView):
         """Refresh data and regenerate the composed plot.
 
         If the panel layout changed, the figure is rebuilt from scratch.
+        If only data/molecules changed, existing axes are updated in-place
+        via :meth:`FullSpectrumPlot.update_panels_inplace` for a significant
+        speed-up (avoids ``fig.clf()`` and re-creating all subplot objects).
         """
         wave, flux = self._load_spectrum_data()
         self.line_data = self._load_line_data()
@@ -171,10 +179,8 @@ class FullSpectrumView(PlotView):
             self._plot.generate_plot()
             self._install_span_selectors()
         else:
-            # Data changed but layout is the same — regenerate into existing fig
-            self.span_selectors.clear()
-            self._plot.generate_plot()
-            self._install_span_selectors()
+            # Layout unchanged — fast in-place update of existing axes
+            self._plot.update_panels_inplace()
 
     # ==================================================================
     # Span selector (interactive-only feature)
@@ -337,15 +343,29 @@ class FullSpectrumView(PlotView):
         wave_data: Any,
         active_molecule: Optional["Molecule"] = None,
         current_selection: Optional[Tuple[float, float]] = None,
+        force_rerender: bool = False,
     ) -> None:
         if not self._initialised or not self.subplots:
             return
 
-        # 1. Toggle molecule line visibility per subplot
-        for ax in self.subplots.values():
-            self._renderer.set_molecule_visibility(
-                molecule_name, is_visible, ax=ax, lines=ax.lines,
-            )
+        # 1. Toggle molecule line visibility per subplot.
+        #    When force_rerender is True (parameters changed while hidden),
+        #    destroy the stale artists and re-create them from fresh data.
+        if force_rerender and is_visible:
+            molecule = molecules_dict.get(molecule_name)
+            for ax in self.subplots.values():
+                self._renderer.remove_molecule_lines(
+                    molecule_name, ax=ax, lines=list(ax.lines), update_legend=False,
+                )
+                if molecule is not None:
+                    self._renderer.render_individual_molecule_spectrum(
+                        molecule, wave_data, subplot=ax, update_legend=False,
+                    )
+        else:
+            for ax in self.subplots.values():
+                self._renderer.set_molecule_visibility(
+                    molecule_name, is_visible, ax=ax, lines=ax.lines,
+                )
 
         # 2. Recompute summed spectrum
         try:
@@ -453,7 +473,11 @@ class FullSpectrumView(PlotView):
     # Overlay artist helpers (interactive-only)
     # ==================================================================
     def _add_saved_line_artists(self) -> None:
-        """Add saved-line annotations to every subplot."""
+        """Add saved-line annotations to every subplot.
+
+        Delegates to :meth:`BasePlot._plot_line_annotations` with
+        ``tag='_islat_saved_line'`` so artists can be removed later.
+        """
         if self._plot is None:
             return
 
@@ -463,77 +487,52 @@ class FullSpectrumView(PlotView):
         if self.line_data is None:
             return
 
-        col = "wave" if "wave" in self.line_data.columns else "lam"
-        if col not in self.line_data.columns:
-            return
-        svd_lamb = np.array(self.line_data[col])
-        svd_species = self.line_data["species"]
+        # Ensure the 'line' column exists (BasePlot expects it)
         if "line" not in self.line_data.columns:
             self.line_data["line"] = [""] * len(self.line_data)
-        svd_lineID = np.array(self.line_data["line"])
 
         for n, ax in self.subplots.items():
             is_last = n == len(self._plot._panel_edges) - 1
             panel_start = self._plot._panel_edges[n]
             panel_end = self._plot._xlim_end if is_last else panel_start + self._plot._step
             xr = (panel_start, panel_end)
-
-            # Use the axes' actual limits so annotations align with the plot
             ymin, ymax = ax.get_ylim()
 
-            for i in range(len(svd_lamb)):
-                if xr[0] < svd_lamb[i] < xr[1]:
-                    line = ax.vlines(
-                        svd_lamb[i], ymin, ymax,
-                        linestyles="dotted", color="grey", linewidth=0.7,
-                    )
-                    line._islat_saved_line = True
-                    text = ax.text(
-                        svd_lamb[i] + 0.003, ymax,
-                        f"{svd_species[i]} {svd_lineID[i]}",
-                        fontsize=6, rotation=90, va="top", ha="left", color="grey",
-                    )
-                    text._islat_saved_line = True
+            BasePlot._plot_line_annotations(
+                ax, self.line_data, xr, ymin, ymax,
+                tag="_islat_saved_line",
+            )
 
     def _remove_saved_line_artists(self) -> None:
         """Remove all ``_islat_saved_line`` artists."""
         for ax in self.subplots.values():
-            for coll in ax.collections[:]:
-                if hasattr(coll, "_islat_saved_line"):
-                    coll.remove()
-            for txt in ax.texts[:]:
-                if hasattr(txt, "_islat_saved_line"):
-                    txt.remove()
+            BasePlot._clear_tagged_artists(
+                ax, "_islat_saved_line", lines=True, collections=True, texts=True,
+            )
 
     def _add_atomic_line_artists(self) -> None:
-        """Add atomic-line annotations to every subplot."""
+        """Add atomic-line annotations to every subplot.
+
+        Delegates to :meth:`BasePlot._plot_atomic_lines` with
+        ``tag='_islat_atomic_line'`` so artists can be removed later.
+        No dependency on :class:`PlotRenderer` is needed.
+        """
         atomic_data = load_atomic_lines()
         for n, ax in self.subplots.items():
             is_last = n == len(self._plot._panel_edges) - 1
             panel_start = self._plot._panel_edges[n]
             panel_end = self._plot._xlim_end if is_last else panel_start + self._plot._step
             xr = (panel_start, panel_end)
-            filtered = atomic_data[
-                (atomic_data["wave"] >= xr[0]) & (atomic_data["wave"] <= xr[1])
-            ]
-            if len(filtered) > 0:
-                self._renderer.render_atomic_lines(
-                    filtered, ax,
-                    filtered["wave"].values,
-                    filtered["species"].values,
-                    filtered["line"].values,
-                    using_subplot=True,
-                )
+            BasePlot._plot_atomic_lines(
+                ax, atomic_data, xr=xr, tag="_islat_atomic_line",
+            )
 
     def _remove_atomic_line_artists(self) -> None:
         """Remove all ``_islat_atomic_line`` artists."""
         for ax in self.subplots.values():
-            for line in ax.lines[:]:
-                if hasattr(line, "_islat_atomic_line"):
-                    line.remove()
-            for txt in ax.texts[:]:
-                if hasattr(txt, "_islat_atomic_line"):
-                    txt.remove()
+            BasePlot._clear_tagged_artists(
+                ax, "_islat_atomic_line", lines=True, collections=False, texts=True,
+            )
 
     # ==================================================================
     # File output  (overrides PlotView.save_figure)
@@ -583,7 +582,7 @@ class FullSpectrumView(PlotView):
             atomic_lines_df = load_atomic_lines()
 
         # Create standalone figure — uses BasePlot._ensure_figure (non-pyplot)
-        wave, flux = self._load_spectrum_data()
+        wave, flux = self._load_spectrum_data()  # now reads from memory, not disk
         standalone = FullSpectrumPlot(
             wave_data=wave,
             flux_data=flux,
@@ -693,12 +692,11 @@ def output_full_spectrum(islat_ref: Any, rasterized: bool = False) -> str | None
     This is the backward-compatible replacement for the function that
     previously lived in ``OutputFullSpectrum.py``.
     """
-    # Load spectrum data
-    spectrum_data = pd.read_csv(islat_ref.loaded_spectrum_file, sep=",")
+    # Use in-memory data instead of re-reading the CSV from disk
     rv = islat_ref.molecules_dict.global_stellar_rv
-    wave = spectrum_data["wave"].values
+    wave = np.array(islat_ref.wave_data_original, copy=True)
     wave = wave - (wave / SPEED_OF_LIGHT_KMS * rv)
-    flux = spectrum_data["flux"].values
+    flux = np.array(islat_ref.flux_data, copy=True)
 
     # Read toggle state if available
     ts: dict = {}
