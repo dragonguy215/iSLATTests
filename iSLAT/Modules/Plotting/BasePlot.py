@@ -26,6 +26,43 @@ if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
 
+
+def _detect_system_theme() -> str:
+    """Return ``'DarkTheme'`` or ``'LightTheme'`` based on the OS appearance.
+
+    Works on macOS (via ``defaults``), Windows (via registry), and falls
+    back to ``'LightTheme'`` on other platforms or on error.
+    """
+    import platform
+    import subprocess
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            result = subprocess.run(
+                ["defaults", "read", "-g", "AppleInterfaceStyle"],
+                capture_output=True, text=True, timeout=2,
+            )
+            # "Dark" is returned when dark mode is active; command
+            # *fails* when light mode is active (key doesn't exist).
+            if result.returncode == 0 and "dark" in result.stdout.strip().lower():
+                return "DarkTheme"
+            return "LightTheme"
+        elif system == "Windows":
+            import winreg  # available only on Windows
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            )
+            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            winreg.CloseKey(key)
+            return "LightTheme" if value == 1 else "DarkTheme"
+        else:
+            # Linux / other — no universal API; default to light.
+            return "LightTheme"
+    except Exception:
+        return "LightTheme"
+
+
 # ---------------------------------------------------------------------------
 # Default theme (used when no GUI theme is supplied)
 # ---------------------------------------------------------------------------
@@ -41,6 +78,10 @@ DEFAULT_THEME: Dict[str, Any] = {
     "saved_line_color_one": "red",
     "saved_line_color_two": "orange",
     "default_molecule_color": "blue",
+    "model_linewidth": 2,
+    "model_alpha": 1,
+    "full_spectrum_model_linewidth": 0.8,
+    "full_spectrum_model_alpha": 0.8,
     "zorder_observed": 2,
     "zorder_summed": 1,
     "zorder_model": 3,
@@ -84,6 +125,79 @@ class BasePlot(ABC):
         """Return a value from the theme dict, or *default*."""
         return self.theme.get(key, default)
 
+    def apply_theme_to_figure(self, fig: Optional[MplFigure] = None) -> None:
+        """Apply theme background / foreground colours to a figure and all its axes.
+
+        This sets the figure face colour, axes face colour, tick colours,
+        label colours, title colours, and spine colours from the theme
+        dictionary.  Call this after ``generate_plot()`` (or at the end
+        of it) to get a fully themed figure without manual per-axes work.
+
+        Parameters
+        ----------
+        fig : Figure, optional
+            The figure to style.  Defaults to ``self.fig``.
+        """
+        target = fig if fig is not None else self.fig
+        if target is None:
+            return
+        fg = self._get_theme_value("foreground", "black")
+        bg = self._get_theme_value("background", "white")
+        graph_bg = self._get_theme_value("graph_fill_color", bg)
+
+        target.set_facecolor(bg)
+        for ax in target.axes:
+            ax.set_facecolor(graph_bg)
+            ax.tick_params(colors=fg, which="both")
+            ax.xaxis.label.set_color(fg)
+            ax.yaxis.label.set_color(fg)
+            ax.title.set_color(fg)
+            for spine in ax.spines.values():
+                spine.set_color(fg)
+            # Theme the legend text if one exists
+            legend = ax.get_legend()
+            if legend is not None:
+                frame = legend.get_frame()
+                if legend.get_visible() and frame.get_visible():
+                    frame.set_facecolor(graph_bg)
+                    frame.set_edgecolor(fg)
+                for text in legend.get_texts():
+                    # Skip texts that carry per-molecule colour
+                    if not getattr(text, '_islat_mol_color', False):
+                        text.set_color(fg)
+
+    @staticmethod
+    def load_theme(name: str = "auto") -> Dict[str, Any]:
+        """Load a theme dictionary from the bundled JSON theme files.
+
+        Parameters
+        ----------
+        name : str
+            Theme name (e.g. ``"DarkTheme"``, ``"LightTheme"``,
+            ``"PastelBlue"``).  The special value ``"auto"`` selects
+            ``"DarkTheme"`` or ``"LightTheme"`` depending on the
+            operating system's current appearance setting.
+
+        Returns
+        -------
+        dict
+            The parsed theme dictionary, or :data:`DEFAULT_THEME` if the
+            file cannot be found.
+        """
+        if name == "auto":
+            name = _detect_system_theme()
+
+        import json
+        try:
+            from iSLAT.Modules.FileHandling import theme_file_path
+            theme_json = Path(str(theme_file_path)) / f"{name}.json"
+            if theme_json.exists():
+                with open(theme_json, "r") as fh:
+                    return json.load(fh)
+        except Exception:
+            pass
+        return DEFAULT_THEME.copy()
+
     # ------------------------------------------------------------------
     # Molecule helpers (shared across all plot types)
     # ------------------------------------------------------------------
@@ -97,6 +211,52 @@ class BasePlot(ABC):
         """Return the colour associated with a molecule."""
         color = getattr(molecule, "color", None)
         return color if color else "blue"
+
+    @staticmethod
+    def build_molecule_legend(
+        ax: Axes,
+        mol_labels: List[str],
+        mol_colors: List[str],
+        *,
+        ncols: int = 12,
+        fontsize: int = 10,
+        bbox_to_anchor: Tuple[float, float] = (0.5, 1.4),
+    ) -> None:
+        """Create (or replace) a text-only, per-molecule-coloured legend.
+
+        Each entry is shown as bold coloured text with no visible handle
+        patch, giving a compact colour key above the plot.  The legend
+        texts are tagged with ``_islat_mol_color = True`` so that
+        :meth:`apply_theme_to_figure` will not overwrite them with the
+        foreground colour.
+
+        When *mol_labels* is empty the existing legend (if any) is
+        removed and no new one is created.
+        """
+        old = ax.get_legend()
+        if old is not None:
+            old.remove()
+
+        if not mol_labels:
+            return
+
+        from matplotlib.patches import Patch
+        handles = [Patch(facecolor='none', edgecolor='none') for _ in mol_colors]
+        leg = ax.legend(
+            handles,
+            mol_labels,
+            loc="upper center",
+            ncols=min(ncols, len(mol_labels)),
+            handlelength=0,
+            handletextpad=0,
+            bbox_to_anchor=bbox_to_anchor,
+            fontsize=fontsize,
+            prop={"weight": "bold"},
+            frameon=False,
+        )
+        for txt, col in zip(leg.get_texts(), mol_colors):
+            txt.set_color(col)
+            txt._islat_mol_color = True
 
     @staticmethod
     def get_molecule_spectrum_data(
@@ -228,7 +388,7 @@ class BasePlot(ABC):
         wave_data: np.ndarray,
         flux_data: np.ndarray,
         error_data: Optional[np.ndarray] = None,
-        color: str = "black",
+        color: Optional[str] = None,
         label: str = "Data",
         deduplicate: bool = False,
     ) -> None:
@@ -254,6 +414,9 @@ class BasePlot(ABC):
         """
         if flux_data is None or len(flux_data) == 0:
             return
+
+        if color is None:
+            color = self._get_theme_value("foreground", "black")
 
         if deduplicate:
             BasePlot._clear_tagged_artists(ax, "_islat_observed")
@@ -332,13 +495,17 @@ class BasePlot(ABC):
         ax: Axes,
         molecule: "Molecule",
         wave_data: Optional[np.ndarray] = None,
-        linewidth: float = 1,
-        alpha: float = 0.8,
+        linewidth: Optional[float] = None,
+        alpha: Optional[float] = None,
         linestyle: str = "--",
         interpolate_to_input: bool = False,
         target_wavelengths: Optional[np.ndarray] = None,
     ) -> Optional[Line2D]:
         """Plot a single molecule's model spectrum on *ax*."""
+        if linewidth is None:
+            linewidth = self._get_theme_value("model_linewidth", 0.8)
+        if alpha is None:
+            alpha = self._get_theme_value("model_alpha", 0.8)
         plot_lam, plot_flux = self.get_molecule_spectrum_data(
             molecule, wave_data,
             interpolate_to_input=interpolate_to_input,

@@ -5,6 +5,7 @@ from tkinter import ttk, colorchooser
 import numpy as np
 from iSLAT.Modules.DataTypes.Molecule import Molecule
 from iSLAT.Modules.FileHandling.iSLATFileHandling import load_control_panel_fields_config
+from iSLAT.Modules.Debug import debug_config
 from ..GUIFunctions import create_wrapper_frame, create_scrollable_frame, ColorButton
 #from .RegularFrame import RegularFrame
 from ..Tooltips import CreateToolTip
@@ -13,12 +14,12 @@ from ..Tooltips import CreateToolTip
 _IS_WINDOWS = platform.system() == "Windows"
 _ENTRY_LABEL_PADX = 2 if _IS_WINDOWS else 1
 _ENTRY_FIELD_PADX = 2 if _IS_WINDOWS else 1
-_MOL_BTN_WIDTH = 4 if _IS_WINDOWS else 2
+_MOL_BTN_WIDTH = 5 if _IS_WINDOWS else 3
 _COLOR_VIS_SCROLL_WIDTH = 170 if _IS_WINDOWS else 160
 _MOL_PARAM_SCROLL_WIDTH = 185 if _IS_WINDOWS else 170
 _MATCH_BTN_PADX = 2 if _IS_WINDOWS else 1
 # Column minimum pixel sizes for molecule visibility/color grid alignment
-_VIS_COL_MINSIZES = (26, 52, 26, 28) if _IS_WINDOWS else (20, 40, 20, 22)
+_VIS_COL_MINSIZES = (24, 40, 20, 22) if _IS_WINDOWS else (18, 32, 16, 18)
 
 class ControlPanel(ttk.Frame):
     def __init__(self, master, islat, plot, data_field, font):
@@ -327,23 +328,40 @@ class ControlPanel(ttk.Frame):
             if mol_name not in self.mol_visibility:
                 self.mol_visibility[mol_name] = visibility_var
 
-            mol_btn = tk.Button(
+            btn_theme = self.theme.get("buttons", {}).get("DefaultBotton", {}) if hasattr(self, 'theme') and self.theme else {}
+            mol_bg = btn_theme.get("background", "lightgray")
+            mol_fg = self.theme.get("foreground", "#000000") if hasattr(self, 'theme') and self.theme else "#000000"
+            mol_btn = tk.Label(
                 mol_frame,
                 text=mol_name,
                 width=_MOL_BTN_WIDTH,
-                activebackground="white",
-                activeforeground="#0a84ff",
+                bg=mol_bg,
+                fg=mol_fg,
+                relief="raised",
+                borderwidth=1,
+                cursor="hand2",
+                anchor="center",
             )
-            mol_btn.config(command=lambda name=mol_name: self._on_molecule_selected(mol_name=name))
+            mol_btn.bind("<Button-1>", lambda e, name=mol_name: self._on_molecule_selected(mol_name=name))
+            mol_btn.bind("<Enter>", lambda e, w=mol_btn: w.configure(bg="white", fg="#0a84ff"))
+            mol_btn.bind("<Leave>", lambda e, w=mol_btn, _bg=mol_bg, _fg=mol_fg: w.configure(bg=_bg, fg=_fg))
             mol_btn.grid(row=0, column=1, sticky="ew", pady=2)
             if len(mol_name) > self.max_name_len:
                 CreateToolTip(mol_btn, mol_name, bg=self.bg_color)
 
-            delete_btn = tk.Button(
+            del_bg = self.theme.get("delete_button_bg_color", "#b1403b") if hasattr(self, 'theme') and self.theme else "#b1403b"
+            del_fg = self.theme.get("delete_button_fg_color", "#000000") if hasattr(self, 'theme') and self.theme else "#000000"
+            delete_btn = tk.Label(
                 mol_frame,
                 text="X",
-                command=lambda name=mol_name, frame=mol_frame: self._delete_molecule(mol_name=name, frame=frame)
+                bg=del_bg,
+                fg=del_fg,
+                width=2,
+                relief="raised",
+                borderwidth=1,
+                cursor="hand2",
             )
+            delete_btn.bind("<Button-1>", lambda e, name=mol_name, frame=mol_frame: self._delete_molecule(mol_name=name, frame=frame))
             delete_btn.grid(row=0, column=2, pady=2, sticky="nsew")
 
             color_button = ColorButton(
@@ -729,13 +747,12 @@ class ControlPanel(ttk.Frame):
         # Simply toggle this molecule's visibility - don't affect other molecules
         self.islat.molecules_dict.bulk_set_visibility(new_visibility, [molecule_name])
         
-        # Debug: Verify the visibility was actually set
-        print(f"ControlPanel: Set {molecule_name} visibility to {new_visibility}, actual value: {getattr(selected_mol, 'is_visible', 'UNDEFINED')}")
+        debug_config.trace("control_panel", f"Set {molecule_name} visibility to {new_visibility}, actual value: {getattr(selected_mol, 'is_visible', 'UNDEFINED')}")
         
         # Trigger selective plot refresh to show/hide the molecule
         if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'plot') and hasattr(self.islat.GUI.plot, 'on_molecule_visibility_changed'):
             self.islat.GUI.plot.on_molecule_visibility_changed(molecule_name, new_visibility)
-            print(f"ControlPanel: Triggered selective plot refresh for visibility change")
+            debug_config.trace("control_panel", f"Triggered selective plot refresh for visibility change")
 
     def _toggle_all_molecule_visibility(self):
         """Toggle the visibility of all molecules at once"""
