@@ -442,6 +442,11 @@ class PlotRenderer:
         # Passing ``molecules`` would cause every visible molecule to be
         # drawn and appear in the legend.
 
+        # Resolve comparison molecules from islat when available.
+        comparison_molecules = []
+        if hasattr(self, 'islat') and hasattr(self.islat, 'comparison_molecules'):
+            comparison_molecules = self.islat.comparison_molecules
+
         # Reuse stored LineInspectionPlot, updating its parameters
         if self._line_inspection_plot is None:
             self._line_inspection_plot = LineInspectionPlot(
@@ -451,6 +456,7 @@ class PlotRenderer:
                 xmax=xmax,
                 molecule=active_molecule,
                 molecules=molecules,
+                comparison_molecules=comparison_molecules,
                 wave_data_obs=wave_data_obs,
                 ax=self.ax2,
                 fig=self.fig,
@@ -464,6 +470,7 @@ class PlotRenderer:
             self._line_inspection_plot.xmax = xmax
             self._line_inspection_plot.molecule = active_molecule
             self._line_inspection_plot.molecules = molecules
+            self._line_inspection_plot.comparison_molecules = comparison_molecules
             self._line_inspection_plot.wave_data_obs = (
                 np.asarray(wave_data_obs) if wave_data_obs is not None
                 else wave_data
@@ -958,7 +965,9 @@ class PlotRenderer:
         # Clear the list after removing all artists
         active_lines_list.clear()
     
-    def render_active_lines_in_population_diagram(self, line_data: List[Tuple['MoleculeLine', float, Optional[float]]], active_lines_list: List[Any]) -> None:
+    def render_active_lines_in_population_diagram(self, line_data: List[Tuple['MoleculeLine', float, Optional[float]]],
+                                                   active_lines_list: List[Any],
+                                                   molecule: Optional['Molecule'] = None) -> None:
         """
         Render active lines as scatter points in the population diagram.
         
@@ -972,6 +981,9 @@ class PlotRenderer:
             List of (MoleculeLine, intensity, tau) tuples
         active_lines_list : List[Any]
             List to store active line data for interaction
+        molecule : Molecule, optional
+            The molecule these lines belong to.  When *None* falls back to
+            ``self.islat.active_molecule``.
         """
         if not line_data:
             return
@@ -990,8 +1002,9 @@ class PlotRenderer:
         original_intensities = [intensity for _, intensity, _ in line_data]
         max_intensity = max(original_intensities) if original_intensities else 1.0
         
-        # Get molecule properties once (not in loop)
-        molecule = getattr(self.islat, 'active_molecule', None)
+        # Resolve molecule
+        if molecule is None:
+            molecule = getattr(self.islat, 'active_molecule', None)
         if molecule is None:
             return
         radius = getattr(molecule, 'radius', 1.0)
@@ -1002,8 +1015,9 @@ class PlotRenderer:
         dist = distance * c.PARSEC_CM
         beam_s = area / dist ** 2
         
-        # Cache theme value once
-        active_color = self._get_theme_value("active_scatter_line_color", 'green')
+        # Use the molecule's own colour for the scatter dots
+        mol_color = BasePlot.get_molecule_color(molecule)
+        mol_name = BasePlot.get_molecule_display_name(molecule)
         
         # Collect data for vectorized scatter (faster than individual scatter calls)
         e_ups = []
@@ -1025,6 +1039,9 @@ class PlotRenderer:
                 # Add GUI-internal fields
                 value_data['rd_yax'] = rd_yax
                 value_data['intensity_percent'] = (intensity / max_intensity) * 100
+                value_data['_molecule'] = molecule
+                value_data['_molecule_name'] = mol_name
+                value_data['_molecule_color'] = mol_color
                 value_data_list.append(value_data)
         
         if not e_ups:
@@ -1032,23 +1049,38 @@ class PlotRenderer:
             
         # Create single vectorized scatter call (much faster than N individual calls)
         sc = self.ax3.scatter(e_ups, rd_yaxs, s=30, 
-                             color=active_color, 
+                             color=mol_color, 
                              edgecolors='black', picker=True)
         
-        # Store the scatter collection for later recoloring
+        # Track scatter collections per molecule for later recoloring.
+        # Initialise the list on first use and append each collection.
+        if not hasattr(self, '_active_scatter_collections'):
+            self._active_scatter_collections = []
+        self._active_scatter_collections.append((sc, len(e_ups), molecule))
+
+        # Keep legacy attributes for backwards compat with pick handler
         self._active_scatter_collection = sc
         self._active_scatter_count = len(e_ups)
         
-        # Store reference to scatter and value data in active_lines_list
-        # Each entry gets the same scatter ref but different point_index for recoloring
+        # Store reference to scatter and value data in active_lines_list.
+        # Walk backwards from the end so we match already-existing entries
+        # that were created by render_active_lines_in_line_inspection_multi
+        # for the same molecule.
+        # Build a quick map: for each molecule+lam combo find the entry index.
+        existing_map: dict = {}
+        for i, entry in enumerate(active_lines_list):
+            vd = entry[3]
+            if vd.get('_molecule') is molecule and vd.get('lam') is not None:
+                existing_map[vd['lam']] = i
+
         for idx, value_data in enumerate(value_data_list):
-            value_data['_scatter_point_index'] = idx  # Store index within scatter collection
-            if idx < len(active_lines_list):
-                # Update existing entry with scatter artist reference
-                active_lines_list[idx][2] = sc  # All points share same scatter collection
-                active_lines_list[idx][3].update(value_data)
+            value_data['_scatter_point_index'] = idx
+            lam_key = value_data.get('lam')
+            match_i = existing_map.get(lam_key)
+            if match_i is not None:
+                active_lines_list[match_i][2] = sc
+                active_lines_list[match_i][3].update(value_data)
             else:
-                # Create new entry: [line_artist, text_obj, scatter_artist, value_data]
                 active_lines_list.append([None, None, sc, value_data])
     
     def render_active_lines_in_line_inspection(self, line_data: List[Tuple['MoleculeLine', float, Optional[float]]], active_lines_list: List[Any], 
@@ -1123,6 +1155,70 @@ class PlotRenderer:
                 else:
                     # Create new entry: [line_artist, text_obj, scatter_artist, value_data]
                     active_lines_list.append([vline, text, None, value_data])
+
+    def render_active_lines_in_line_inspection_multi(
+        self,
+        all_line_data: Dict['Molecule', List[Tuple['MoleculeLine', float, Optional[float]]]],
+        active_lines_list: List[Any],
+        max_y: float,
+    ) -> None:
+        """Render active lines for **multiple** molecules in the line inspection plot.
+
+        Each molecule's lines are drawn in that molecule's own colour so
+        they are visually distinguishable.
+
+        Parameters
+        ----------
+        all_line_data : dict[Molecule, list]
+            Mapping from molecule → ``(MoleculeLine, intensity, tau)`` tuples.
+        active_lines_list : list
+            Shared list that stores ``[vline, text, scatter, value_data]`` entries.
+        max_y : float
+            Maximum y value for scaling line heights.
+        """
+        if not all_line_data:
+            return
+
+        threshold_percent = self.get_line_intensity_threshold()
+
+        for molecule, line_data in all_line_data.items():
+            if not line_data:
+                continue
+
+            filtered = self.filter_lines_by_threshold(line_data, threshold_percent)
+            if not filtered:
+                continue
+
+            # Max intensity from *this* molecule's lines (for height scaling)
+            all_intensities = [i for _, i, _ in line_data]
+            max_intensity = max(all_intensities) if all_intensities else 1.0
+
+            mol_color = BasePlot.get_molecule_color(molecule)
+            mol_name = BasePlot.get_molecule_display_name(molecule)
+
+            for line, intensity, tau_val in filtered:
+                lineheight = (intensity / max_intensity) * max_y if max_intensity > 0 else 0
+                if lineheight <= 0:
+                    continue
+
+                vline = self.ax2.vlines(
+                    line.lam, 0, lineheight,
+                    color=mol_color, linestyle='dashed', linewidth=1, picker=True,
+                )
+                text = self.ax2.text(
+                    line.lam, lineheight,
+                    f"{line.e_up:.0f},{line.a_stein:.3f}",
+                    fontsize='x-small', color=mol_color, rotation=45,
+                )
+
+                value_data = LineInspectionPlot.get_line_info(line, intensity, tau_val)
+                value_data['lineheight'] = lineheight
+                value_data['intensity_percent'] = (intensity / max_intensity) * 100
+                value_data['_molecule'] = molecule
+                value_data['_molecule_name'] = mol_name
+                value_data['_molecule_color'] = mol_color
+
+                active_lines_list.append([vline, text, None, value_data])
     
     def get_molecule_spectrum_data(self, molecule: 'Molecule', wave_data: np.ndarray,
                                     interpolate_to_input: bool = False,

@@ -58,6 +58,7 @@ class LineInspectionPlot(BasePlot):
         error_data: Optional[np.ndarray] = None,
         molecule: Optional["Molecule"] = None,
         molecules: Optional["MoleculeDict"] = None,
+        comparison_molecules: Optional[List["Molecule"]] = None,
         line_data: Optional[List[Tuple["MoleculeLine", float, Optional[float]]]] = None,
         line_threshold: float = 0.0,
         figsize: Optional[Tuple[float, float]] = None,
@@ -74,6 +75,7 @@ class LineInspectionPlot(BasePlot):
         self.error_data = error_data
         self.molecule = molecule
         self.molecules = molecules
+        self.comparison_molecules: List["Molecule"] = comparison_molecules or []
         self.line_data = line_data
         self.line_threshold = line_threshold
         self._external_ax = ax
@@ -147,6 +149,21 @@ class LineInspectionPlot(BasePlot):
             if mol_max is not None and len(obs_flux) == 0:
                 max_y = max(max_y, mol_max)
 
+        # -- comparison molecules (shift-click secondary selections) ----
+        if self.comparison_molecules:
+            for comp_mol in self.comparison_molecules:
+                # Skip the active molecule if it somehow ended up in the
+                # comparison list.
+                if self.molecule is not None and getattr(comp_mol, 'name', None) == getattr(self.molecule, 'name', None):
+                    continue
+                comp_max = self._overlay_molecule(
+                    ax, comp_mol, use_interp, target_wave,
+                    color_override=self._comparison_color(comp_mol),
+                    linestyle_override="-.",
+                )
+                if comp_max is not None and len(obs_flux) == 0:
+                    max_y = max(max_y, comp_max)
+
         # -- individual line markers ------------------------------------
         if self.line_data:
             max_y = self._plot_line_markers(ax, self.line_data, max_y)
@@ -173,8 +190,17 @@ class LineInspectionPlot(BasePlot):
         molecule: "Molecule",
         interpolate_to_input: bool = False,
         target_wavelengths: Optional[np.ndarray] = None,
+        color_override: Optional[str] = None,
+        linestyle_override: Optional[str] = None,
     ) -> Optional[float]:
         """Plot one molecule model in the inspection range.
+
+        Parameters
+        ----------
+        color_override : str, optional
+            If given, use this colour instead of the molecule's own colour.
+        linestyle_override : str, optional
+            If given, use this linestyle instead of the default ``"--"``.
 
         Returns the max flux value in the range, or *None* if nothing was plotted.
         """
@@ -202,12 +228,31 @@ class LineInspectionPlot(BasePlot):
         ax.plot(
             model_wave_range,
             model_flux_range,
-            color=self.get_molecule_color(molecule),
-            linestyle="--",
+            color=color_override or self.get_molecule_color(molecule),
+            linestyle=linestyle_override or "--",
             linewidth=2,
             label=self.get_molecule_display_name(molecule),
         )
         return float(np.nanmax(model_flux_range))
+
+    @staticmethod
+    def _comparison_color(molecule: "Molecule") -> str:
+        """Return a distinguishable colour for a comparison molecule.
+
+        Uses the molecule's own colour but lightened / desaturated so it
+        contrasts with the active molecule's full-saturation dashed line.
+        Falls back to a salmon colour when the molecule has no colour or
+        if colour manipulation fails.
+        """
+        import matplotlib.colors as mcolors
+        base = getattr(molecule, "color", None) or "blue"
+        try:
+            rgba = mcolors.to_rgba(base)
+            # Lighten: blend 50 % toward white
+            lightened = tuple(c + (1.0 - c) * 0.40 for c in rgba[:3]) + (rgba[3],)
+            return mcolors.to_hex(lightened)
+        except Exception:
+            return "#FA8072"  # salmon fallback
 
     def _plot_line_markers(
         self,

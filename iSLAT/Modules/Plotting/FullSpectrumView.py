@@ -268,6 +268,7 @@ class FullSpectrumView(PlotView):
             main_plot.plot_renderer._pop_diagram_cache_key = None
             main_plot.plot_renderer._active_scatter_collection = None
             main_plot.plot_renderer._active_scatter_count = 0
+            main_plot.plot_renderer._active_scatter_collections = []
 
         main_plot.current_selection = (xmin, xmax)
 

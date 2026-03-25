@@ -311,10 +311,20 @@ class iSLATPlot:
 
         # Register for active molecule changes
         self.islat.add_active_molecule_change_callback(self._on_active_molecule_changed)
+
+        # Register for comparison molecule changes
+        self.islat.add_comparison_molecule_change_callback(self._on_comparison_molecules_changed)
     
     def _on_active_molecule_changed(self, old_molecule, new_molecule):
         """Handle active molecule changes"""
         self.on_active_molecule_changed()
+
+    def _on_comparison_molecules_changed(self, comparison_molecules):
+        """Handle comparison molecule list changes — refresh line inspection."""
+        if hasattr(self, 'current_selection') and self.current_selection:
+            xmin, xmax = self.current_selection
+            self.update_line_inspection_plot(xmin=xmin, xmax=xmax)
+            self.canvas.draw_idle()
     
     def _on_global_parameter_changed(self, parameter_name, old_value, new_value):
         """Handle global parameter changes that affect all molecules.
@@ -463,12 +473,46 @@ class iSLATPlot:
             xmax=xmax
         )
 
+    def _gather_all_active_line_data(self, xmin: float, xmax: float):
+        """Collect line data from the active molecule and all comparison molecules.
+
+        Returns
+        -------
+        dict[Molecule, list]
+            Mapping from molecule object to its ``(MoleculeLine, intensity, tau)`` tuples.
+        """
+        all_line_data: dict = {}
+
+        # Active molecule
+        active = self.islat.active_molecule
+        if active is not None:
+            try:
+                ld = self.get_molecule_line_data(active, xmin, xmax)
+                if ld:
+                    all_line_data[active] = ld
+            except Exception as e:
+                debug_config.warning("main_plot", f"Could not get line data for {active.name}: {e}")
+
+        # Comparison molecules
+        for comp_mol in getattr(self.islat, 'comparison_molecules', []):
+            if comp_mol is active:
+                continue
+            try:
+                ld = self.get_molecule_line_data(comp_mol, xmin, xmax)
+                if ld:
+                    all_line_data[comp_mol] = ld
+            except Exception as e:
+                debug_config.warning("main_plot", f"Could not get line data for {comp_mol.name}: {e}")
+
+        return all_line_data
+
     def plot_spectrum_around_line(self, xmin=None, xmax=None, highlight_strongest=True):
         """
         Plot spectrum around selected lines using molecule's built-in caching.
         
-        This method leverages the active molecule's intensity and line caching
-        to avoid redundant calculations.
+        Gathers line data from the active molecule **and** all comparison
+        molecules, renders them with per-molecule colours, and keeps the
+        population diagram synchronised with the selected line.
         """
         debug_config.verbose("line_inspection", f"plot_spectrum_around_line called", 
                            xmin=xmin, xmax=xmax, highlight_strongest=highlight_strongest)
@@ -485,31 +529,26 @@ class iSLATPlot:
 
         debug_config.trace("line_inspection", f"Processing selection: {xmin:.3f} - {xmax:.3f}")
         
-        # Get lines in range using the molecule's built-in line caching
-        try:
-            line_data = self.get_molecule_line_data(self.islat.active_molecule, xmin, xmax)
-            if not line_data:
-                self.islat.GUI.data_field.insert_text(f"No transitions found for {self.islat.active_molecule.name} in the selected range")
-                # Clear active lines and update population diagram even if no lines in range
-                debug_config.verbose("line_inspection", "No lines in range, clearing active lines")
-                self.clear_active_lines()
-                self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-                self.canvas.draw_idle()
-                return
-        except Exception as e:
-            debug_config.warning("main_plot", f"Could not get line data: {e}")
-            # Clear active lines and update population diagram even if no lines in range
-            debug_config.verbose("line_inspection", "Error getting line data, clearing active lines")
+        # Gather lines from active + comparison molecules
+        all_line_data = self._gather_all_active_line_data(xmin, xmax)
+
+        if not all_line_data:
+            active_name = getattr(self.islat.active_molecule, 'name', '?')
+            self.islat.GUI.data_field.insert_text(
+                f"No transitions found for active molecules in the selected range")
+            debug_config.verbose("line_inspection", "No lines in range, clearing active lines")
             self.clear_active_lines()
             self.plot_renderer.render_population_diagram(self.islat.active_molecule)
             self.canvas.draw_idle()
             return
 
+        total_lines = sum(len(v) for v in all_line_data.values())
+        debug_config.trace("line_inspection", f"Found {total_lines} lines across {len(all_line_data)} molecule(s)")
+
         # Clear previous active_lines before plotting
-        debug_config.trace("line_inspection", f"Found {len(line_data)} lines, plotting line inspection and population diagram")
         self.clear_active_lines()
-        self.plot_line_inspection(xmin, xmax, line_data, highlight_strongest=highlight_strongest)
-        self.plot_population_diagram(line_data)
+        self.plot_line_inspection(xmin, xmax, all_line_data=all_line_data, highlight_strongest=highlight_strongest)
+        self.plot_population_diagram(all_line_data=all_line_data)
         # Highlight strongest line AFTER both line inspection and population diagram are rendered
         # so that both the vertical line and scatter point get the orange color
         if highlight_strongest:
@@ -523,11 +562,59 @@ class iSLATPlot:
         debug_config.verbose("line_inspection", "plot_spectrum_around_line completed")
     
     def on_pick_line(self, event):
-        """Handle line pick events — interaction logic owned by the controller."""
+        """Handle line pick events — interaction logic owned by the controller.
+
+        When a line belonging to a comparison molecule is picked the
+        population diagram is refreshed to show that molecule.
+        """
         picked_value = self._handle_line_pick_event(event, self.active_lines)
         if picked_value:
             self.selected_line = picked_value
             self._display_line_info(picked_value)
+
+            # Switch population diagram to the molecule that owns this line
+            picked_mol = picked_value.get('_molecule')
+            if picked_mol is not None:
+                self.plot_renderer.render_population_diagram(picked_mol, force_redraw=True)
+                self.ax3.set_title(
+                    f"{BasePlot.get_molecule_display_name(picked_mol)} Population diagram",
+                    color=self.plot_renderer._get_theme_value('foreground', 'black'),
+                )
+                # Re-render the scatter dots for that molecule's lines
+                self.plot_renderer._active_scatter_collections = []
+                mol_line_data = [
+                    entry[3] for entry in self.active_lines
+                    if entry[3].get('_molecule') is picked_mol
+                ]
+                if mol_line_data:
+                    # Rebuild (line, intensity, tau) tuples from value_data
+                    class _MiniLine:
+                        pass
+                    rebuilt = []
+                    for vd in mol_line_data:
+                        ml = _MiniLine()
+                        ml.lam = vd.get('lam')
+                        ml.e_up = vd.get('e_up')
+                        ml.e_low = vd.get('e_low')
+                        ml.a_stein = vd.get('a_stein')
+                        ml.g_up = vd.get('g_up')
+                        ml.g_low = vd.get('g_low')
+                        ml.lev_up = vd.get('up_lev')
+                        ml.lev_low = vd.get('low_lev')
+                        rebuilt.append((ml, vd.get('intensity', 0), vd.get('tau')))
+                    self.plot_renderer.render_active_lines_in_population_diagram(
+                        rebuilt, self.active_lines, molecule=picked_mol,
+                    )
+                    # Highlight the picked scatter point orange in the new collection
+                    picked_idx = picked_value.get('_scatter_point_index')
+                    if picked_idx is not None:
+                        import matplotlib.colors as mcolors
+                        for sc, count, mol in self.plot_renderer._active_scatter_collections:
+                            if mol is picked_mol and picked_idx < count:
+                                mol_color = BasePlot.get_molecule_color(mol)
+                                colors = [mcolors.to_rgba(mol_color)] * count
+                                colors[picked_idx] = mcolors.to_rgba('orange')
+                                sc.set_facecolors(colors)
         self.canvas.draw_idle()
 
     def highlight_strongest_line(self):
@@ -620,47 +707,59 @@ class iSLATPlot:
         Any
             The value data of the picked line or None
         """
+        import matplotlib.colors as mcolors
+
         picked_value = None
+        picked_scatter_collection = None
         picked_scatter_idx = None
         picked_artist = event.artist
 
-        # Get the active scatter collection and count from the renderer
-        scatter_collection = getattr(self.plot_renderer, '_active_scatter_collection', None)
-        scatter_count = getattr(self.plot_renderer, '_active_scatter_count', 0)
-        active_color = self.plot_renderer._get_theme_value("active_scatter_line_color", 'green')
+        # Gather all scatter collections tracked by the renderer
+        scatter_collections = getattr(self.plot_renderer, '_active_scatter_collections', [])
+        # Build a set for quick artist identity checks
+        scatter_artists = {sc for sc, _cnt, _mol in scatter_collections}
 
-        # Check if the picked artist is the scatter collection
+        # Determine if a scatter point was clicked and in which collection
         scatter_point_clicked = None
-        if picked_artist is scatter_collection and hasattr(event, 'ind') and len(event.ind) > 0:
+        clicked_sc = None
+        if picked_artist in scatter_artists and hasattr(event, 'ind') and len(event.ind) > 0:
             scatter_point_clicked = event.ind[0]
+            clicked_sc = picked_artist
 
-        # Find which entry in active_lines was picked and reset line inspection colors
+        # Pass 1: reset every line to its molecule colour and find the picked entry
         for line, text_obj, scatter, value in active_lines_list:
+            mol_color = value.get('_molecule_color', 'green') if value else 'green'
+
             is_line_picked = (picked_artist is line)
             point_idx = value.get('_scatter_point_index', None) if value else None
-            is_scatter_picked = (scatter_point_clicked is not None and point_idx == scatter_point_clicked)
+            is_scatter_picked = (clicked_sc is not None and scatter is clicked_sc
+                                 and point_idx == scatter_point_clicked)
             is_picked = is_line_picked or is_scatter_picked
 
+            # Reset to molecule colour
             if line is not None:
-                line.set_color(active_color)
+                line.set_color(mol_color)
             if text_obj is not None:
-                text_obj.set_color(active_color)
+                text_obj.set_color(mol_color)
 
             if is_picked:
                 picked_value = value
+                picked_scatter_collection = scatter
                 picked_scatter_idx = point_idx
                 if line is not None:
                     line.set_color('orange')
                 if text_obj is not None:
                     text_obj.set_color('orange')
 
-        # Update scatter collection colors
-        if scatter_collection is not None and scatter_count > 0:
-            import matplotlib.colors as mcolors
-            colors = [mcolors.to_rgba(active_color)] * scatter_count
-            if picked_scatter_idx is not None and picked_scatter_idx < scatter_count:
+        # Pass 2: reset scatter collection colours per-molecule, then highlight pick
+        for sc, count, mol in scatter_collections:
+            mol_color = BasePlot.get_molecule_color(mol)
+            colors = [mcolors.to_rgba(mol_color)] * count
+            if (sc is picked_scatter_collection
+                    and picked_scatter_idx is not None
+                    and picked_scatter_idx < count):
                 colors[picked_scatter_idx] = mcolors.to_rgba('orange')
-            scatter_collection.set_facecolors(colors)
+            sc.set_facecolors(colors)
 
         return picked_value
 
@@ -683,20 +782,22 @@ class iSLATPlot:
         if not active_lines_list:
             return None
 
-        scatter_collection = getattr(self.plot_renderer, '_active_scatter_collection', None)
-        scatter_count = getattr(self.plot_renderer, '_active_scatter_count', 0)
-        active_color = self.plot_renderer._get_theme_value("active_scatter_line_color", 'green')
+        import matplotlib.colors as mcolors
 
-        # Reset all line inspection lines to green first
+        scatter_collections = getattr(self.plot_renderer, '_active_scatter_collections', [])
+
+        # Reset all line inspection lines to their molecule colour
         for line, text_obj, scatter, value in active_lines_list:
+            mol_color = value.get('_molecule_color', 'green') if value else 'green'
             if line is not None:
-                line.set_color(active_color)
+                line.set_color(mol_color)
             if text_obj is not None:
-                text_obj.set_color(active_color)
+                text_obj.set_color(mol_color)
 
         # Find the line with the highest intensity
         highest_intensity = -float('inf')
         strongest_triplet = None
+        strongest_scatter_collection = None
         strongest_scatter_idx = None
 
         for line, text_obj, scatter, value in active_lines_list:
@@ -704,16 +805,19 @@ class iSLATPlot:
             if intensity > highest_intensity:
                 highest_intensity = intensity
                 strongest_triplet = [line, text_obj, scatter, value]
+                strongest_scatter_collection = scatter
                 strongest_scatter_idx = value.get('_scatter_point_index', None) if value else None
 
-        # Reset scatter collection to all green, then highlight strongest in orange
-        if scatter_collection is not None and scatter_count > 0:
-            import matplotlib.colors as mcolors
-            colors = [mcolors.to_rgba(active_color)] * scatter_count
-            if strongest_scatter_idx is not None and strongest_scatter_idx < scatter_count:
+        # Reset scatter collections to molecule colours, highlight strongest in orange
+        for sc, count, mol in scatter_collections:
+            mol_color = BasePlot.get_molecule_color(mol)
+            colors = [mcolors.to_rgba(mol_color)] * count
+            if (sc is strongest_scatter_collection
+                    and strongest_scatter_idx is not None
+                    and strongest_scatter_idx < count):
                 colors[strongest_scatter_idx] = mcolors.to_rgba('orange')
-            scatter_collection.set_facecolors(colors)
-            scatter_collection.set_zorder(1)
+            sc.set_facecolors(colors)
+            sc.set_zorder(1)
 
         # Highlight the strongest line inspection elements in orange
         if strongest_triplet is not None:
@@ -825,73 +929,88 @@ class iSLATPlot:
         self.canvas.draw_idle()
         return
 
-    def plot_line_inspection(self, xmin=None, xmax=None, line_data=None, highlight_strongest=True):
+    def plot_line_inspection(self, xmin=None, xmax=None, line_data=None,
+                             all_line_data=None, highlight_strongest=True):
+        """Render the line inspection panel with vertical line markers.
+
+        Parameters
+        ----------
+        all_line_data : dict[Molecule, list], optional
+            Per-molecule line data gathered by
+            :meth:`_gather_all_active_line_data`.  When provided the old
+            *line_data* argument is ignored.
+        """
         if xmin is None or xmax is None:
             self.clear_active_lines()
             self.plot_renderer.ax2.clear()
-            # Refresh population diagram without active line dots
             if hasattr(self.islat, 'active_molecule') and self.islat.active_molecule:
                 self.plot_renderer.render_population_diagram(self.islat.active_molecule)
             self.current_selection = None
             self.canvas.draw_idle()
             return
-        
-        # Get line data using the molecular line API
-        if line_data is None:
-            try:
-                line_data = self.get_molecule_line_data(self.islat.active_molecule, xmin, xmax)
-                if not line_data:
-                    self.clear_active_lines()
-                    self.ax2.clear()
-                    # Refresh population diagram without active line dots
-                    if hasattr(self.islat, 'active_molecule') and self.islat.active_molecule:
-                        self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-                    self.current_selection = None
-                    self.canvas.draw_idle()
-                    return
-            except Exception as e:
-                debug_config.warning("main_plot", f"Could not get line data: {e}")
+
+        # Legacy single-molecule path: wrap into the new dict format.
+        if all_line_data is None:
+            if line_data is None:
+                try:
+                    line_data = self.get_molecule_line_data(self.islat.active_molecule, xmin, xmax)
+                except Exception as e:
+                    debug_config.warning("main_plot", f"Could not get line data: {e}")
+                    line_data = []
+            if not line_data:
                 self.clear_active_lines()
                 self.ax2.clear()
-                # Refresh population diagram without active line dots
                 if hasattr(self.islat, 'active_molecule') and self.islat.active_molecule:
                     self.plot_renderer.render_population_diagram(self.islat.active_molecule)
                 self.current_selection = None
                 self.canvas.draw_idle()
                 return
+            all_line_data = {self.islat.active_molecule: line_data}
 
-        # First update the basic line inspection plot
+        # First update the basic line inspection plot (observed + model spectra)
         self.update_line_inspection_plot(xmin=xmin, xmax=xmax)
-        
+
         # Get the max y value for scaling line heights
         data_mask = (self.islat.wave_data >= xmin) & (self.islat.wave_data <= xmax)
         data_region_y = self.islat.flux_data[data_mask]
-        max_y = np.nanmax(data_region_y) if len(data_region_y) > 0 else (self.plot_renderer.ax2.get_ylim()[1] / 1.1) #returns ymin, ymax
-            
+        max_y = np.nanmax(data_region_y) if len(data_region_y) > 0 else (self.plot_renderer.ax2.get_ylim()[1] / 1.1)
+
         # Add vertical lines using PlotRenderer (clear_active_lines already called by caller)
-        self.plot_renderer.render_active_lines_in_line_inspection(line_data, self.active_lines, max_y)
+        self.plot_renderer.render_active_lines_in_line_inspection_multi(
+            all_line_data, self.active_lines, max_y,
+        )
 
         # Don't call canvas.draw_idle() here - let caller batch it
         # Don't highlight here - do it after population diagram scatter points are created
 
-    def plot_population_diagram(self, line_data):
-        """
-        Plot population diagram for the currently active lines in the selected region.
-        Uses the MoleculeLine-based data structure.
-        
+    def plot_population_diagram(self, line_data=None, all_line_data=None):
+        """Plot population diagram for the currently active lines.
+
         Parameters
         ----------
-        line_data : list
-            List of (MoleculeLine, intensity, tau) tuples
+        line_data : list, optional
+            Legacy single-molecule list of ``(MoleculeLine, intensity, tau)``.
+        all_line_data : dict[Molecule, list], optional
+            Per-molecule line data.  Takes precedence over *line_data*.
         """
-        # Only redraw base population diagram if molecule changed (uses internal caching)
-        # This avoids expensive full redraw on every selection change
+        # Render the base population diagram for the active molecule
         self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-        
-        # Add active line scatter points
-        if line_data:
-            self.plot_renderer.render_active_lines_in_population_diagram(line_data, self.active_lines)
-        
+
+        # Reset per-cycle scatter tracking before adding new scatter collections
+        self.plot_renderer._active_scatter_collections = []
+
+        # Wrap legacy single-molecule path
+        if all_line_data is None and line_data:
+            all_line_data = {self.islat.active_molecule: line_data}
+
+        if all_line_data:
+            # Render scatter points for every molecule (each gets its own colour)
+            for mol, ld in all_line_data.items():
+                if ld:
+                    self.plot_renderer.render_active_lines_in_population_diagram(
+                        ld, self.active_lines, molecule=mol,
+                    )
+
         # Don't call canvas.draw_idle() here - let caller batch it
         # Don't call highlight_strongest_line() here - already called in plot_line_inspection
 
@@ -1087,11 +1206,18 @@ class iSLATPlot:
                 debug_config.trace("main_plot", f"{molecule_name} parameter changed while hidden — marked stale")
         
         # Check if the changed molecule is the active one for additional updates
-        if (hasattr(self.islat, 'active_molecule') and 
+        is_active = (hasattr(self.islat, 'active_molecule') and 
             self.islat.active_molecule and 
             hasattr(self.islat.active_molecule, 'name') and
-            self.islat.active_molecule.name == molecule_name):
-            
+            self.islat.active_molecule.name == molecule_name)
+
+        # Check if the changed molecule is a comparison molecule
+        is_comparison = any(
+            getattr(m, 'name', None) == molecule_name
+            for m in getattr(self.islat, 'comparison_molecules', [])
+        )
+
+        if is_active:
             # If we have a current selection, refresh the line inspection and population diagram
             if hasattr(self, 'current_selection') and self.current_selection:
                 xmin, xmax = self.current_selection
@@ -1099,6 +1225,12 @@ class iSLATPlot:
             else:
                 # Just update the population diagram without active lines
                 self.plot_renderer.render_population_diagram(self.islat.active_molecule)
+                self.canvas.draw_idle()
+        elif is_comparison:
+            # Comparison molecule changed — refresh line inspection only
+            if hasattr(self, 'current_selection') and self.current_selection:
+                xmin, xmax = self.current_selection
+                self.update_line_inspection_plot(xmin=xmin, xmax=xmax)
                 self.canvas.draw_idle()
 
     def on_molecule_deleted(self, molecule_name):
@@ -1119,6 +1251,10 @@ class iSLATPlot:
             hasattr(self.islat.active_molecule, 'name') and
             self.islat.active_molecule.name == molecule_name):
             self.clear_active_lines()
+
+        # Remove from comparison molecules if present
+        comp_mols = getattr(self.islat, '_comparison_molecules', [])
+        comp_mols[:] = [m for m in comp_mols if getattr(m, 'name', None) != molecule_name]
         
         # Update all plots to reflect the change
         self.update_all_plots()

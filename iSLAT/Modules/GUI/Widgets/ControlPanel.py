@@ -52,6 +52,8 @@ class ControlPanel(ttk.Frame):
         temp_label.destroy()
         fg_text = tk.Text()
         self.selected_color = "#007BFF"
+        self.comparison_color = "#66B2FF"  # Lighter blue for comparison molecules
+        self._shift_click_consumed = False  # Flag to prevent command firing on shift-click
         
         self.max_name_len = 4
         # Load field configurations from JSON file using iSLAT file handling
@@ -340,6 +342,11 @@ class ControlPanel(ttk.Frame):
                 command=lambda name=mol_name: self._on_molecule_selected(mol_name=name),
             )
             mol_btn.grid(row=0, column=1, sticky="ew", pady=_row_pady)
+            # Shift-click toggles the molecule as a comparison molecule
+            mol_btn.bind(
+                "<Shift-Button-1>",
+                lambda e, name=mol_name: self._on_molecule_shift_clicked(mol_name=name),
+            )
             if len(mol_name) > self.max_name_len:
                 CreateToolTip(mol_btn, mol_name, bg=self.bg_color)
 
@@ -808,7 +815,17 @@ class ControlPanel(ttk.Frame):
         """Update color button and visibility checkbox based on active molecule"""
         active_mol = self._get_active_molecule_object()
         self.selected_name = active_mol.name
+
+        # Reset all frames to default, then highlight active + comparison
+        for name, frame in self.mol_frames.items():
+            frame.config(bg=self.bg_color)
         self.mol_frames[active_mol.name].config(bg=self.selected_color)
+        # Re-apply comparison highlights
+        for comp_mol in self.islat.comparison_molecules:
+            comp_name = getattr(comp_mol, 'name', str(comp_mol))
+            if comp_name in self.mol_frames and comp_name != active_mol.name:
+                self.mol_frames[comp_name].config(bg=self.comparison_color)
+
         if len(active_mol.name) > self.max_name_len + 4:
             self.selected_name = active_mol.name[:self.max_name_len] + "..."
             CreateToolTip(self.selected_label, active_mol.name, bg = self.bg_color)
@@ -889,6 +906,10 @@ class ControlPanel(ttk.Frame):
 
     def _on_molecule_selected(self, mol_name, event=None):
         """Handle molecule selection - uses iSLAT's active_molecule property"""
+        # If shift-click was consumed, skip normal selection
+        if self._shift_click_consumed:
+            self._shift_click_consumed = False
+            return
 
         old_active_mol = self._get_active_molecule_object().name
         
@@ -897,8 +918,33 @@ class ControlPanel(ttk.Frame):
         except KeyError:
             old_active_mol = self.islat.user_settings.get("default_active_molecule", "H2O")
             self.mol_frames[old_active_mol].config(bg = self.bg_color)
-            
+
+        # Normal click: clear comparison molecules and reset their frame colors
+        for comp_mol in self.islat.comparison_molecules:
+            comp_name = getattr(comp_mol, 'name', str(comp_mol))
+            if comp_name in self.mol_frames:
+                self.mol_frames[comp_name].config(bg=self.bg_color)
+        self.islat.clear_comparison_molecules()
+
         self._set_active_molecule(mol_name= mol_name)
+
+    def _on_molecule_shift_clicked(self, mol_name):
+        """Handle shift-click on a molecule button — toggle as comparison molecule."""
+        self._shift_click_consumed = True
+
+        # Cannot add active molecule as a comparison molecule
+        active_mol = self._get_active_molecule_object()
+        if active_mol and active_mol.name == mol_name:
+            return
+
+        was_added = self.islat.toggle_comparison_molecule(mol_name)
+
+        # Update frame highlight
+        if mol_name in self.mol_frames:
+            if was_added:
+                self.mol_frames[mol_name].config(bg=self.comparison_color)
+            else:
+                self.mol_frames[mol_name].config(bg=self.bg_color)
 
     def _set_active_molecule(self, mol_name):
         selected_label = self.mol_dict[mol_name].displaylabel

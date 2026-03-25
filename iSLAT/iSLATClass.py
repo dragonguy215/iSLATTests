@@ -53,6 +53,11 @@ class iSLAT:
         
         # === CALLBACK SYSTEM ===
         self._active_molecule_change_callbacks = []
+        self._comparison_molecules_change_callbacks = []
+
+        # Comparison molecules — secondary molecules rendered alongside the
+        # active molecule in the line inspection plot (shift-click selection).
+        self._comparison_molecules: list = []
         
         # === LAZY LOADING FLAGS ===
         self._initial_molecule_parameters = None
@@ -901,6 +906,68 @@ class iSLAT:
             except Exception as e:
                 debug_config.error("active_molecule", f"Error in callback {i+1}: {e}")
         debug_config.verbose("active_molecule", "All callbacks completed")
+
+    # === COMPARISON MOLECULES ===
+    @property
+    def comparison_molecules(self) -> list:
+        """Secondary molecules rendered in the line inspection plot."""
+        return list(self._comparison_molecules)
+
+    def toggle_comparison_molecule(self, molecule) -> bool:
+        """Add or remove a molecule from the comparison list.
+
+        Parameters
+        ----------
+        molecule : str or Molecule
+            The molecule to toggle.
+
+        Returns
+        -------
+        bool
+            ``True`` if the molecule was added, ``False`` if removed.
+        """
+        mol_obj = self._resolve_molecule(molecule)
+        if mol_obj is None:
+            return False
+
+        if mol_obj in self._comparison_molecules:
+            self._comparison_molecules.remove(mol_obj)
+            debug_config.info("comparison", f"Removed comparison molecule: {mol_obj.name}")
+            self._notify_comparison_molecules_change()
+            return False
+        else:
+            self._comparison_molecules.append(mol_obj)
+            debug_config.info("comparison", f"Added comparison molecule: {mol_obj.name}")
+            self._notify_comparison_molecules_change()
+            return True
+
+    def clear_comparison_molecules(self):
+        """Remove all comparison molecules."""
+        if self._comparison_molecules:
+            self._comparison_molecules.clear()
+            debug_config.info("comparison", "Cleared all comparison molecules")
+            self._notify_comparison_molecules_change()
+
+    def add_comparison_molecule_change_callback(self, callback):
+        """Register a callback for comparison molecule list changes."""
+        self._comparison_molecules_change_callbacks.append(callback)
+
+    def _notify_comparison_molecules_change(self):
+        """Notify all callbacks that the comparison molecule list changed."""
+        for callback in self._comparison_molecules_change_callbacks:
+            try:
+                callback(self._comparison_molecules)
+            except Exception as e:
+                debug_config.error("comparison", f"Error in comparison callback: {e}")
+
+    def _resolve_molecule(self, molecule):
+        """Resolve a molecule name or object to a Molecule instance."""
+        if isinstance(molecule, Molecule):
+            return molecule
+        elif isinstance(molecule, str):
+            if hasattr(self, 'molecules_dict') and molecule in self.molecules_dict:
+                return self.molecules_dict[molecule]
+        return None
 
     # === UTILITY METHODS ===
     def _safe_load_data(self, loader_func, cache_attr, error_message):
