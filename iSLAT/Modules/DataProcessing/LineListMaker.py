@@ -31,7 +31,7 @@ from typing import (
 import numpy as np
 import pandas as pd
 
-from ..DataTypes import MoleculeLineList
+from ..DataTypes.MoleculeLineList import MoleculeLineList
 
 # ---------------------------------------------------------------------------
 # Internal helpers
