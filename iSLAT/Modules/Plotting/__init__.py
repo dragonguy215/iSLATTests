@@ -35,6 +35,7 @@ load_theme = _BP.load_theme  # Convenience alias at package level
 from .LineInspectionPlot import LineInspectionPlot
 from .PopulationDiagramPlot import PopulationDiagramPlot
 from .FullSpectrumPlot import FullSpectrumPlot
+from .ResidualSpectrumPlot import ResidualSpectrumPlot
 from .MainPlotGrid import MainPlotGrid
 from .FitLinesPlotGrid import FitLinesPlotGrid
 from .PlotView import PlotView
@@ -53,4 +54,5 @@ __all__ = [
     "PlotView",
     "ThreePanelView",
     "FullSpectrumView",
+    "ResidualSpectrumPlot"
 ]
