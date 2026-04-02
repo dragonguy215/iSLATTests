@@ -49,7 +49,7 @@ class Spectrum:
     _FLUX_JY_FACTOR = 1e19 / c.SPEED_OF_LIGHT_CGS  # Conversion factor for Jy
     
     __slots__ = (
-        '_lam_min', '_lam_max', '_dlambda', '_R', '_distance',
+        '_lam_min', '_lam_max', '_dlambda', '_R', '_R_func', '_distance',
         '_lamgrid', '_flux', '_flux_jy', '_I_arrays', '_lam_arrays', '_tau_arrays',
         '_components', '_flux_valid', '_convolution_cache',
         '_kernel_cache', '_cache_stats', '_n_grid_points', '_unique_cache',
@@ -58,7 +58,8 @@ class Spectrum:
     
     def __init__(self, lam_min: float = None, lam_max: float = None, 
                  dlambda: float = None, R: float = None, distance: float = None,
-                 wavelength_range: Optional[tuple] = None):
+                 wavelength_range: Optional[tuple] = None,
+                 R_func: Optional[Any] = None):
         """Initialize a spectrum class and prepare it to add intensity components
 
         Parameters
@@ -70,13 +71,24 @@ class Spectrum:
         dlambda: float
             Resolution of the spectrum to calculate in micron
         R: float
-            Spectral resolution of the instrument in R = lambda/delta_lambda
+            Spectral resolution of the instrument as a scalar
+            R = lambda/delta_lambda.  Used when *R_func* is not provided.
         distance: float
             Distance to the disk in pc
         wavelength_range: tuple of (float, float), optional
             Wavelength range ``(lam_min, lam_max)`` in microns.  When set,
             only lines within this range are included in the convolution.
             Defaults to ``(lam_min, lam_max)`` when not provided.
+        R_func: callable, optional
+            A function ``R_func(wavelength_um)`` that returns the
+            wavelength-dependent resolving power *R* for one or more
+            wavelengths (in microns).  When provided, *R_func* is used
+            instead of the scalar *R* during convolution, giving each
+            spectral line a kernel width that matches the local
+            instrument resolution (e.g. JWST MIRI MRS).
+
+            The callable must accept a float or 1-D ``numpy.ndarray``
+            and return a value of the same shape.
         """
 
         # assure valid lambda grid range
@@ -88,6 +100,7 @@ class Spectrum:
         self._lam_max = lam_max
         self._dlambda = dlambda
         self._R = R
+        self._R_func = R_func
         self._distance = distance
         self._wavelength_range = wavelength_range if wavelength_range is not None else (lam_min, lam_max)
 
@@ -162,7 +175,14 @@ class Spectrum:
 
         # 2. select only lines within the selected wavelength range using vectorized operations
         wr_min, wr_max = self._wavelength_range
-        select_border = 100 * wr_max / self._R
+        # Use the minimum R across the range for border padding to capture
+        # all lines whose wings could contribute to the grid.
+        if self._R_func is not None:
+            R_border = float(np.nanmin(np.asarray(
+                self._R_func(np.array([wr_min, wr_max])), dtype=float)))
+        else:
+            R_border = self._R
+        select_border = 100 * wr_max / R_border
         mask = (lam_all >= wr_min - select_border) & (lam_all <= wr_max + select_border)
         
         if not np.any(mask):
@@ -235,7 +255,13 @@ class Spectrum:
         n_grid = self._n_grid_points
 
         # 2. Calculate width and normalization of convolution kernel
-        fwhm = lam / self._R
+        # Use wavelength-dependent R(λ) when a callable is provided;
+        # otherwise fall back to the fixed scalar R.
+        if self._R_func is not None:
+            R_per_line = np.atleast_1d(np.asarray(self._R_func(lam), dtype=float))
+            fwhm = lam / R_per_line
+        else:
+            fwhm = lam / self._R
         sigma = fwhm / self._FWHM_TO_SIGMA
         
         # Pre-compute terms that will be reused: norm * intens and 1/(2*sigma^2)
@@ -356,6 +382,63 @@ class Spectrum:
     def components(self) -> List[Dict[str, Any]]:
         """list of dict: Intensity components added to the spectrum"""
         return self._components
+
+    @property
+    def R_func(self):
+        """callable or None: Wavelength-dependent resolving-power function."""
+        return self._R_func
+
+    @R_func.setter
+    def R_func(self, value):
+        """Set a new R(λ) function.  Invalidates cached flux."""
+        if value is not self._R_func:
+            self._R_func = value
+            self._invalidate_flux_cache()
+
+    def resample_to(self, target_wavelengths: np.ndarray,
+                    unit: str = 'jy',
+                    rv_shift: float = 0.0,
+                    fill: float = 0.0) -> np.ndarray:
+        """Flux-conserving resampling of the spectrum onto a target grid.
+
+        Uses the same ``spectres``-style algorithm employed by
+        :func:`iSLAT.Modules.DataTypes.Molecule._spectres` to perform
+        flux-conserving resampling that correctly handles uneven pixel
+        sampling (e.g. JWST MIRI MRS).
+
+        Parameters
+        ----------
+        target_wavelengths : np.ndarray
+            1-D array of desired output wavelength positions (µm).
+        unit : str, optional
+            ``'jy'`` (default) for Jy, ``'cgs'`` for erg/s/cm²/µm.
+        rv_shift : float, optional
+            Radial-velocity shift in km/s to apply to the model grid
+            **before** resampling.  Positive values red-shift the model
+            (i.e. ``λ_obs = λ_rest × (1 + rv / c)``).
+        fill : float, optional
+            Value used for target pixels that fall outside the model grid.
+
+        Returns
+        -------
+        np.ndarray
+            Resampled flux array with the same length as
+            *target_wavelengths*.
+        """
+        from .Molecule import _spectres
+
+        source_wave = self._lamgrid
+        if rv_shift != 0.0:
+            doppler = 1.0 + rv_shift / c.SPEED_OF_LIGHT_KMS
+            source_wave = source_wave * doppler
+
+        if unit == 'jy':
+            source_flux = self.flux_jy
+        else:
+            source_flux = self.flux
+
+        return _spectres(target_wavelengths, source_wave, source_flux,
+                         fill=fill)
 
     @property
     def get_table(self):
