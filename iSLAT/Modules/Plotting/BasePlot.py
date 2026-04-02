@@ -235,9 +235,10 @@ class BasePlot(ABC):
         mol_labels: List[str],
         mol_colors: List[str],
         *,
-        ncols: int = 12,
+        ncols: Optional[int] = None,
         fontsize: int = 10,
-        bbox_to_anchor: Tuple[float, float] = (0.5, 1.4),
+        bbox_to_anchor: Tuple[float, float] = (0.5, 0.99),
+        use_figure_transform: bool = True,
     ) -> None:
         """Create (or replace) a text-only, per-molecule-coloured legend.
 
@@ -247,8 +248,18 @@ class BasePlot(ABC):
         :meth:`apply_theme_to_figure` will not overwrite them with the
         foreground colour.
 
+        When *ncols* is ``None`` (the default), the number of columns is
+        auto-computed so that the legend does not exceed the width of the
+        axes.  If the labels are long, items wrap into multiple rows.
+
         When *mol_labels* is empty the existing legend (if any) is
         removed and no new one is created.
+
+        Parameters
+        ----------
+        use_figure_transform : bool
+            When True (default), *bbox_to_anchor* is interpreted in
+            figure coordinates.  When False, it uses axes coordinates.
         """
         old = ax.get_legend()
         if old is not None:
@@ -258,7 +269,28 @@ class BasePlot(ABC):
             return
 
         from matplotlib.patches import Patch
+
+        # --- Auto-compute ncols to fit within the axes width ----------
+        if ncols is None:
+            fig = ax.get_figure()
+            fig_w_in = fig.get_figwidth()
+
+            # Estimate average label width in inches (approx 0.085 in
+            # per character at the given fontsize, scaled from 10pt base)
+            char_w_in = 0.085 * (fontsize / 10.0)
+            avg_label_w = sum(len(lbl) for lbl in mol_labels) / len(mol_labels)
+            col_w_in = avg_label_w * char_w_in + 0.3  # extra for padding
+
+            # Maximum columns that fit within the figure width
+            max_cols = max(int(fig_w_in / col_w_in), 1)
+            ncols = min(max_cols, len(mol_labels))
+
         handles = [Patch(facecolor='none', edgecolor='none') for _ in mol_colors]
+
+        # Place the legend centred on the full figure width, pinned
+        # near the top of the figure so it sits above all panels.
+        fig = ax.get_figure()
+        transform = fig.transFigure if use_figure_transform else ax.transAxes
         leg = ax.legend(
             handles,
             mol_labels,
@@ -267,6 +299,7 @@ class BasePlot(ABC):
             handlelength=0,
             handletextpad=0,
             bbox_to_anchor=bbox_to_anchor,
+            bbox_transform=transform,
             fontsize=fontsize,
             prop={"weight": "bold"},
             frameon=False,
@@ -382,17 +415,28 @@ class BasePlot(ABC):
     def _ensure_figure(self, **subplot_kw) -> MplFigure:
         """Create the figure if it doesn't already exist.
 
-        Uses :class:`matplotlib.figure.Figure` directly (not
-        ``plt.figure()``) so the figure is **not** registered with the
-        pyplot state machine.  This prevents the TkAgg backend from
-        creating a hidden figure-manager window that would steal the
-        application's taskbar icon.
+        In a Jupyter notebook the figure is created via
+        ``plt.figure()`` so that the active interactive backend
+        (e.g. ``%matplotlib widget`` / ipympl) can manage it and
+        provide pan/zoom/resize controls — just like a regular
+        matplotlib plot.
+
+        Outside of a notebook, :class:`matplotlib.figure.Figure` is
+        instantiated directly so the figure is **not** registered with
+        the pyplot state machine.  This prevents the TkAgg backend
+        from creating a hidden figure-manager window that would steal
+        the application's taskbar icon.
         """
         if self.fig is None:
             kw: Dict[str, Any] = {"layout": "constrained"}
             if self._figsize is not None:
                 kw["figsize"] = self._figsize
-            self.fig = MplFigure(**kw)
+            if self._in_notebook():
+                # Use pyplot so the interactive backend (ipympl) picks
+                # up the figure and renders it as a widget.
+                self.fig = plt.figure(**kw)
+            else:
+                self.fig = MplFigure(**kw)
             self._owns_figure = True
         return self.fig
 
@@ -870,20 +914,35 @@ class BasePlot(ABC):
     def show(self, block: bool = False) -> None:
         """Display the plot interactively.
 
-        In a Jupyter notebook the figure is rendered inline via
-        ``IPython.display.display``.  Outside of a notebook, the figure
-        is temporarily registered with pyplot so ``plt.show()`` can
-        display it in a window.
+        In a Jupyter notebook with an interactive backend such as
+        ``%matplotlib widget`` (ipympl), the figure is already managed
+        by pyplot (see :meth:`_ensure_figure`) and calling
+        ``plt.show()`` makes it render as a fully interactive widget
+        with pan / zoom / resize controls.
+
+        Outside of a notebook the figure is temporarily registered
+        with pyplot so ``plt.show()`` can display it in a GUI window.
         """
         if self.fig is None:
             self.generate_plot()
 
         if self._in_notebook():
+            # If the figure was created outside pyplot (e.g. passed in
+            # via the *fig* constructor arg), register it now so the
+            # interactive backend can display it.
             try:
-                from IPython.display import display as ipy_display  # noqa: F811
-                ipy_display(self.fig)
-            except ImportError:
-                plt.show(block=block)
+                fig_num = self.fig.number
+            except AttributeError:
+                fig_num = None
+            if fig_num is None or fig_num not in plt.get_fignums():
+                try:
+                    manager = plt._backend_mod.new_figure_manager_given_figure(
+                        id(self.fig), self.fig
+                    )
+                    plt._pylab_helpers.Gcf.set_active(manager)
+                except Exception:
+                    pass
+            plt.show(block=block)
             return
 
         # Non-notebook: register the figure with pyplot so plt.show()
@@ -938,3 +997,50 @@ class BasePlot(ABC):
     def get_figure(self) -> Optional[MplFigure]:
         """Return the underlying matplotlib *Figure*."""
         return self.fig
+
+    # ------------------------------------------------------------------
+    # Notebook / IPython rich-display integration
+    # ------------------------------------------------------------------
+    def _repr_png_(self) -> Optional[bytes]:
+        """Return a PNG rendering of the figure for IPython/Jupyter.
+
+        When an iSLAT plot object is the last expression in a notebook
+        cell, Jupyter calls this method automatically so the figure
+        renders inline — just like a plain matplotlib ``Figure``.
+        """
+        if self.fig is None:
+            self.generate_plot()
+        if self.fig is None:
+            return None
+        try:
+            import io
+            buf = io.BytesIO()
+            dpi = _display_config.savefig_dpi if _display_config else 150
+            self.fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
+            buf.seek(0)
+            return buf.getvalue()
+        except Exception:
+            return None
+
+    def _repr_html_(self) -> Optional[str]:
+        """Return an HTML ``<img>`` tag embedding the figure as base-64.
+
+        Provides a second rich-display path for IPython/Jupyter frontends
+        that prefer HTML over raw PNG.
+        """
+        png = self._repr_png_()
+        if png is None:
+            return None
+        try:
+            import base64
+            b64 = base64.b64encode(png).decode("ascii")
+            return f'<img src="data:image/png;base64,{b64}" />'
+        except Exception:
+            return None
+
+    def _repr_mimebundle_(self, **kwargs) -> Optional[dict]:
+        """IPython rich-display mimebundle for notebook rendering."""
+        png = self._repr_png_()
+        if png is None:
+            return None
+        return {"image/png": png}
