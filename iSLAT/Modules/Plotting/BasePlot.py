@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
 
-
 def _detect_system_theme() -> str:
     """Return ``'DarkTheme'`` or ``'LightTheme'`` based on the OS appearance.
 
@@ -67,7 +66,6 @@ def _detect_system_theme() -> str:
             return "LightTheme"
     except Exception:
         return "LightTheme"
-
 
 # ---------------------------------------------------------------------------
 # Default theme (used when no GUI theme is supplied)
@@ -914,11 +912,13 @@ class BasePlot(ABC):
     def show(self, block: bool = False) -> None:
         """Display the plot interactively.
 
-        In a Jupyter notebook with an interactive backend such as
-        ``%matplotlib widget`` (ipympl), the figure is already managed
-        by pyplot (see :meth:`_ensure_figure`) and calling
-        ``plt.show()`` makes it render as a fully interactive widget
-        with pan / zoom / resize controls.
+        In a Jupyter notebook the figure created by
+        :meth:`_ensure_figure` is already registered with pyplot via
+        ``plt.figure()``, so calling ``plt.show()`` renders it inline
+        — exactly like a regular matplotlib plot.  If the figure was
+        passed in externally and is *not* registered with pyplot, we
+        fall back to IPython's ``display()`` so the inline backend
+        never has to deal with a manually-created figure manager.
 
         Outside of a notebook the figure is temporarily registered
         with pyplot so ``plt.show()`` can display it in a GUI window.
@@ -927,22 +927,25 @@ class BasePlot(ABC):
             self.generate_plot()
 
         if self._in_notebook():
-            # If the figure was created outside pyplot (e.g. passed in
-            # via the *fig* constructor arg), register it now so the
-            # interactive backend can display it.
+            # Check whether the figure is already known to pyplot.
             try:
                 fig_num = self.fig.number
             except AttributeError:
                 fig_num = None
-            if fig_num is None or fig_num not in plt.get_fignums():
+
+            if fig_num is not None and fig_num in plt.get_fignums():
+                # Figure was created via plt.figure() in _ensure_figure
+                # and is fully managed by pyplot — just show it normally.
+                plt.show(block=block)
+            else:
+                # Externally-passed figure not registered with pyplot.
+                # Use IPython display instead of manual Gcf registration
+                # to avoid _cidgcf errors with the inline backend.
                 try:
-                    manager = plt._backend_mod.new_figure_manager_given_figure(
-                        id(self.fig), self.fig
-                    )
-                    plt._pylab_helpers.Gcf.set_active(manager)
-                except Exception:
-                    pass
-            plt.show(block=block)
+                    from IPython.display import display as ipy_display
+                    ipy_display(self.fig)
+                except ImportError:
+                    plt.show(block=block)
             return
 
         # Non-notebook: register the figure with pyplot so plt.show()
