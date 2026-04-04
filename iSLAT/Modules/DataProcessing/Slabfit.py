@@ -29,6 +29,8 @@ Example Usage:
 """
 
 import os
+import json
+from pathlib import Path
 import numpy as np
 from scipy.optimize import fmin
 #from iSLAT.Modules.DataProcessing.Chi2Spectrum import Chi2Spectrum
@@ -52,8 +54,9 @@ class SlabModel:
         
         Parameters:
         -----------
-        output_folder : str
-            Directory containing the target file for chi-squared evaluation
+        output_folder : str or Path
+            Directory containing the target file for chi-squared evaluation.
+            Accepts a string path or a ``pathlib.Path`` object.
             Default: line_saves_file_path from FileHandling module
         mol_object : Molecule
             Molecule object containing molecular data and parameters
@@ -75,17 +78,17 @@ class SlabModel:
         self.data_field = data_field
 
         try:
-            #self.output_folder = output_folder if output_folder else line_saves_file_path
             if output_folder:
-                self.output_folder = output_folder
+                # Accept str or Path; always store as str for os.path compat
+                self.output_folder = str(output_folder)
             else:
-                self.output_folder = line_saves_file_path
+                self.output_folder = str(line_saves_file_path)
                 self.data_field.insert_text(f"Using default output folder: {line_saves_file_path}", clear_after=False)
         except Exception as e:
             if self.data_field:
                 self.data_field.insert_text(f"Error setting output folder: {e}", clear_after=False)
             self.data_field.insert_text(f"Using default folder: {line_saves_file_path}", clear_after=False)
-            self.output_folder = line_saves_file_path
+            self.output_folder = str(line_saves_file_path)
             
         self.mol_object = mol_object
         
@@ -329,7 +332,7 @@ class SlabModel:
         
         print(f"Updated molecule '{self.mol_object.name}' with fitted parameters")
     
-    def save_results(self, fitted_params, filename=None):
+    def save_results(self, fitted_params, filename=None, format="json"):
         """
         Save fitting results to a file in the output folder.
         
@@ -337,14 +340,65 @@ class SlabModel:
         -----------
         fitted_params : dict
             Dictionary containing fitted parameters
-        filename : str, optional
-            Name of output file (default: 'slab_fit_results.txt')
+        filename : str or Path, optional
+            Name of output file.  When *None*, auto-generated from the
+            molecule name and the chosen *format*
+            (e.g. ``slab_fit_results_H2O.json``).
+        format : str, optional
+            Output format: ``"json"`` (default) or ``"txt"`` for
+            backwards-compatible plain-text output.
+        
+        Returns:
+        --------
+        str
+            Full path to the saved file.
         """
+        format = format.lower()
+        if format not in ("json", "txt"):
+            raise ValueError(f"Unsupported format '{format}'. Use 'json' or 'txt'.")
+
         if filename is None:
-            filename = f"slab_fit_results_{self.mol_object.name}.txt"
-        
-        output_path = os.path.join(self.output_folder, filename)
-        
+            ext = "json" if format == "json" else "txt"
+            filename = f"slab_fit_results_{self.mol_object.name}.{ext}"
+
+        output_path = os.path.join(self.output_folder, str(filename))
+        os.makedirs(self.output_folder, exist_ok=True)
+
+        if format == "json":
+            self._save_results_json(fitted_params, output_path)
+        else:
+            self._save_results_txt(fitted_params, output_path)
+
+        print(f"Results saved to {output_path}")
+        return output_path
+
+    # ------------------------------------------------------------------
+    #  Private writers
+    # ------------------------------------------------------------------
+
+    def _save_results_json(self, fitted_params, output_path):
+        """Write fitting results as a machine-readable JSON file."""
+        payload = {
+            "molecule": self.mol_object.name,
+            "input_file": self.input_file,
+            "fitted_parameters": {
+                "temperature_K": fitted_params["temperature"],
+                "log_n_mol": fitted_params.get("log_n_mol"),
+                "n_mol_cm2": fitted_params["n_mol"],
+                "radius_au": fitted_params["radius"],
+            },
+            "fitting_statistics": {
+                "chi2_final": fitted_params["chi2_final"],
+                "iterations": fitted_params["iterations"],
+                "function_calls": fitted_params["function_calls"],
+                "convergence_flag": fitted_params["convergence_flag"],
+            },
+        }
+        with open(output_path, "w") as f:
+            json.dump(payload, f, indent=2)
+
+    def _save_results_txt(self, fitted_params, output_path):
+        """Write fitting results as human-readable plain text (legacy format)."""
         with open(output_path, 'w') as f:
             f.write(f"Slab Model Fitting Results\n")
             f.write(f"==========================\n\n")
@@ -359,9 +413,6 @@ class SlabModel:
             f.write(f"  Iterations: {fitted_params['iterations']}\n")
             f.write(f"  Function calls: {fitted_params['function_calls']}\n")
             f.write(f"  Convergence flag: {fitted_params['convergence_flag']}\n")
-        
-        print(f"Results saved to {output_path}")
-        return output_path
 
 # Backward compatibility alias
 SlabFit = SlabModel

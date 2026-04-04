@@ -21,6 +21,7 @@ Class hierarchy::
     ├── LineInspectionPlot     — zoomed wavelength region
     ├── PopulationDiagramPlot  — Boltzmann / rotation diagram
     ├── FullSpectrumPlot       — multi-panel full spectrum overview
+    │   └── ResidualSpectrumPlot — ...with per-panel residuals & chi^2
     ├── MainPlotGrid           — 3-panel composite (spectrum + inspection + pop-diagram)
     └── FitLinesPlotGrid       — grid of individual line-fit results
 

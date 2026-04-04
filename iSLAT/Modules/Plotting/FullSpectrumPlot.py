@@ -10,7 +10,7 @@ The interactive :class:`FullSpectrumView` composes an instance of this
 class for rendering, adding span-selectors and toggle sync on top.
 """
 
-from typing import Optional, Tuple, List, Dict, Any, Union, TYPE_CHECKING
+from typing import Callable, Optional, Tuple, List, Dict, Any, Union, TYPE_CHECKING
 from pathlib import Path
 
 import numpy as np
@@ -52,6 +52,10 @@ class FullSpectrumPlot(BasePlot):
         ``(start, end)`` wavelength range. Defaults to full data range.
     ymax_factor : float, optional
         Fractional padding above the peak flux in each panel (0.2 = 20 %).
+    uniform_ylim : bool, optional
+        When *True* every panel shares the same vertical scale,
+        determined by the global flux minimum and maximum across all
+        panels.  Default *False* (each panel auto-scales independently).
     figsize : tuple, optional
         Figure size.  Height is scaled automatically if *None*.
     fig : Figure, optional
@@ -70,6 +74,7 @@ class FullSpectrumPlot(BasePlot):
         step: Optional[float] = None,
         xlim_range: Optional[Tuple[float, float]] = None,
         ymax_factor: float = 0.2,
+        uniform_ylim: bool = False,
         figsize: Optional[Tuple[float, float]] = None,
         wave_data_obs: Optional[np.ndarray] = None,
         **kwargs,
@@ -92,6 +97,7 @@ class FullSpectrumPlot(BasePlot):
 
         self.n_panels = n_panels
         self.ymax_factor = ymax_factor
+        self.uniform_ylim = uniform_ylim
 
         # Wavelength range
         if xlim_range is not None:
@@ -162,6 +168,121 @@ class FullSpectrumPlot(BasePlot):
         )
 
     # ------------------------------------------------------------------
+    # Molecule-cache helper (shared with ResidualSpectrumPlot)
+    # ------------------------------------------------------------------
+    def _build_mol_cache(self) -> Tuple[List[tuple], List[str], List[str]]:
+        """Pre-compute molecule spectrum data, labels, and colours.
+
+        Returns ``(mol_cache, mol_labels, mol_colors)`` where each entry
+        in *mol_cache* is ``(wavelengths, flux, color, label, name)``.
+        Sub-classes override or reuse this to avoid duplicating the
+        molecule-caching logic.
+        """
+        mol_cache: List[tuple] = []
+        mol_labels: List[str] = []
+        mol_colors: List[str] = []
+        if self.molecules is not None:
+            visible = self.molecules.get_visible_molecules(return_objects=True)
+            mol_labels = [self.get_molecule_display_name(m) for m in visible]
+            mol_colors = [self.get_molecule_color(m) for m in visible]
+
+            use_interp = False
+            target_wave = None
+            ref_wave = getattr(self, 'wave_data_obs', self.wave_data)
+            if ref_wave is not None and hasattr(self.molecules, 'get_matched_sampling_wavelengths'):
+                use_interp, target_wave = (
+                    self.molecules.get_matched_sampling_wavelengths(ref_wave)
+                )
+                if not use_interp:
+                    target_wave = None
+
+            for mol in visible:
+                lam, flux = self.get_molecule_spectrum_data(
+                    mol, self.wave_data,
+                    interpolate_to_input=use_interp,
+                    target_wavelengths=target_wave,
+                )
+                if lam is not None and flux is not None and len(flux) > 0:
+                    mol_cache.append((
+                        lam, flux,
+                        self.get_molecule_color(mol),
+                        self.get_molecule_display_name(mol),
+                        getattr(mol, "name", "unknown"),
+                    ))
+        return mol_cache, mol_labels, mol_colors
+
+    # ------------------------------------------------------------------
+    def _spectrum_ylim_fn(self, mask: np.ndarray) -> Tuple[float, float]:
+        """Default per-panel y-limit function (observed spectrum).
+
+        Parameters
+        ----------
+        mask : np.ndarray
+            Boolean mask into :attr:`wave_data` / :attr:`flux_data`
+            selecting the points that fall within the current panel.
+
+        Returns
+        -------
+        tuple[float, float]
+            ``(ymin, ymax)`` for the panel.
+        """
+        if np.any(mask):
+            _ymax = float(np.nanmax(self.flux_data[mask]))
+            _ymax += _ymax * self.ymax_factor
+            return (-0.005, _ymax)
+        return (-0.005, 0.1)
+
+    # ------------------------------------------------------------------
+    def _compute_panel_ylims(
+        self,
+        uniform: Optional[bool] = None,
+        ylim_fn: Optional[Callable[[np.ndarray], Tuple[float, float]]] = None,
+    ) -> List[Tuple[float, float]]:
+        """Compute per-panel y-limits.
+
+        Iterates over :attr:`_panel_edges` and returns a list of
+        ``(ymin, ymax)`` tuples — one per panel.  The per-panel
+        computation is delegated to *ylim_fn* so that subclasses (e.g.
+        :class:`ResidualSpectrumPlot`) can reuse the same loop /
+        unification logic for residual panels.
+
+        Parameters
+        ----------
+        uniform : bool, optional
+            When *True* every entry is replaced with the global
+            extremes so that all panels share the same vertical scale.
+            Defaults to :attr:`uniform_ylim`.
+        ylim_fn : callable, optional
+            ``fn(mask) -> (ymin, ymax)`` where *mask* is a boolean
+            array indexing into :attr:`wave_data`.  Defaults to
+            :meth:`_spectrum_ylim_fn` (observed-flux auto-scale).
+
+        Returns
+        -------
+        list[tuple[float, float]]
+            One ``(ymin, ymax)`` pair per panel.
+        """
+        if uniform is None:
+            uniform = self.uniform_ylim
+        if ylim_fn is None:
+            ylim_fn = self._spectrum_ylim_fn
+
+        ylims: List[Tuple[float, float]] = []
+        for xlim_start in self._panel_edges:
+            panel_end = xlim_start + self._step
+            mask = (
+                (self.wave_data >= xlim_start) & (self.wave_data <= panel_end)
+            )
+            ylims.append(ylim_fn(mask))
+
+        if uniform and ylims:
+            g_ymin = min(yl[0] for yl in ylims)
+            g_ymax = max(yl[1] for yl in ylims)
+            ylims = [(g_ymin, g_ymax)] * len(ylims)
+
+        return ylims
+
+    # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
         """Build the multi-panel figure."""
         n = len(self._panel_edges)
@@ -181,47 +302,15 @@ class FullSpectrumPlot(BasePlot):
             except Exception:
                 pass
 
-        # Prepare molecule legend info
-        mol_labels: List[str] = []
-        mol_colors: List[str] = []
-        if self.molecules is not None:
-            visible = self.molecules.get_visible_molecules(return_objects=True)
-            mol_labels = [self.get_molecule_display_name(m) for m in visible]
-            mol_colors = [self.get_molecule_color(m) for m in visible]
+        # --- Pre-compute molecule data via shared helper ----------------
+        mol_cache, mol_labels, mol_colors = self._build_mol_cache()
 
-        # --- Pre-compute molecule flux arrays ONCE (Item 3) -------------
-        # Each entry is (wavelength, flux, color, label, mol_name).
-        # Slicing per panel is a cheap NumPy mask, avoiding N*M get_flux()
-        # calls (N panels x M molecules).
-        mol_cache: List[tuple] = []
-        if self.molecules is not None:
-            # Determine interpolation settings once using observer-frame
-            # wavelengths — get_matched_sampling_wavelengths handles the
-            # stellar RV correction internally.
-            use_interp = False
-            target_wave = None
-            if self.wave_data_obs is not None and hasattr(self.molecules, 'get_matched_sampling_wavelengths'):
-                use_interp, target_wave = self.molecules.get_matched_sampling_wavelengths(self.wave_data_obs)
-                if not use_interp:
-                    target_wave = None
-
-            for mol in visible:
-                lam, flux = self.get_molecule_spectrum_data(
-                    mol, self.wave_data,
-                    interpolate_to_input=use_interp,
-                    target_wavelengths=target_wave,
-                )
-                if lam is not None and flux is not None and len(flux) > 0:
-                    mol_cache.append((
-                        lam, flux,
-                        self.get_molecule_color(mol),
-                        self.get_molecule_display_name(mol),
-                        getattr(mol, "name", "unknown"),
-                    ))
+        # --- Pre-compute per-panel y-limits (pass 1) -------------------
+        panel_ylims = self._compute_panel_ylims()
 
         for idx, xlim_start in enumerate(self._panel_edges):
             is_last = idx == n - 1
-            panel_end = self._xlim_end if is_last else xlim_start + self._step
+            panel_end = xlim_start + self._step
             xr = (xlim_start, panel_end)
 
             ax = self.fig.add_subplot(n, 1, idx + 1)
@@ -236,13 +325,7 @@ class FullSpectrumPlot(BasePlot):
             self._plot_observed_spectrum(ax, panel_wave, panel_flux, panel_err,
                                         deduplicate=True)
 
-            # y-limits
-            if np.any(mask):
-                ymax = float(np.nanmax(self.flux_data[mask]))
-                ymax += ymax * self.ymax_factor
-                ymin = -0.005
-            else:
-                ymin, ymax = -0.005, 0.1
+            ymin, ymax = panel_ylims[idx]
 
             # --- molecule models (slice pre-computed data) ---------------
             for m_lam, m_flux, m_color, m_label, m_name in mol_cache:
@@ -311,7 +394,7 @@ class FullSpectrumPlot(BasePlot):
             self.generate_plot()
             return
 
-        # --- Pre-compute molecule data once (same as generate_plot) ------
+        # --- Pre-compute molecule data via shared helper -----------------
         summed_wave: Optional[np.ndarray] = None
         summed_flux: Optional[np.ndarray] = None
         if self.molecules is not None:
@@ -322,36 +405,20 @@ class FullSpectrumPlot(BasePlot):
             except Exception:
                 pass
 
+        mol_cache, _labels, _colors = self._build_mol_cache()
+
         visible = []
-        mol_cache: List[tuple] = []
         if self.molecules is not None:
             visible = self.molecules.get_visible_molecules(return_objects=True)
-            use_interp = False
-            target_wave = None
-            if self.wave_data_obs is not None and hasattr(self.molecules, 'get_matched_sampling_wavelengths'):
-                use_interp, target_wave = self.molecules.get_matched_sampling_wavelengths(self.wave_data_obs)
-                if not use_interp:
-                    target_wave = None
-            for mol in visible:
-                lam, flux = self.get_molecule_spectrum_data(
-                    mol, self.wave_data,
-                    interpolate_to_input=use_interp,
-                    target_wavelengths=target_wave,
-                )
-                if lam is not None and flux is not None and len(flux) > 0:
-                    mol_cache.append((
-                        lam, flux,
-                        self.get_molecule_color(mol),
-                        self.get_molecule_display_name(mol),
-                        getattr(mol, "name", "unknown"),
-                    ))
-
         visible_names = {getattr(m, "name", None) for m in visible}
+
+        # --- Pre-compute per-panel y-limits ----------------------------
+        panel_ylims = self._compute_panel_ylims()
 
         # --- Update each panel in place ---------------------------------
         for idx, xlim_start in enumerate(self._panel_edges):
             is_last = idx == n - 1
-            panel_end = self._xlim_end if is_last else xlim_start + self._step
+            panel_end = xlim_start + self._step
             xr = (xlim_start, panel_end)
             ax = self.subplots[idx]
 
@@ -369,13 +436,7 @@ class FullSpectrumPlot(BasePlot):
                 # Fallback: create from scratch
                 self._plot_observed_spectrum(ax, panel_wave, panel_flux, deduplicate=True)
 
-            # y-limits
-            if np.any(obs_mask):
-                ymax = float(np.nanmax(self.flux_data[obs_mask]))
-                ymax += ymax * self.ymax_factor
-                ymin = -0.005
-            else:
-                ymin, ymax = -0.005, 0.1
+            ymin, ymax = panel_ylims[idx]
             ax.set_ylim(ymin, ymax)
 
             # Update molecule lines in place
