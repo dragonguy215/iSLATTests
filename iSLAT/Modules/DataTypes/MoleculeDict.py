@@ -1040,6 +1040,8 @@ class MoleculeDict(dict):
             molecule = Molecule(
                 user_save_data=mol_data if use_user_save_data else None,
                 hitran_data=mol_data.get("hitran_data"),
+                line_data_source=mol_data.get("line_data_source"),
+                line_format=mol_data.get("line_format"),
                 name=mol_name,
                 filepath=mol_data.get("file") or mol_data.get("File Path"),
                 displaylabel=mol_data.get("displaylabel") or mol_data.get("label") or mol_data.get("Molecule Label", mol_name),
@@ -1352,6 +1354,8 @@ class MoleculeDict(dict):
             molecule = Molecule(
                 user_save_data=mol_data if "Molecule Name" in mol_data else None,
                 hitran_data=mol_data.get("hitran_data"),
+                line_data_source=mol_data.get("line_data_source"),
+                line_format=mol_data.get("line_format"),
                 name=mol_name,
                 filepath=mol_data.get("file") or mol_data.get("File Path"),
                 displaylabel=mol_data.get("label") or mol_data.get("Molecule Label", mol_name),
@@ -1383,7 +1387,9 @@ class MoleculeDict(dict):
         # Estimate workload based on file sizes
         total_estimated_lines = 0
         for mol_data in molecules_data:
-            file_path = mol_data.get("hitran_data") or mol_data.get("File Path")
+            file_path = (mol_data.get("line_data_source")
+                         or mol_data.get("hitran_data")
+                         or mol_data.get("File Path"))
             if file_path and os.path.exists(file_path):
                 try:
                     file_size = os.path.getsize(file_path)

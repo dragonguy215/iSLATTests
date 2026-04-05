@@ -38,3 +38,5 @@ iSLAT/DATAFILES/LINELISTS/
 .coverage
 
 .DS_store
+
+iSLAT/DATAFILES/cache/

@@ -24,6 +24,9 @@ hitran_data_folder_name = Path("HITRANdata")
 hitran_data_folder_path = _ABSOLUTE_DATA_FILES_PATH / "HITRANdata"
 hitran_cache_folder_path = os.path.join(str(hitran_data_folder_path), "cache")
 
+# General line-list cache (covers HITRAN, CSV, saved-lines, and custom formats)
+line_cache_folder_path = os.path.join(str(_ABSOLUTE_DATA_FILES_PATH), "cache")
+
 example_data_folder_path = data_files_path / "EXAMPLE-data"
 
 molsave_file_name = "molsave.csv"
@@ -70,6 +73,7 @@ __all__ = [
     "hitran_data_folder_name",
     "hitran_data_folder_path",
     "hitran_cache_folder_path",
+    "line_cache_folder_path",
     "molsave_file_name",
     "molecule_list_file_name",
     "defaults_file_name",

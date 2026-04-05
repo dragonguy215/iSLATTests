@@ -162,7 +162,8 @@ class Molecule:
         '_intensity_cache', '_spectrum_cache', '_flux_cache',
         '_param_hash_cache', '_dirty_flags', '_cache_stats',
         '_molar_mass', '_thermal_broad',
-        '_intensity_calculation_method'
+        '_intensity_calculation_method',
+        '_line_data_source', '_line_format',
     )
     
     _molecule_parameter_change_callbacks = []
@@ -228,6 +229,11 @@ class Molecule:
         else:
             self.user_save_data = None
             self.hitran_data = None
+
+        # Format-neutral line data source (takes precedence over hitran_data
+        # when present).  Accepted values: any file path string.
+        self._line_data_source = kwargs.get('line_data_source', None)
+        self._line_format = kwargs.get('line_format', None)  # "hitran", "csv", "saved", or None=auto
 
         self.initial_molecule_parameters = kwargs.get('initial_molecule_parameters', {})
 
@@ -331,7 +337,10 @@ class Molecule:
     def _load_from_kwargs(self, kwargs: Dict[str, Any]):
         """Load parameters from kwargs"""
         self.name = kwargs.get('name', kwargs.get('displaylabel', kwargs.get('filepath', 'Unknown Molecule')))
-        self.filepath = kwargs.get('filepath', (self.hitran_data if hasattr(self, 'hitran_data') else None))
+        # Prefer line_data_source over hitran_data for the filepath
+        self.filepath = kwargs.get('filepath',
+                                   self._line_data_source or
+                                   (self.hitran_data if hasattr(self, 'hitran_data') else None))
         self.displaylabel = kwargs.get('displaylabel', kwargs.get('name', 'Unknown Molecule'))
         self._temp_val = kwargs.get('temp', self.initial_molecule_parameters.get('t_kin', 300.0))
         self._radius_val = kwargs.get('radius', self.initial_molecule_parameters.get('radius_init', 1.0))
@@ -358,7 +367,8 @@ class Molecule:
                 debug_config.info('molecule_dict', f"Loading lines from filepath: {self.filepath}")
                 self.lines = MoleculeLineList(
                     molecule_id=self.name, filename=self.filepath,
-                    wavelength_range=self._wavelength_range
+                    wavelength_range=self._wavelength_range,
+                    format=getattr(self, '_line_format', None),
                 )
             else:
                 print("Creating empty line list")
