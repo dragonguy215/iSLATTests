@@ -963,7 +963,11 @@ class BasePlot(ABC):
             manager = plt._backend_mod.new_figure_manager_given_figure(
                 num, self.fig,
             )
-            plt._pylab_helpers.Gcf.set_active(manager)
+            # Use _set_new_active_manager (not set_active) so the
+            # manager gets its _cidgcf callback registered.  Without
+            # this, Gcf.destroy_all() crashes because it expects
+            # manager._cidgcf to exist for mpl_disconnect().
+            plt._pylab_helpers.Gcf._set_new_active_manager(manager)
         except Exception:
             # Fallback for backends that don't support this.
             try:

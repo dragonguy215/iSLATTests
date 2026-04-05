@@ -239,6 +239,162 @@ class TestBuildMoleculeLegend:
         plt.close(fig)
 
 
+class TestRegisterWithPyplot:
+    """Ensure _register_with_pyplot produces a properly managed figure.
+
+    This test class guards against the _cidgcf regression: when a
+    figure is created via ``matplotlib.figure.Figure()`` (not
+    ``plt.figure()``) and then registered with pyplot's Gcf, the
+    resulting FigureManager must have a ``_cidgcf`` attribute.
+    Without it, ``Gcf.destroy_all()`` — called by ``plt.show()`` in
+    the inline / notebook backend — raises ``AttributeError``.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _close_all_figures(self):
+        """Clean pyplot state before and after every test."""
+        plt.close("all")
+        yield
+        plt.close("all")
+
+    def test_figure_registered_in_pyplot(self):
+        """After _register_with_pyplot the figure should be in Gcf."""
+        panel = ConcreteSpectralPanel(
+            np.arange(5.0), np.ones(5), 0.0, 4.0,
+        )
+        panel._ensure_figure()
+        panel._register_with_pyplot()
+
+        # The figure should now appear in pyplot's figure list.
+        assert len(plt.get_fignums()) >= 1
+        panel.close()
+
+    def test_manager_has_cidgcf(self):
+        """The registered FigureManager must have _cidgcf.
+
+        This is the exact attribute whose absence caused the
+        'FigureManagerBase has no attribute _cidgcf' crash when
+        plt.show() → Gcf.destroy_all() was called in notebooks.
+        """
+        from matplotlib._pylab_helpers import Gcf
+
+        panel = ConcreteSpectralPanel(
+            np.arange(5.0), np.ones(5), 0.0, 4.0,
+        )
+        panel._ensure_figure()
+        panel._register_with_pyplot()
+
+        # Find the manager for our figure
+        fig_num = panel.fig.number
+        manager = Gcf.figs.get(fig_num)
+        assert manager is not None, (
+            f"Figure {fig_num} not found in Gcf.figs after registration"
+        )
+        assert hasattr(manager, "_cidgcf"), (
+            "FigureManager registered via _register_with_pyplot is missing "
+            "_cidgcf — Gcf.destroy_all() will crash (the original bug)."
+        )
+        panel.close()
+
+    def test_destroy_all_after_register(self):
+        """Gcf.destroy_all() must not raise after _register_with_pyplot.
+
+        This is the high-level regression test: plt.show() on the
+        inline backend calls Gcf.destroy_all() internally.  If the
+        manager was registered incorrectly this raises AttributeError.
+        """
+        from matplotlib._pylab_helpers import Gcf
+
+        panel = ConcreteSpectralPanel(
+            np.arange(5.0), np.ones(5), 0.0, 4.0,
+        )
+        panel._ensure_figure()
+        panel._register_with_pyplot()
+
+        # Must not raise
+        Gcf.destroy_all()
+        panel.fig = None  # Already destroyed — avoid double-close
+
+    def test_plt_close_all_after_register(self):
+        """plt.close('all') must work after _register_with_pyplot."""
+        panel = ConcreteSpectralPanel(
+            np.arange(5.0), np.ones(5), 0.0, 4.0,
+        )
+        panel._ensure_figure()
+        panel._register_with_pyplot()
+
+        # Must not raise
+        plt.close("all")
+        assert len(plt.get_fignums()) == 0
+        panel.fig = None  # Already closed
+
+    def test_register_idempotent(self):
+        """Calling _register_with_pyplot twice must be safe."""
+        panel = ConcreteSpectralPanel(
+            np.arange(5.0), np.ones(5), 0.0, 4.0,
+        )
+        panel._ensure_figure()
+        panel._register_with_pyplot()
+        fignums_first = list(plt.get_fignums())
+        panel._register_with_pyplot()
+        fignums_second = list(plt.get_fignums())
+        assert fignums_first == fignums_second
+        panel.close()
+
+    def test_register_multiple_figures(self):
+        """Register several independent figures and destroy all."""
+        from matplotlib._pylab_helpers import Gcf
+
+        panels = []
+        for _ in range(5):
+            p = ConcreteSpectralPanel(
+                np.arange(5.0), np.ones(5), 0.0, 4.0,
+            )
+            p._ensure_figure()
+            p._register_with_pyplot()
+            panels.append(p)
+
+        assert len(plt.get_fignums()) >= 5
+        # All managers must have _cidgcf
+        for fig_num in plt.get_fignums():
+            mgr = Gcf.figs.get(fig_num)
+            assert hasattr(mgr, "_cidgcf"), (
+                f"Manager for figure {fig_num} missing _cidgcf"
+            )
+
+        # Must not raise
+        Gcf.destroy_all()
+        for p in panels:
+            p.fig = None
+
+    def test_close_after_register_deregisters(self):
+        """BasePlot.close() should deregister the figure from pyplot."""
+        panel = ConcreteSpectralPanel(
+            np.arange(5.0), np.ones(5), 0.0, 4.0,
+        )
+        panel._ensure_figure()
+        panel._register_with_pyplot()
+        assert len(plt.get_fignums()) >= 1
+        panel.close()
+        # The figure should no longer be tracked
+        assert panel.fig is None
+
+    def test_show_does_not_crash(self):
+        """show() on a concrete plot must not raise AttributeError.
+
+        This simulates the exact user-facing action that triggered the
+        original notebook crash.
+        """
+        wave, flux, _ = make_wave_flux(n=50)
+        panel = ConcreteSpectralPanel(wave, flux, 10.0, 20.0)
+        panel.generate_plot()
+        # show() calls _register_with_pyplot() internally.
+        # On the Agg backend it won't display anything, but it must
+        # not crash.
+        panel.show()
+        panel.close()
+
+
 class TestBasePlotIO:
     """Save and IPython rich-display."""
 
