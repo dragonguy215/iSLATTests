@@ -44,6 +44,31 @@ class GapMode(Enum):
     CONNECT = "connect"
     SKIP = "skip"
 
+
+class XScaling(Enum):
+    """Strategy for distributing wavelength ranges across stacked panels.
+
+    Controls how :class:`StackedSpectralPanel` computes the panel edges
+    that divide the full wavelength range into rows.
+
+    Attributes
+    ----------
+    WAVELENGTH : str
+        Each panel covers an equal wavelength width
+        ``(wave_max - wave_min) / n_panels``.  This is the default
+        (current) behaviour.  Panels in data-sparse regions will
+        appear mostly empty, while dense regions may be crowded.
+    DATA_DENSITY : str
+        Each panel contains approximately the same number of observed
+        data points.  Panels in densely-sampled spectral regions cover
+        a narrower wavelength range, and sparse regions cover a wider
+        range.  This keeps the horizontal point-to-point spacing
+        roughly constant across all panels.
+    """
+    WAVELENGTH = "wavelength"
+    DATA_DENSITY = "data_density"
+
+
 if TYPE_CHECKING:
     import pandas as pd
     from iSLAT.Modules.DataTypes.Molecule import Molecule
@@ -97,6 +122,7 @@ class SpectralPanel(BasePlot):
         ax: Optional[Axes] = None,
         gap_mode: GapMode | str = GapMode.CONNECT,
         gap_threshold: Optional[float] = None,
+        x_scaling: "XScaling | str" = "wavelength",
         **kwargs,
     ):
         super().__init__(figsize=figsize or (10, 4), **kwargs)
@@ -116,6 +142,12 @@ class SpectralPanel(BasePlot):
             gap_mode = GapMode(gap_mode)
         self.gap_mode: GapMode = gap_mode
         self.gap_threshold: Optional[float] = gap_threshold
+
+        # Horizontal-axis scaling (stored for informational use; the
+        # actual panel-edge logic lives in StackedSpectralPanel).
+        if isinstance(x_scaling, str):
+            x_scaling = XScaling(x_scaling)
+        self.x_scaling: XScaling = x_scaling
 
     # ------------------------------------------------------------------
     # Panel range property

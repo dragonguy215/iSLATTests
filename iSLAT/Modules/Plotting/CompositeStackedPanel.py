@@ -94,6 +94,7 @@ class CompositeStackedPanel(StackedSpectralPanel):
         # Override the panel_edges computed by the parent — they are
         # meaningless for a composite; we only need the *count*.
         self._panel_edges = np.arange(len(row_plan), dtype=float)
+        self._panel_ends = np.arange(1, len(row_plan) + 1, dtype=float)
         self._step = 1.0  # dummy
 
         # Pre-compute kwargs for each source once.
@@ -133,8 +134,8 @@ class CompositeStackedPanel(StackedSpectralPanel):
             plot_b.generate_plot()
 
         # Midpoints for matching.
-        mid_a = plot_a._panel_edges + plot_a._step / 2.0
-        mid_b = plot_b._panel_edges + plot_b._step / 2.0
+        mid_a = (plot_a._panel_edges + plot_a._panel_ends) / 2.0
+        mid_b = (plot_b._panel_edges + plot_b._panel_ends) / 2.0
 
         # Greedy closest-midpoint matching (one-to-one).
         matched: List[Tuple[int, int]] = []
@@ -209,7 +210,7 @@ class CompositeStackedPanel(StackedSpectralPanel):
             return True  # Fallback: keep the row
         owner, cell_idx = self.row_plan[row_idx]
         edge = owner._panel_edges[cell_idx]
-        return owner._cell_has_data(edge, edge + owner._step)
+        return owner._cell_has_data(edge, owner._panel_ends[cell_idx])
 
     # ------------------------------------------------------------------
     # _create_cell — delegate to the source plot
@@ -226,7 +227,7 @@ class CompositeStackedPanel(StackedSpectralPanel):
         owner, cell_idx = self.row_plan[idx]
         edge = owner._panel_edges[cell_idx]
         real_xmin = edge
-        real_xmax = edge + owner._step
+        real_xmax = owner._panel_ends[cell_idx]
         kw = self._source_kwargs.get(id(owner), {})
         return owner._create_cell(cell_idx, real_xmin, real_xmax, gs_slot, **kw)
 

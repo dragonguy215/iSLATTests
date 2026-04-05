@@ -31,6 +31,7 @@ Class hierarchy::
     └── FitLinesPlotGrid           — grid of individual line-fit results
 
     GapMode (Enum)             — CONNECT (default) | SKIP (break lines at gaps)
+    XScaling (Enum)            — WAVELENGTH (default) | DATA_DENSITY (uniform point density)
 
     PlotView (ABC)             — switchable view interface (GUI only)
     ├── ThreePanelView         — standard 3-panel GUI layout
@@ -40,7 +41,7 @@ Class hierarchy::
 from .BasePlot import BasePlot, DEFAULT_THEME, _detect_system_theme
 from .BasePlot import BasePlot as _BP
 load_theme = _BP.load_theme  # Convenience alias at package level
-from .SpectralPanel import SpectralPanel, GapMode
+from .SpectralPanel import SpectralPanel, GapMode, XScaling
 from .StackedSpectralPanel import StackedSpectralPanel
 from .CompositeStackedPanel import CompositeStackedPanel
 from .SpectrumPanel import SpectrumPanel
@@ -60,6 +61,7 @@ __all__ = [
     "DEFAULT_THEME",
     "load_theme",
     "GapMode",
+    "XScaling",
     "SpectralPanel",
     "StackedSpectralPanel",
     "CompositeStackedPanel",

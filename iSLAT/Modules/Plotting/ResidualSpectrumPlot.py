@@ -446,6 +446,7 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
             ax=ax_spec,
             gap_mode=self.gap_mode,
             gap_threshold=self.gap_threshold,
+            x_scaling=self.x_scaling,
         )
         # Attach model_components for rendering in _post_render_cell
         spectrum_panel._model_components = self.model_components
@@ -472,6 +473,7 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
             ax=ax_res,
             gap_mode=self.gap_mode,
             gap_threshold=self.gap_threshold,
+            x_scaling=self.x_scaling,
         )
 
         return [spectrum_panel, residual_panel]
@@ -488,7 +490,7 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
         fg = self._get_theme_value("foreground", "black")
         n = len(self._panel_edges)
         xmin = self._panel_edges[idx]
-        xmax = xmin + self._step
+        xmax = self._panel_ends[idx]
         xr = (xmin, xmax)
 
         spectrum_panel = cell_panels[0]

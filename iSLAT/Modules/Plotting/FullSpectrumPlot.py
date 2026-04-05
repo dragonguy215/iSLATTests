@@ -166,8 +166,7 @@ class FullSpectrumPlot(StackedSpectralPanel):
 
         self._xlim_start = float(np.nanmin(self.wave_data))
         self._xlim_end = float(np.nanmax(self.wave_data))
-        self._step = (self._xlim_end - self._xlim_start) / max(self.n_panels, 1)
-        self._panel_edges = np.arange(self._xlim_start, self._xlim_end, self._step)
+        self._compute_panel_layout()
 
         return (
             len(old_edges) != len(self._panel_edges)
@@ -275,6 +274,7 @@ class FullSpectrumPlot(StackedSpectralPanel):
             ax=ax,
             gap_mode=self.gap_mode,
             gap_threshold=self.gap_threshold,
+            x_scaling=self.x_scaling,
         )
         # Populate backward-compatible subplots dict
         self.subplots[idx] = ax
@@ -397,7 +397,7 @@ class FullSpectrumPlot(StackedSpectralPanel):
         # --- Update each panel in place ---------------------------------
         for idx, xlim_start in enumerate(self._panel_edges):
             is_last = idx == n - 1
-            panel_end = xlim_start + self._step
+            panel_end = self._panel_ends[idx]
             xr = (xlim_start, panel_end)
             ax = self.subplots[idx]
 

@@ -46,7 +46,7 @@ from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 from matplotlib.ticker import MaxNLocator
 
 from .BasePlot import BasePlot
-from .SpectralPanel import SpectralPanel, GapMode
+from .SpectralPanel import SpectralPanel, GapMode, XScaling
 
 if TYPE_CHECKING:
     from matplotlib.gridspec import SubplotSpec
@@ -113,6 +113,7 @@ class StackedSpectralPanel(BasePlot):
         figsize: Optional[Tuple[float, float]] = None,
         gap_mode: GapMode | str = GapMode.CONNECT,
         gap_threshold: Optional[float] = None,
+        x_scaling: XScaling | str = XScaling.WAVELENGTH,
         **kwargs,
     ):
         super().__init__(figsize=figsize, **kwargs)
@@ -134,6 +135,11 @@ class StackedSpectralPanel(BasePlot):
         self.gap_mode: GapMode = gap_mode
         self.gap_threshold: Optional[float] = gap_threshold
 
+        # Horizontal-axis scaling strategy
+        if isinstance(x_scaling, str):
+            x_scaling = XScaling(x_scaling)
+        self.x_scaling: XScaling = x_scaling
+
         # Wavelength range
         if xlim_range is not None:
             self._xlim_start, self._xlim_end = xlim_range
@@ -141,18 +147,8 @@ class StackedSpectralPanel(BasePlot):
             self._xlim_start = float(np.nanmin(self.wave_data))
             self._xlim_end = float(np.nanmax(self.wave_data))
 
-        # Panel step
-        if step is not None:
-            self._step = step
-        else:
-            self._step = (self._xlim_end - self._xlim_start) / max(
-                self.n_panels, 1
-            )
-
-        # Pre-compute panel edges
-        self._panel_edges: np.ndarray = np.arange(
-            self._xlim_start, self._xlim_end, self._step
-        )
+        # Compute panel edges and ends
+        self._compute_panel_layout(step=step)
 
         # Auto figsize
         if self._figsize is None:
@@ -160,6 +156,94 @@ class StackedSpectralPanel(BasePlot):
 
         # Storage: {row_index: list[SpectralPanel]}
         self.panels: Dict[int, List[SpectralPanel]] = {}
+
+    # ------------------------------------------------------------------
+    # Panel-layout computation
+    # ------------------------------------------------------------------
+    def _compute_panel_layout(
+        self,
+        step: Optional[float] = None,
+    ) -> None:
+        """Compute :attr:`_panel_edges` and :attr:`_panel_ends`.
+
+        When :attr:`x_scaling` is ``WAVELENGTH`` (default) each panel
+        covers an equal wavelength width — the classic behaviour.
+
+        When :attr:`x_scaling` is ``DATA_DENSITY`` the panel boundaries
+        are chosen so that each panel contains approximately the same
+        number of finite observed data-points.  The resulting panels
+        have **variable** wavelength widths but uniform horizontal
+        data-point density.
+
+        After this method runs:
+
+        * ``_panel_edges[i]`` — left boundary of panel *i*
+        * ``_panel_ends[i]``  — right boundary of panel *i*
+        * ``_step``           — uniform step width (``WAVELENGTH`` mode)
+          **or** ``None`` (``DATA_DENSITY`` mode).
+        """
+        start = self._xlim_start
+        end = self._xlim_end
+
+        if self.x_scaling is XScaling.DATA_DENSITY:
+            self._step = None  # not meaningful for variable-width panels
+            self._panel_edges, self._panel_ends = (
+                self._density_edges(start, end, self.n_panels)
+            )
+        else:
+            # Equal-wavelength-width mode (original behaviour).
+            if step is not None:
+                self._step = step
+            else:
+                self._step = (end - start) / max(self.n_panels, 1)
+
+            edges = np.arange(start, end, self._step)
+            self._panel_edges = edges
+            self._panel_ends = np.append(edges[1:], end)
+
+    def _density_edges(
+        self,
+        start: float,
+        end: float,
+        n_panels: int,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Return ``(edges, ends)`` placing boundaries at data-quantiles.
+
+        Only *finite* flux values inside ``[start, end]`` are counted.
+        If there are fewer data points than panels the function falls
+        back to equal-wavelength spacing.
+        """
+        mask = (
+            (self.wave_data >= start)
+            & (self.wave_data <= end)
+            & np.isfinite(self.flux_data)
+        )
+        wave_in_range = np.sort(self.wave_data[mask])
+
+        if len(wave_in_range) < n_panels or n_panels <= 1:
+            # Not enough data — fall back to equal-wavelength.
+            step = (end - start) / max(n_panels, 1)
+            edges = np.arange(start, end, step)
+            return edges, np.append(edges[1:], end)
+
+        # Quantile-based boundaries so each panel has ~equal point count.
+        quantiles = np.linspace(0, 1, n_panels + 1)
+        boundaries = np.quantile(wave_in_range, quantiles)
+
+        # Snap the outermost boundaries to the exact data range.
+        boundaries[0] = start
+        boundaries[-1] = end
+
+        edges = boundaries[:-1]
+        ends = boundaries[1:]
+        return edges, ends
+
+    def get_panel_end(self, idx: int) -> float:
+        """Return the right wavelength boundary for panel *idx*.
+
+        Works for both equal-width and data-density modes.
+        """
+        return float(self._panel_ends[idx])
 
     # ------------------------------------------------------------------
     # Abstract factory -- subclasses produce the concrete cell contents
@@ -280,8 +364,8 @@ class StackedSpectralPanel(BasePlot):
                 )
 
         ylims: List[Tuple[float, float]] = []
-        for xlim_start in self._panel_edges:
-            panel_end = xlim_start + self._step
+        for idx, xlim_start in enumerate(self._panel_edges):
+            panel_end = self._panel_ends[idx]
             mask = (self.wave_data >= xlim_start) & (
                 self.wave_data <= panel_end
             )
@@ -509,7 +593,7 @@ class StackedSpectralPanel(BasePlot):
         active_idx: List[int] = []
         for i, edge in enumerate(self._panel_edges):
             xmin = edge
-            xmax = edge + self._step
+            xmax = self._panel_ends[i]
             if self._cell_has_data(xmin, xmax):
                 active_idx.append(i)
         return active_idx, self._panel_edges[active_idx] if active_idx else np.array([])
@@ -598,7 +682,7 @@ class StackedSpectralPanel(BasePlot):
         for row_pos, orig_idx in enumerate(active_indices):
             is_last = row_pos == n_active - 1
             xlim_start = self._panel_edges[orig_idx]
-            panel_end = xlim_start + self._step
+            panel_end = self._panel_ends[orig_idx]
             xmin, xmax = xlim_start, panel_end
 
             # Delegate cell creation to the concrete subclass.
@@ -622,10 +706,7 @@ class StackedSpectralPanel(BasePlot):
                 and prev_bottom_ax is not None
             ):
                 # There were skipped cells between prev and current row.
-                skipped_start = (
-                    self._panel_edges[prev_original_idx]
-                    + self._step
-                )
+                skipped_start = self._panel_ends[prev_original_idx]
                 skipped_end = xlim_start
                 self._draw_gap_skip_annotation(
                     prev_bottom_ax,
