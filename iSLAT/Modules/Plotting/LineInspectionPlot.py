@@ -13,16 +13,20 @@ import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from .BasePlot import BasePlot
+from .SpectralPanel import SpectralPanel
 
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
 
-class LineInspectionPlot(BasePlot):
+class LineInspectionPlot(SpectralPanel):
     """
     Plot a narrow wavelength region with observed data and molecule models.
+
+    Implements the :class:`SpectralPanel` abstract interface for a single
+    zoomed-in wavelength region with optional molecule model overlays and
+    individual line markers with energy / A-coefficient labels.
 
     Parameters
     ----------
@@ -64,38 +68,25 @@ class LineInspectionPlot(BasePlot):
         ax: Optional[Axes] = None,
         **kwargs,
     ):
-        super().__init__(figsize=figsize or (10, 4), **kwargs)
-        self.wave_data = wave_data
-        self.flux_data = flux_data
-        self.xmin = xmin
-        self.xmax = xmax
-        self.error_data = error_data
+        super().__init__(
+            wave_data=wave_data,
+            flux_data=flux_data,
+            xmin=xmin,
+            xmax=xmax,
+            error_data=error_data,
+            molecules=molecules,
+            figsize=figsize or (10, 4),
+            ax=ax,
+            **kwargs,
+        )
         self.molecule = molecule
-        self.molecules = molecules
         self.line_data = line_data
         self.line_threshold = line_threshold
-        self._external_ax = ax
-
-    # ------------------------------------------------------------------
-    @property
-    def ax(self) -> Axes:
-        """The axes used for this plot."""
-        return self._ax
 
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:  # noqa: D401
         """Generate (or regenerate) the line inspection plot."""
-        # Resolve axes
-        if self._external_ax is not None:
-            self._ax = self._external_ax
-        else:
-            self._ensure_figure()
-            # Clear previous axes so regeneration doesn't stack on top
-            self.fig.clf()
-            self._ax = self.fig.add_subplot(111)
-
-        ax = self._ax
-        ax.clear()
+        ax = self._resolve_axes()
 
         fg = self._get_theme_value("foreground", "black")
 
@@ -339,12 +330,3 @@ class LineInspectionPlot(BasePlot):
         if not df.empty:
             df = df.sort_values("wavelength_um", ignore_index=True)
         return df
-
-    # ------------------------------------------------------------------
-    # Convenience: update the wavelength range without rebuilding
-    # ------------------------------------------------------------------
-    def set_range(self, xmin: float, xmax: float) -> None:
-        """Change the inspection range and regenerate."""
-        self.xmin = xmin
-        self.xmax = xmax
-        self.generate_plot()

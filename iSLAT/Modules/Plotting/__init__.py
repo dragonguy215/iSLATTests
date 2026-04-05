@@ -18,7 +18,9 @@ Quick-start (notebook)::
 Class hierarchy::
 
     BasePlot (ABC)
-    ├── LineInspectionPlot     — zoomed wavelength region
+    ├── SpectralPanel (ABC)    — single panel of spectral data in a range
+    │   └── LineInspectionPlot — zoomed wavelength region
+    ├── StackedSpectralPanel (ABC) — composer for vertically stacked panels
     ├── PopulationDiagramPlot  — Boltzmann / rotation diagram
     ├── FullSpectrumPlot       — multi-panel full spectrum overview
     │   └── ResidualSpectrumPlot — ...with per-panel residuals & chi^2
@@ -33,6 +35,8 @@ Class hierarchy::
 from .BasePlot import BasePlot, DEFAULT_THEME, _detect_system_theme
 from .BasePlot import BasePlot as _BP
 load_theme = _BP.load_theme  # Convenience alias at package level
+from .SpectralPanel import SpectralPanel
+from .StackedSpectralPanel import StackedSpectralPanel
 from .LineInspectionPlot import LineInspectionPlot
 from .PopulationDiagramPlot import PopulationDiagramPlot
 from .FullSpectrumPlot import FullSpectrumPlot
@@ -47,6 +51,8 @@ __all__ = [
     "BasePlot",
     "DEFAULT_THEME",
     "load_theme",
+    "SpectralPanel",
+    "StackedSpectralPanel",
     "LineInspectionPlot",
     "PopulationDiagramPlot",
     "FullSpectrumPlot",
@@ -55,5 +61,5 @@ __all__ = [
     "PlotView",
     "ThreePanelView",
     "FullSpectrumView",
-    "ResidualSpectrumPlot"
+    "ResidualSpectrumPlot",
 ]
