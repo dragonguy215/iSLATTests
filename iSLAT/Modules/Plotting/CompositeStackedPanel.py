@@ -127,11 +127,10 @@ class CompositeStackedPanel(StackedSpectralPanel):
         Matched pairs are interleaved (A-row, B-row); unmatched cells
         from either source are appended at the end.
         """
-        # Ensure both are rendered so internal state is populated.
-        if plot_a.fig is None:
-            plot_a.generate_plot()
-        if plot_b.fig is None:
-            plot_b.generate_plot()
+        # Panel edges / ends are computed in __init__, so we do NOT
+        # need to call generate_plot() here.  Doing so would create
+        # pyplot-managed figures that leak as unwanted widget outputs
+        # in Jupyter notebooks.
 
         # Midpoints for matching.
         mid_a = (plot_a._panel_edges + plot_a._panel_ends) / 2.0

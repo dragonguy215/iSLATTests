@@ -410,31 +410,32 @@ class BasePlot(ABC):
     # ------------------------------------------------------------------
     # Figure lifecycle helpers
     # ------------------------------------------------------------------
-    def _ensure_figure(self, **subplot_kw) -> MplFigure:
+    def _ensure_figure(self, silent: bool = False, **subplot_kw) -> MplFigure:
         """Create the figure if it doesn't already exist.
 
-        In a Jupyter notebook the figure is created via
-        ``plt.figure()`` so that the active interactive backend
-        (e.g. ``%matplotlib widget`` / ipympl) can manage it and
-        provide pan/zoom/resize controls — just like a regular
-        matplotlib plot.
+        The figure is **always** created via
+        :class:`~matplotlib.figure.Figure` — it is *not* registered
+        with the pyplot state machine at creation time.  This prevents
+        "leaked" figure widgets in Jupyter notebooks when plot objects
+        are used as intermediate data sources (e.g. the two source
+        plots inside a :class:`CompositeStackedPanel`).
 
-        Outside of a notebook, :class:`matplotlib.figure.Figure` is
-        instantiated directly so the figure is **not** registered with
-        the pyplot state machine.  This prevents the TkAgg backend
-        from creating a hidden figure-manager window that would steal
-        the application's taskbar icon.
+        When the user calls :meth:`show`, the figure is registered
+        with pyplot **on demand** so that the active interactive
+        backend (ipympl ``%matplotlib widget``, inline, TkAgg, …)
+        can display it properly.
+
+        Parameters
+        ----------
+        silent : bool
+            Kept for backward compatibility.  Has no effect — all
+            figures are now created without pyplot registration.
         """
         if self.fig is None:
             kw: Dict[str, Any] = {"layout": "constrained"}
             if self._figsize is not None:
                 kw["figsize"] = self._figsize
-            if self._in_notebook():
-                # Use pyplot so the interactive backend (ipympl) picks
-                # up the figure and renders it as a widget.
-                self.fig = plt.figure(**kw)
-            else:
-                self.fig = MplFigure(**kw)
+            self.fig = MplFigure(**kw)
             self._owns_figure = True
         return self.fig
 
@@ -912,53 +913,64 @@ class BasePlot(ABC):
     def show(self, block: bool = False) -> None:
         """Display the plot interactively.
 
-        In a Jupyter notebook the figure created by
-        :meth:`_ensure_figure` is already registered with pyplot via
-        ``plt.figure()``, so calling ``plt.show()`` renders it inline
-        — exactly like a regular matplotlib plot.  If the figure was
-        passed in externally and is *not* registered with pyplot, we
-        fall back to IPython's ``display()`` so the inline backend
-        never has to deal with a manually-created figure manager.
-
-        Outside of a notebook the figure is temporarily registered
-        with pyplot so ``plt.show()`` can display it in a GUI window.
+        Figures are created without pyplot registration (see
+        :meth:`_ensure_figure`), so this method registers the figure
+        with pyplot **on demand** before displaying.  In a Jupyter
+        notebook this lets the active interactive backend (ipympl,
+        inline, …) create the proper widget or image.  Outside of a
+        notebook the figure is registered with the GUI backend so
+        ``plt.show()`` opens a window.
         """
         if self.fig is None:
             self.generate_plot()
 
-        if self._in_notebook():
-            # Check whether the figure is already known to pyplot.
-            try:
-                fig_num = self.fig.number
-            except AttributeError:
-                fig_num = None
+        # Register the figure with pyplot if it isn't already.
+        self._register_with_pyplot()
 
-            if fig_num is not None and fig_num in plt.get_fignums():
-                # Figure was created via plt.figure() in _ensure_figure
-                # and is fully managed by pyplot — just show it normally.
-                plt.show(block=block)
-            else:
-                # Externally-passed figure not registered with pyplot.
-                # Use IPython display instead of manual Gcf registration
-                # to avoid _cidgcf errors with the inline backend.
-                try:
-                    from IPython.display import display as ipy_display
-                    ipy_display(self.fig)
-                except ImportError:
-                    plt.show(block=block)
+        if self._in_notebook():
+            plt.show(block=block)
             return
 
-        # Non-notebook: register the figure with pyplot so plt.show()
-        # can display it in a GUI window.
+        # Non-notebook: plt.show() opens a GUI window.
+        plt.show(block=block)
+
+    def _register_with_pyplot(self) -> None:
+        """Ensure *self.fig* is known to pyplot's figure manager.
+
+        If the figure was created via :class:`MplFigure` (which is
+        always the case now), it has no ``number`` attribute and is
+        unknown to pyplot.  This method registers it so the active
+        backend (ipympl widget, inline, TkAgg, …) can display it.
+
+        Calling this more than once is safe — it's a no-op when the
+        figure is already registered.
+        """
+        if self.fig is None:
+            return
+
+        # Already registered?
+        try:
+            fig_num = self.fig.number
+        except AttributeError:
+            fig_num = None
+
+        if fig_num is not None and fig_num in plt.get_fignums():
+            return
+
+        # Register with the backend's figure manager.
         try:
             num = id(self.fig)
-            if num not in [m.num for m in plt._pylab_helpers.Gcf.get_all_fig_managers()]:
-                manager = plt._backend_mod.new_figure_manager_given_figure(num, self.fig)
-                plt._pylab_helpers.Gcf.set_active(manager)
-            plt.show(block=block)
+            manager = plt._backend_mod.new_figure_manager_given_figure(
+                num, self.fig,
+            )
+            plt._pylab_helpers.Gcf.set_active(manager)
         except Exception:
-            # Last-resort fallback
-            plt.show(block=block)
+            # Fallback for backends that don't support this.
+            try:
+                from IPython.display import display as ipy_display
+                ipy_display(self.fig)
+            except ImportError:
+                pass
 
     def save(
         self,
