@@ -1,0 +1,218 @@
+"""
+ResidualPanel -- Concrete :class:`SpectralPanel` for residual display.
+
+Renders the ``(observed - model)`` residual with error bars, a zero
+reference line, optional error-envelope bands, and excluded-range shading.
+This is the lower sub-panel in each :class:`ResidualSpectrumPlot` row.
+"""
+
+from typing import Optional, Tuple, List, Dict, Any, TYPE_CHECKING
+
+import numpy as np
+import pandas as pd
+from matplotlib.axes import Axes
+
+from .SpectralPanel import SpectralPanel
+
+if TYPE_CHECKING:
+    from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+
+
+class ResidualPanel(SpectralPanel):
+    """
+    Single-axes panel showing ``(data - model)`` residuals.
+
+    Parameters
+    ----------
+    wave_data : np.ndarray
+        Full observed wavelength array.
+    flux_data : np.ndarray
+        Full observed flux array.
+    xmin, xmax : float
+        Wavelength bounds for this panel.
+    model_flux_adj : np.ndarray
+        Adjusted model flux array (same grid as *wave_data*).
+    error_data : np.ndarray, optional
+        Original pipeline flux uncertainties.
+    error_adj : np.ndarray, optional
+        Effective errors (e.g. with noise floor added in quadrature).
+    has_noise_floor : bool
+        When *True*, both original and expanded error envelopes are drawn.
+    excluded_ranges : list[tuple[float, float]], optional
+        Wavelength ranges to shade as excluded.
+    atomic_lines : pd.DataFrame, optional
+        Atomic-line DataFrame (for exclusion-window shading).
+    exclude_lines_half_width : float, optional
+        Half-width of exclusion windows around atomic lines.
+    is_first_row : bool
+        When *True*, error-envelope labels are added for the legend.
+    ax : Axes, optional
+        Pre-existing axes to draw into.
+    **kwargs
+        Forwarded to :class:`SpectralPanel` / :class:`BasePlot`.
+    """
+
+    def __init__(
+        self,
+        wave_data: np.ndarray,
+        flux_data: np.ndarray,
+        xmin: float,
+        xmax: float,
+        model_flux_adj: np.ndarray,
+        error_data: Optional[np.ndarray] = None,
+        error_adj: Optional[np.ndarray] = None,
+        has_noise_floor: bool = False,
+        excluded_ranges: Optional[List[Tuple[float, float]]] = None,
+        atomic_lines: Optional[pd.DataFrame] = None,
+        exclude_lines_half_width: Optional[float] = None,
+        is_first_row: bool = False,
+        ax: Optional[Axes] = None,
+        **kwargs,
+    ):
+        super().__init__(
+            wave_data=wave_data,
+            flux_data=flux_data,
+            xmin=xmin,
+            xmax=xmax,
+            error_data=error_data,
+            ax=ax,
+            **kwargs,
+        )
+        self.model_flux_adj = np.asarray(model_flux_adj)
+        self.error_adj = (
+            np.asarray(error_adj) if error_adj is not None else None
+        )
+        self.has_noise_floor = has_noise_floor
+        self.excluded_ranges: List[Tuple[float, float]] = excluded_ranges or []
+        self.atomic_lines = atomic_lines
+        self.exclude_lines_half_width = exclude_lines_half_width
+        self.is_first_row = is_first_row
+
+    # ------------------------------------------------------------------
+    def generate_plot(self, **kwargs) -> None:
+        """Render the residual panel."""
+        ax = self._resolve_axes()
+        xr = self.xlim
+        fg = self._get_theme_value("foreground", "black")
+
+        mask = self.get_panel_mask()
+        panel_wave = self.wave_data[mask]
+        panel_flux = self.flux_data[mask]
+        panel_model = self.model_flux_adj[mask]
+        panel_err_raw = (
+            self.error_data[mask] if self.error_data is not None else None
+        )
+        panel_err = (
+            self.error_adj[mask] if self.error_adj is not None else None
+        )
+
+        residuals = panel_flux - panel_model
+
+        # -- Residual data points ---------------------------------------
+        if panel_err is not None and len(panel_err) == len(residuals):
+            ax.errorbar(
+                panel_wave,
+                residuals,
+                yerr=panel_err,
+                fmt=".",
+                ms=2,
+                color=fg,
+                ecolor="lightgray",
+                elinewidth=0.5,
+                zorder=2,
+            )
+        else:
+            ax.plot(
+                panel_wave,
+                residuals,
+                ".",
+                ms=2,
+                color=fg,
+                zorder=2,
+            )
+        ax.axhline(0, color="gray", ls="--", lw=0.8, alpha=0.7)
+
+        # -- Error-envelope bands ---------------------------------------
+        if (
+            self.has_noise_floor
+            and panel_err is not None
+            and len(panel_err) > 0
+        ):
+            ax.fill_between(
+                panel_wave,
+                -panel_err_raw,
+                panel_err_raw,
+                color="salmon",
+                alpha=0.13,
+                zorder=1,
+                label=(
+                    r"$\pm 1\,\sigma_{\rm pipe}$"
+                    if self.is_first_row
+                    else ""
+                ),
+            )
+            ax.fill_between(
+                panel_wave,
+                -panel_err,
+                panel_err,
+                color="dodgerblue",
+                alpha=0.13,
+                zorder=1,
+                label=(
+                    r"$\pm 1\,\sigma_{\rm eff}$"
+                    if self.is_first_row
+                    else ""
+                ),
+            )
+
+        ax.set_xlim(*xr)
+
+        # -- Shade excluded ranges --------------------------------------
+        for exc_lo, exc_hi in self.excluded_ranges:
+            if exc_hi >= xr[0] and exc_lo <= xr[1]:
+                ax.axvspan(
+                    max(exc_lo, xr[0]),
+                    min(exc_hi, xr[1]),
+                    color="lightcoral",
+                    alpha=0.15,
+                )
+
+        # -- Shade atomic-line exclusion windows ------------------------
+        if (
+            self.exclude_lines_half_width is not None
+            and self.atomic_lines is not None
+            and len(self.atomic_lines) > 0
+        ):
+            hw = self.exclude_lines_half_width
+            for _, arow in self.atomic_lines.iterrows():
+                wl = arow["wave"]
+                a_lo, a_hi = wl - hw, wl + hw
+                if a_hi >= xr[0] and a_lo <= xr[1]:
+                    ax.axvspan(
+                        max(a_lo, xr[0]),
+                        min(a_hi, xr[1]),
+                        color="lightsalmon",
+                        alpha=0.12,
+                    )
+
+    # ------------------------------------------------------------------
+    def compute_ylim(self, ymax_factor: float = 0.3) -> Tuple[float, float]:
+        """Symmetric y-limits based on the worst-case residual / error.
+
+        Returns ``(-pad, +pad)`` so the zero line sits at the centre.
+        """
+        mask = self.get_panel_mask()
+        panel_flux = self.flux_data[mask]
+        panel_model = self.model_flux_adj[mask]
+        panel_err = (
+            self.error_adj[mask] if self.error_adj is not None else None
+        )
+        if len(panel_flux) > 0:
+            residuals = panel_flux - panel_model
+            res_abs_max = float(np.nanmax(np.abs(residuals)))
+            if panel_err is not None and len(panel_err) > 0:
+                err_max = float(np.nanmax(panel_err))
+                res_abs_max = max(res_abs_max, err_max)
+            res_pad = res_abs_max * 1.3 if res_abs_max > 0 else 0.01
+            return (-res_pad, res_pad)
+        return (-0.01, 0.01)

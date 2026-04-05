@@ -18,14 +18,16 @@ Quick-start (notebook)::
 Class hierarchy::
 
     BasePlot (ABC)
-    ├── SpectralPanel (ABC)    — single panel of spectral data in a range
-    │   └── LineInspectionPlot — zoomed wavelength region
+    ├── SpectralPanel (ABC)        — single panel of spectral data in a range
+    │   ├── LineInspectionPlot     — zoomed wavelength region
+    │   ├── SpectrumPanel          — concrete panel: spectrum + molecules
+    │   └── ResidualPanel          — concrete panel: residual + chi^2
     ├── StackedSpectralPanel (ABC) — composer for vertically stacked panels
-    ├── PopulationDiagramPlot  — Boltzmann / rotation diagram
-    ├── FullSpectrumPlot       — multi-panel full spectrum overview
-    │   └── ResidualSpectrumPlot — ...with per-panel residuals & chi^2
-    ├── MainPlotGrid           — 3-panel composite (spectrum + inspection + pop-diagram)
-    └── FitLinesPlotGrid       — grid of individual line-fit results
+    │   └── FullSpectrumPlot       — multi-panel full spectrum overview
+    │       └── ResidualSpectrumPlot — ...with per-panel residuals & chi^2
+    ├── PopulationDiagramPlot      — Boltzmann / rotation diagram
+    ├── MainPlotGrid               — 3-panel composite (spectrum + inspection + pop-diagram)
+    └── FitLinesPlotGrid           — grid of individual line-fit results
 
     PlotView (ABC)             — switchable view interface (GUI only)
     ├── ThreePanelView         — standard 3-panel GUI layout
@@ -37,6 +39,8 @@ from .BasePlot import BasePlot as _BP
 load_theme = _BP.load_theme  # Convenience alias at package level
 from .SpectralPanel import SpectralPanel
 from .StackedSpectralPanel import StackedSpectralPanel
+from .SpectrumPanel import SpectrumPanel
+from .ResidualPanel import ResidualPanel
 from .LineInspectionPlot import LineInspectionPlot
 from .PopulationDiagramPlot import PopulationDiagramPlot
 from .FullSpectrumPlot import FullSpectrumPlot
@@ -53,6 +57,8 @@ __all__ = [
     "load_theme",
     "SpectralPanel",
     "StackedSpectralPanel",
+    "SpectrumPanel",
+    "ResidualPanel",
     "LineInspectionPlot",
     "PopulationDiagramPlot",
     "FullSpectrumPlot",

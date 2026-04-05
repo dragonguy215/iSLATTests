@@ -3,20 +3,22 @@ StackedSpectralPanel -- Abstract composer for vertically stacked spectral panels
 
 Manages a collection of :class:`SpectralPanel` instances laid out in a
 vertical stack using matplotlib's :class:`~matplotlib.gridspec.GridSpec`.
-This provides the same panel-stacking logic currently used by
-:class:`FullSpectrumPlot` and :class:`ResidualSpectrumPlot` but
-generalised so that **any** :class:`SpectralPanel` subclass can be
-composed into a multi-panel figure.
+Each row (cell) may contain an **arbitrary number** of sub-panels
+arranged vertically with configurable height ratios -- for example a
+single spectrum axes (as in :class:`FullSpectrumPlot`) or a spectrum +
+residual pair (as in :class:`ResidualSpectrumPlot`).
 
-Concrete subclasses must implement :meth:`_create_panel` to produce
-the appropriate :class:`SpectralPanel` for each wavelength range, and
-may override :meth:`_post_render_panel` to add per-row decorations.
+Concrete subclasses must implement :meth:`_create_cell` to produce the
+panels and axes for each wavelength row, and may override hooks like
+:meth:`_post_render_cell` and :meth:`_cell_height_ratios`.
 
 Usage sketch::
 
     class MyStackedPlot(StackedSpectralPanel):
-        def _create_panel(self, xmin, xmax, ax, **kw):
-            return MyConcretePanel(wave, flux, xmin, xmax, ax=ax)
+        def _create_cell(self, idx, xmin, xmax, gs_slot, **kw):
+            ax = self.fig.add_subplot(gs_slot)
+            panel = MyPanel(wave, flux, xmin, xmax, ax=ax)
+            return [panel]
 
     plot = MyStackedPlot(wave, flux, n_panels=6)
     plot.generate_plot()
@@ -44,12 +46,17 @@ from .BasePlot import BasePlot
 from .SpectralPanel import SpectralPanel
 
 if TYPE_CHECKING:
+    from matplotlib.gridspec import SubplotSpec
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
 
 
 class StackedSpectralPanel(BasePlot):
     """
     Abstract base for vertically stacked :class:`SpectralPanel` figures.
+
+    Each row in the outer GridSpec is called a **cell**.  A cell may
+    contain one or more sub-panels (axes) -- the concrete subclass
+    decides via :meth:`_create_cell` and :meth:`_cell_height_ratios`.
 
     Parameters
     ----------
@@ -74,13 +81,14 @@ class StackedSpectralPanel(BasePlot):
         When *True* all panels share the same vertical scale.
         Default *False*.
     hspace : float
-        Vertical spacing between rows in the outer GridSpec.
+        Vertical spacing between cells in the outer GridSpec.
         Default 0.15.
     row_height : float
-        Base height (inches) per row used for auto-figsize.  Default 2.0.
+        Base height (inches) per cell used for auto-figsize.
+        Default 2.0.
     figsize : tuple, optional
         Explicit figure size.  When *None* it is computed from
-        ``(14, row_height * n_panels)``.
+        ``(14, row_height * n_cells)``.
     **kwargs
         Forwarded to :class:`BasePlot`.
     """
@@ -138,84 +146,84 @@ class StackedSpectralPanel(BasePlot):
         if self._figsize is None:
             self._figsize = (14, self.row_height * len(self._panel_edges))
 
-        # Child panel storage: {row_index: SpectralPanel}
-        self.panels: Dict[int, SpectralPanel] = {}
-        # Axes storage (mirrors child panels for external access)
-        self.subplots: Dict[int, Axes] = {}
+        # Storage: {row_index: list[SpectralPanel]}
+        self.panels: Dict[int, List[SpectralPanel]] = {}
 
     # ------------------------------------------------------------------
-    # Abstract factory -- subclasses produce the concrete panel type
+    # Abstract factory -- subclasses produce the concrete cell contents
     # ------------------------------------------------------------------
     @abstractmethod
-    def _create_panel(
+    def _create_cell(
         self,
+        idx: int,
         xmin: float,
         xmax: float,
-        ax: Axes,
+        gs_slot: "SubplotSpec",
         **kwargs,
-    ) -> SpectralPanel:
-        """Create and return a :class:`SpectralPanel` for one row.
+    ) -> List[SpectralPanel]:
+        """Create and return one or more :class:`SpectralPanel` instances
+        for a single cell (row) in the stacked figure.
 
-        This is the factory method that concrete subclasses must
-        implement.  The returned panel will have its
-        :meth:`~SpectralPanel.generate_plot` called immediately
-        afterwards.
+        The subclass is responsible for creating the axes (via
+        ``self.fig.add_subplot`` or a nested ``GridSpecFromSubplotSpec``)
+        and attaching them to the panels.
 
         Parameters
         ----------
+        idx : int
+            Row index (0-based).
         xmin, xmax : float
-            Wavelength bounds for the row.
-        ax : Axes
-            Pre-created axes that the panel should draw into.
+            Wavelength bounds for this row.
+        gs_slot : SubplotSpec
+            The outer-GridSpec slot allocated to this row.  Use it
+            directly with ``fig.add_subplot(gs_slot)`` for a single-axes
+            cell, or split it further with ``GridSpecFromSubplotSpec``
+            for multi-axes cells.
         **kwargs
             Extra keyword arguments forwarded from :meth:`generate_plot`.
 
         Returns
         -------
-        SpectralPanel
+        list[SpectralPanel]
+            One or more panels that will be rendered in this row.
         """
         ...
 
     # ------------------------------------------------------------------
     # Optional per-row hook
     # ------------------------------------------------------------------
-    def _post_render_panel(
+    def _post_render_cell(
         self,
         idx: int,
-        panel: SpectralPanel,
-        ax: Axes,
+        cell_panels: List[SpectralPanel],
         is_last: bool,
     ) -> None:
-        """Called after each panel is generated.
+        """Called after all panels in a cell have been generated.
 
         Subclasses can override this to add per-row tick formatting,
         labels, annotations, chi-squared boxes, etc.  The default
         implementation applies common tick locators and hides x-axis
         labels on all but the last row.
-
-        Parameters
-        ----------
-        idx : int
-            Row index (0-based).
-        panel : SpectralPanel
-            The child panel that was just rendered.
-        ax : Axes
-            The axes the panel was drawn on.
-        is_last : bool
-            *True* when this is the bottom row.
         """
         fg = self._get_theme_value("foreground", "black")
-        ax.tick_params(axis="x", labelsize=7)
-        ax.tick_params(axis="y", labelsize=7)
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=8, prune="both"))
-        ax.yaxis.set_major_locator(MaxNLocator(nbins=6, prune="both"))
-        if is_last:
-            ax.set_xlabel("Wavelength (\u03bcm)", fontsize=8, color=fg)
-        else:
-            ax.tick_params(axis="x", labelbottom=False)
+        for p_idx, panel in enumerate(cell_panels):
+            ax = panel.ax
+            if ax is None:
+                continue
+            ax.tick_params(axis="x", labelsize=7)
+            ax.tick_params(axis="y", labelsize=7)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=8, prune="both"))
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=6, prune="both"))
+            is_bottom_ax = (p_idx == len(cell_panels) - 1)
+            if is_last and is_bottom_ax:
+                ax.set_xlabel(
+                    "Wavelength (\u03bcm)", fontsize=8, color=fg,
+                )
+            else:
+                ax.tick_params(axis="x", labelbottom=is_bottom_ax)
 
     # ------------------------------------------------------------------
-    # y-limit computation (same algorithm as FSP._compute_panel_ylims)
+    # y-limit computation
     # ------------------------------------------------------------------
     @staticmethod
     def _default_ylim_fn(
@@ -224,17 +232,7 @@ class StackedSpectralPanel(BasePlot):
         mask: np.ndarray,
         ymax_factor: float = 0.2,
     ) -> Tuple[float, float]:
-        """Compute default ``(ymin, ymax)`` from observed flux.
-
-        Parameters
-        ----------
-        wave_data, flux_data : np.ndarray
-            Full data arrays.
-        mask : np.ndarray
-            Boolean mask selecting points in the current panel.
-        ymax_factor : float
-            Fractional headroom.
-        """
+        """Compute default ``(ymin, ymax)`` from observed flux."""
         if np.any(mask):
             peak = float(np.nanmax(flux_data[mask]))
             return (-0.005, peak + peak * ymax_factor)
@@ -247,7 +245,7 @@ class StackedSpectralPanel(BasePlot):
             Callable[[np.ndarray], Tuple[float, float]]
         ] = None,
     ) -> List[Tuple[float, float]]:
-        """Compute per-panel y-limits (mirrors FSP._compute_panel_ylims).
+        """Compute per-cell y-limits.
 
         Parameters
         ----------
@@ -256,12 +254,7 @@ class StackedSpectralPanel(BasePlot):
             :attr:`uniform_ylim`.
         ylim_fn : callable, optional
             ``fn(mask) -> (ymin, ymax)``.  Defaults to a closure around
-            :meth:`_default_ylim_fn` using this instance's data and
-            *ymax_factor*.
-
-        Returns
-        -------
-        list[tuple[float, float]]
+            :meth:`_default_ylim_fn`.
         """
         if uniform is None:
             uniform = self.uniform_ylim
@@ -288,23 +281,71 @@ class StackedSpectralPanel(BasePlot):
         return ylims
 
     # ------------------------------------------------------------------
+    # Post-render annotation helpers (delegate to each panel)
+    # ------------------------------------------------------------------
+    def plot_atomic_lines(
+        self,
+        atomic_df: Any,
+        tag: str = "_islat_atomic_line",
+    ) -> None:
+        """Draw atomic-line markers on every panel that supports it."""
+        if atomic_df is None or (hasattr(atomic_df, "__len__") and len(atomic_df) == 0):
+            return
+        for cell_panels in self.panels.values():
+            for panel in cell_panels:
+                if hasattr(panel, "plot_atomic_lines"):
+                    panel.plot_atomic_lines(atomic_df, tag=tag)
+
+    def remove_atomic_lines(
+        self,
+        tag: str = "_islat_atomic_line",
+    ) -> None:
+        """Remove atomic-line artists from every panel."""
+        for cell_panels in self.panels.values():
+            for panel in cell_panels:
+                if hasattr(panel, "remove_atomic_lines"):
+                    panel.remove_atomic_lines(tag=tag)
+
+    def plot_saved_lines(
+        self,
+        line_data: Any,
+        tag: str = "_islat_saved_line",
+    ) -> None:
+        """Draw saved-line annotations on every panel that supports it."""
+        if line_data is None or (hasattr(line_data, "__len__") and len(line_data) == 0):
+            return
+        for cell_panels in self.panels.values():
+            for panel in cell_panels:
+                if hasattr(panel, "plot_saved_lines"):
+                    panel.plot_saved_lines(line_data, tag=tag)
+
+    def remove_saved_lines(
+        self,
+        tag: str = "_islat_saved_line",
+    ) -> None:
+        """Remove saved-line artists from every panel."""
+        for cell_panels in self.panels.values():
+            for panel in cell_panels:
+                if hasattr(panel, "remove_saved_lines"):
+                    panel.remove_saved_lines(tag=tag)
+
+    # ------------------------------------------------------------------
     # Top-level plot generation
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
         """Build the stacked multi-panel figure.
 
-        For each panel edge a new :class:`SpectralPanel` is created
-        (via :meth:`_create_panel`), its :meth:`generate_plot` is
-        invoked, and :meth:`_post_render_panel` is called for per-row
+        For each panel edge a cell is created (via :meth:`_create_cell`),
+        each child panel's :meth:`~SpectralPanel.generate_plot` is
+        invoked, and :meth:`_post_render_cell` is called for per-row
         decoration.
         """
         n = len(self._panel_edges)
         self._ensure_figure()
         self.fig.clf()
         self.panels.clear()
-        self.subplots.clear()
 
-        # Disable constrained_layout for uniform panel heights.
+        # Disable constrained_layout for uniform cell heights.
         self.fig.set_layout_engine(None)
 
         gs = GridSpec(
@@ -318,9 +359,6 @@ class StackedSpectralPanel(BasePlot):
             left=0.06, right=0.94, top=0.93, bottom=0.06,
         )
 
-        # --- Pre-compute per-panel y-limits ----------------------------
-        panel_ylims = self._compute_panel_ylims()
-
         fg = self._get_theme_value("foreground", "black")
 
         for idx, xlim_start in enumerate(self._panel_edges):
@@ -328,26 +366,23 @@ class StackedSpectralPanel(BasePlot):
             panel_end = xlim_start + self._step
             xmin, xmax = xlim_start, panel_end
 
-            ax = self.fig.add_subplot(gs[idx, 0])
-            self.subplots[idx] = ax
+            # Delegate cell creation to the concrete subclass.
+            cell_panels = self._create_cell(
+                idx, xmin, xmax, gs[idx, 0], **kwargs,
+            )
+            self.panels[idx] = cell_panels
 
-            # --- Delegate to the concrete factory ----------------------
-            panel = self._create_panel(xmin, xmax, ax, **kwargs)
-            self.panels[idx] = panel
+            # Render each sub-panel in the cell.
+            for panel in cell_panels:
+                panel.generate_plot(**kwargs)
 
-            # Let the child panel render onto the supplied axes.
-            panel.generate_plot(**kwargs)
-
-            # Apply pre-computed y-limits
-            ax.set_xlim(xmin, xmax)
-            ymin, ymax = panel_ylims[idx]
-            ax.set_ylim(ymin, ymax)
-
-            # Per-row decoration hook
-            self._post_render_panel(idx, panel, ax, is_last)
+            # Per-row decoration hook.
+            self._post_render_cell(idx, cell_panels, is_last)
 
         # --- Global figure labels --------------------------------------
-        self.fig.supylabel("Flux Density (Jy)", fontsize=10, color=fg, x=0.01)
+        self.fig.supylabel(
+            "Flux Density (Jy)", fontsize=10, color=fg, x=0.01,
+        )
 
         # Apply theme
         self.apply_theme_to_figure()

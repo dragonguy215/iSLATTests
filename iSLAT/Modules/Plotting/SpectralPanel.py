@@ -25,6 +25,7 @@ from matplotlib.figure import Figure as MplFigure
 from .BasePlot import BasePlot
 
 if TYPE_CHECKING:
+    import pandas as pd
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
 
@@ -146,6 +147,66 @@ class SpectralPanel(BasePlot):
             peak = float(np.nanmax(self.flux_data[mask]))
             return (-0.005, peak + peak * ymax_factor)
         return (-0.005, 0.1)
+
+    # ------------------------------------------------------------------
+    # Post-render annotation helpers
+    # ------------------------------------------------------------------
+    def plot_atomic_lines(
+        self,
+        atomic_df: "pd.DataFrame",
+        tag: str = "_islat_atomic_line",
+    ) -> None:
+        """Draw atomic-line markers on the panel's axes.
+
+        Uses the panel's current y-limits for correct label placement.
+        Safe to call after :meth:`generate_plot`.
+        """
+        ax = self.ax
+        if ax is None:
+            return
+        self._plot_atomic_lines(ax, atomic_df, xr=self.xlim, tag=tag)
+
+    def remove_atomic_lines(
+        self,
+        tag: str = "_islat_atomic_line",
+    ) -> None:
+        """Remove previously drawn atomic-line artists."""
+        ax = self.ax
+        if ax is None:
+            return
+        self._clear_tagged_artists(
+            ax, tag, lines=True, collections=False, texts=True,
+        )
+
+    def plot_saved_lines(
+        self,
+        line_data: "pd.DataFrame",
+        tag: str = "_islat_saved_line",
+    ) -> None:
+        """Draw saved-line annotations on the panel's axes.
+
+        Uses the panel's current y-limits for correct label placement.
+        Safe to call after :meth:`generate_plot`.
+        """
+        ax = self.ax
+        if ax is None:
+            return
+        ymin, ymax = ax.get_ylim()
+        self._plot_line_annotations(
+            ax, line_data, self.xlim, ymin, ymax, tag=tag,
+        )
+
+    def remove_saved_lines(
+        self,
+        tag: str = "_islat_saved_line",
+    ) -> None:
+        """Remove previously drawn saved-line artists."""
+        ax = self.ax
+        if ax is None:
+            return
+        self._clear_tagged_artists(
+            ax, tag, lines=True, collections=True, texts=True,
+        )
 
     # ------------------------------------------------------------------
     # Convenience: change range and regenerate

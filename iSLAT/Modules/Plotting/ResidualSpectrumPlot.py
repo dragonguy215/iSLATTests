@@ -7,6 +7,11 @@ Optionally annotates each row with its reduced chi^2 and displays global
 goodness-of-fit statistics (chi^2, degrees of freedom, reduced chi^2) at the
 bottom of the figure.
 
+Each cell in the stacked layout contains two sub-panels produced by
+:meth:`_create_cell`: a :class:`SpectrumPanel` (top) and a
+:class:`ResidualPanel` (bottom), arranged via a nested
+``GridSpecFromSubplotSpec``.
+
 Designed for best-fit comparison plots, works with any model flux array.
 """
 
@@ -18,12 +23,16 @@ import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
-from matplotlib.gridspec import GridSpec
+from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 
 from .FullSpectrumPlot import FullSpectrumPlot
+from .SpectralPanel import SpectralPanel
+from .SpectrumPanel import SpectrumPanel
+from .ResidualPanel import ResidualPanel
 from .BasePlot import BasePlot
 
 if TYPE_CHECKING:
+    from matplotlib.gridspec import SubplotSpec
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
 
@@ -373,79 +382,211 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
         return (-0.01, 0.01)
 
     # ------------------------------------------------------------------
-    def generate_plot(self, **kwargs) -> None:
-        """Build the multi-panel figure with residual rows."""
-        n = len(self._panel_edges)
-        self._ensure_figure()
-        self.fig.clf()
-        self.subplots.clear()
+    # StackedSpectralPanel factory (overrides FSP)
+    # ------------------------------------------------------------------
+    def _create_cell(
+        self,
+        idx: int,
+        xmin: float,
+        xmax: float,
+        gs_slot: "SubplotSpec",
+        **kwargs,
+    ) -> List[SpectralPanel]:
+        """Create a spectrum + residual panel pair for the given row.
 
-        # Disable constrained_layout so every panel pair has exactly
-        # the same height -- the engine would otherwise redistribute
-        # vertical space per-row based on tick labels and legends.
-        # Use None (not "none") to fully clear the engine -- "none"
-        # installs a PlaceHolderLayoutEngine that still triggers
-        # warnings from subplots_adjust().
-        self.fig.set_layout_engine(None)
+        Uses a nested ``GridSpecFromSubplotSpec`` to split the allocated
+        slot into two sub-rows with configurable height ratios.
 
+        The molecule cache, summed spectrum, and model-related data are
+        passed through *kwargs* from :meth:`generate_plot`.
+        """
+        gs_inner = GridSpecFromSubplotSpec(
+            2, 1,
+            subplot_spec=gs_slot,
+            height_ratios=[1.0, self.residual_height_ratio],
+            hspace=0.0,
+        )
+        ax_spec = self.fig.add_subplot(gs_inner[0, 0])
+        ax_res = self.fig.add_subplot(gs_inner[1, 0], sharex=ax_spec)
+
+        # Populate backward-compatible subplots dict
+        self.subplots[idx] = (ax_spec, ax_res)
+
+        # --- Build the summed spectrum for this row --------------------
+        # The model fill uses the adjusted hires model if available,
+        # otherwise falls back to the data-grid model.
+        _hires_adj = self._model_flux_hires_adj
+        if _hires_adj is not None:
+            summed_w = self.model_wave
+            summed_f = _hires_adj
+        else:
+            summed_w = self.wave_data
+            summed_f = self._model_flux_adj
+
+        # --- Spectrum panel (top) --------------------------------------
+        spectrum_panel = SpectrumPanel(
+            wave_data=self.wave_data,
+            flux_data=self.flux_data,
+            xmin=xmin,
+            xmax=xmax,
+            error_data=self.error_data,
+            molecules=self.molecules,
+            mol_cache=kwargs.get("mol_cache", []),
+            summed_wave=summed_w,
+            summed_flux=summed_f,
+            line_list=self.line_list,
+            atomic_lines=self.atomic_lines,
+            wave_data_obs=getattr(self, "wave_data_obs", None),
+            ax=ax_spec,
+        )
+        # Attach model_components for rendering in _post_render_cell
+        spectrum_panel._model_components = self.model_components
+        spectrum_panel._has_continuum = self._has_continuum
+        spectrum_panel._continuum_params = (
+            (self.continuum_c0, self.continuum_c1, self.lam_ref)
+            if self._has_continuum else None
+        )
+
+        # --- Residual panel (bottom) -----------------------------------
+        residual_panel = ResidualPanel(
+            wave_data=self.wave_data,
+            flux_data=self.flux_data,
+            xmin=xmin,
+            xmax=xmax,
+            model_flux_adj=self._model_flux_adj,
+            error_data=self.error_data,
+            error_adj=self._error_adj,
+            has_noise_floor=self._has_noise_floor,
+            excluded_ranges=self.excluded_ranges,
+            atomic_lines=self.atomic_lines,
+            exclude_lines_half_width=self.exclude_lines_half_width,
+            is_first_row=(idx == 0),
+            ax=ax_res,
+        )
+
+        return [spectrum_panel, residual_panel]
+
+    # ------------------------------------------------------------------
+    def _post_render_cell(
+        self,
+        idx: int,
+        cell_panels: List[SpectralPanel],
+        is_last: bool,
+    ) -> None:
+        """Apply y-limits, tick formatting, model components, chi^2, and
+        excluded-range shading to the spectrum + residual pair."""
         fg = self._get_theme_value("foreground", "black")
+        n = len(self._panel_edges)
+        xmin = self._panel_edges[idx]
+        xmax = xmin + self._step
+        xr = (xmin, xmax)
 
-        # --- Nested GridSpec layout ------------------------------------
-        # Outer grid: n rows (one per wavelength range), matching
-        # FullSpectrumPlot's panel positions so that the TOP edge of
-        # each spectrum sub-panel lines up exactly.
-        # Inner grid (per row): 2 sub-rows [spectrum, residual] with
-        # hspace=0 so they are flush against each other.
-        from matplotlib.gridspec import GridSpecFromSubplotSpec
+        spectrum_panel = cell_panels[0]
+        residual_panel = cell_panels[1]
+        ax_spec = spectrum_panel.ax
+        ax_res = residual_panel.ax
 
-        gs_outer = GridSpec(
-            nrows=n, ncols=1,
-            figure=self.fig,
-            hspace=0.15,
-        )
+        # --- Spectrum y-limits (pre-computed) --------------------------
+        spec_ylims = getattr(self, "_spec_ylims", None)
+        if spec_ylims is not None and idx < len(spec_ylims):
+            ax_spec.set_ylim(*spec_ylims[idx])
 
-        # Fixed margins: top leaves room for the molecule legend,
-        # bottom leaves room for the global chi-squared box.
-        self.fig.subplots_adjust(
-            left=0.06, right=0.92, top=0.93, bottom=0.06,
-        )
+        # --- Residual y-limits (pre-computed) --------------------------
+        res_ylims = getattr(self, "_res_ylims", None)
+        if res_ylims is not None and idx < len(res_ylims):
+            ax_res.set_ylim(*res_ylims[idx])
 
-        # --- Pre-compute molecule data via inherited helper ------------
-        mol_cache, mol_labels, mol_colors = self._build_mol_cache()
+        # --- Draw annotations AFTER y-limits are finalised -------------
+        for panel in cell_panels:
+            if hasattr(panel, "atomic_lines") and panel.atomic_lines is not None and len(panel.atomic_lines) > 0:
+                panel.plot_atomic_lines(panel.atomic_lines)
+            if hasattr(panel, "line_list") and panel.line_list is not None and len(panel.line_list) > 0:
+                panel.plot_saved_lines(panel.line_list)
 
-        # --- Pre-compute per-panel y-limits (pass 1) ------------------
-        # Spectrum y-limits -- delegated to the inherited helper
-        spec_ylims = self._compute_panel_ylims()
+        # --- Explicit model components on spectrum panel ---------------
+        model_components = getattr(spectrum_panel, "_model_components", None)
+        if model_components:
+            for comp in model_components:
+                c_wave = np.asarray(comp["wave"])
+                c_flux = np.asarray(comp["flux"])
+                c_mask = (c_wave >= xr[0]) & (c_wave <= xr[1])
+                if np.any(c_mask):
+                    ax_spec.plot(
+                        c_wave[c_mask],
+                        c_flux[c_mask],
+                        color=comp.get("color", "blue"),
+                        linewidth=comp.get("linewidth", 0.7),
+                        alpha=comp.get("alpha", 0.6),
+                        label=comp.get("label", ""),
+                        zorder=self._get_theme_value("zorder_model", 3),
+                    )
 
-        # Residual y-limits -- same helper, different per-panel function
-        res_ylims = self._compute_panel_ylims(
-            uniform=self.uniform_ylim_residuals,
-            ylim_fn=self._residual_ylim_fn,
-        )
+        # --- Continuum offset overlay ---------------------------------
+        continuum_params = getattr(spectrum_panel, "_continuum_params", None)
+        if continuum_params is not None:
+            c0, c1, lam_ref = continuum_params
+            mask = spectrum_panel.get_panel_mask()
+            panel_wave = self.wave_data[mask]
+            if len(panel_wave) > 0:
+                cont_panel = c0 + c1 * (panel_wave - lam_ref)
+                ax_spec.plot(
+                    panel_wave, cont_panel,
+                    color="dimgray", ls="-.", lw=1.0, alpha=0.7,
+                    label="Continuum offset" if idx == 0 else "",
+                    zorder=self._get_theme_value("zorder_model", 3) - 1,
+                )
 
-        # --- Global chi-squared accumulators ---------------------------
-        total_chi2_raw = 0.0
-        total_chi2_adj = 0.0
-        total_n_points = 0
+        # --- Tick formatting -------------------------------------------
+        ax_spec.tick_params(axis="x", labelbottom=False, labelsize=7)
+        ax_spec.tick_params(axis="y", labelsize=7)
+        ax_spec.xaxis.set_major_locator(MaxNLocator(nbins=8, prune="both"))
+        ax_spec.yaxis.set_major_locator(MaxNLocator(nbins=6, prune="both"))
+
+        ax_res.tick_params(axis="x", labelbottom=True, labelsize=7)
+        ax_res.tick_params(axis="y", labelsize=7)
+        ax_res.xaxis.set_major_locator(MaxNLocator(nbins=8, prune="both"))
+        ax_res.yaxis.set_major_locator(MaxNLocator(nbins=4, prune="both"))
+
+        if is_last:
+            ax_res.set_xlabel("Wavelength (\u03bcm)", fontsize=8, color=fg)
+        else:
+            ax_res.set_xlabel("")
+
+        # --- Shade excluded ranges on BOTH sub-panels ------------------
+        for exc_lo, exc_hi in self.excluded_ranges:
+            if exc_hi >= xr[0] and exc_lo <= xr[1]:
+                for _ax in (ax_spec, ax_res):
+                    _ax.axvspan(
+                        max(exc_lo, xr[0]),
+                        min(exc_hi, xr[1]),
+                        color="lightcoral",
+                        alpha=0.15,
+                    )
+
+        # Shade atomic-line exclusion windows on spectrum panel too
+        if (
+            self.exclude_lines_half_width is not None
+            and self.atomic_lines is not None
+            and len(self.atomic_lines) > 0
+        ):
+            hw = self.exclude_lines_half_width
+            for _, arow in self.atomic_lines.iterrows():
+                wl = arow["wave"]
+                a_lo, a_hi = wl - hw, wl + hw
+                if a_hi >= xr[0] and a_lo <= xr[1]:
+                    ax_spec.axvspan(
+                        max(a_lo, xr[0]),
+                        min(a_hi, xr[1]),
+                        color="lightsalmon",
+                        alpha=0.12,
+                    )
+
+        # --- Per-panel chi-squared -------------------------------------
         _has_nuisance = self._has_continuum or self._has_noise_floor
-
-        # --- Render each panel -----------------------------------------
-        for idx, xlim_start in enumerate(self._panel_edges):
-            is_last = idx == n - 1
-            panel_end = xlim_start + self._step
-            xr = (xlim_start, panel_end)
-
-            gs_inner = GridSpecFromSubplotSpec(
-                2, 1,
-                subplot_spec=gs_outer[idx, 0],
-                height_ratios=[1.0, self.residual_height_ratio],
-                hspace=0.0,
-            )
-            ax_spec = self.fig.add_subplot(gs_inner[0, 0])
-            ax_res = self.fig.add_subplot(gs_inner[1, 0], sharex=ax_spec)
-            self.subplots[idx] = (ax_spec, ax_res)
-
-            # --- Data mask for this panel ------------------------------
+        if (
+            self.show_chi2_per_panel
+            and self.error_data is not None
+        ):
             mask = (self.wave_data >= xr[0]) & (self.wave_data <= xr[1])
             panel_wave = self.wave_data[mask]
             panel_flux = self.flux_data[mask]
@@ -458,198 +599,7 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
                 self._error_adj[mask] if self._error_adj is not None else None
             )
 
-            # --- SPECTRUM sub-panel ------------------------------------
-            self._plot_observed_spectrum(
-                ax_spec, panel_wave, panel_flux, panel_err_raw, deduplicate=True
-            )
-
-            # Molecule models (from MoleculeDict)
-            if mol_cache:
-                for m_lam, m_flux, m_color, m_label, m_name in mol_cache:
-                    m_mask = (m_lam >= xr[0]) & (m_lam <= xr[1])
-                    if np.any(m_mask):
-                        line, = ax_spec.plot(
-                            m_lam[m_mask],
-                            m_flux[m_mask],
-                            linestyle="--",
-                            color=m_color,
-                            alpha=self._get_theme_value(
-                                "full_spectrum_model_alpha", 0.8
-                            ),
-                            linewidth=self._get_theme_value(
-                                "full_spectrum_model_linewidth", 0.8
-                            ),
-                            label=m_label,
-                            zorder=self._get_theme_value("zorder_model", 3),
-                        )
-                        line._molecule_name = m_name
-
-            # Explicit model components (from generated / manual)
-            if self.model_components:
-                for comp in self.model_components:
-                    c_wave = np.asarray(comp["wave"])
-                    c_flux = np.asarray(comp["flux"])
-                    c_mask = (c_wave >= xr[0]) & (c_wave <= xr[1])
-                    if np.any(c_mask):
-                        ax_spec.plot(
-                            c_wave[c_mask],
-                            c_flux[c_mask],
-                            color=comp.get("color", "blue"),
-                            linewidth=comp.get("linewidth", 0.7),
-                            alpha=comp.get("alpha", 0.6),
-                            label=comp.get("label", ""),
-                            zorder=self._get_theme_value("zorder_model", 3),
-                        )
-
-            # Combined model as filled area (use adjusted flux)
-            _hires_adj = self._model_flux_hires_adj
-            if _hires_adj is not None:
-                mw_mask = (self.model_wave >= xr[0]) & (
-                    self.model_wave <= xr[1]
-                )
-                if np.any(mw_mask):
-                    self._plot_summed_spectrum(
-                        ax_spec,
-                        self.model_wave[mw_mask],
-                        _hires_adj[mw_mask],
-                        label="Combined model",
-                    )
-            else:
-                # Use the data-grid model flux for the fill
-                if len(panel_wave) > 0:
-                    self._plot_summed_spectrum(
-                        ax_spec, panel_wave, panel_model, label="Combined model"
-                    )
-
-            # Continuum offset overlay
-            if self._has_continuum and len(panel_wave) > 0:
-                cont_panel = (
-                    self.continuum_c0
-                    + self.continuum_c1 * (panel_wave - self.lam_ref)
-                )
-                ax_spec.plot(
-                    panel_wave, cont_panel,
-                    color="dimgray", ls="-.", lw=1.0, alpha=0.7,
-                    label="Continuum offset" if idx == 0 else "",
-                    zorder=self._get_theme_value("zorder_model", 3) - 1,
-                )
-
-            # y-limits for spectrum panel (pre-computed in pass 1)
-            ymin, ymax = spec_ylims[idx]
-
-            ax_spec.set_xlim(*xr)
-            ax_spec.set_ylim(ymin, ymax)
-            ax_spec.tick_params(axis="x", labelbottom=False, labelsize=7)
-            ax_spec.tick_params(axis="y", labelsize=7)
-            ax_spec.xaxis.set_major_locator(
-                MaxNLocator(nbins=8, prune="both")
-            )
-            ax_spec.yaxis.set_major_locator(
-                MaxNLocator(nbins=6, prune="both")
-            )
-
-            # --- Line annotations on spectrum panel --------------------
-            if self.line_list is not None and len(self.line_list) > 0:
-                self._plot_line_annotations(
-                    ax_spec, self.line_list, xr, ymin, ymax
-                )
-            if self.atomic_lines is not None and len(self.atomic_lines) > 0:
-                self._plot_atomic_lines(ax_spec, self.atomic_lines, xr=xr)
-
-            # --- RESIDUAL sub-panel (uses adjusted model + errors) ----
-            residuals = panel_flux - panel_model
-            if panel_err is not None and len(panel_err) == len(residuals):
-                ax_res.errorbar(
-                    panel_wave,
-                    residuals,
-                    yerr=panel_err,
-                    fmt=".",
-                    ms=2,
-                    color=fg,
-                    ecolor="lightgray",
-                    elinewidth=0.5,
-                    zorder=2,
-                )
-            else:
-                ax_res.plot(
-                    panel_wave,
-                    residuals,
-                    ".",
-                    ms=2,
-                    color=fg,
-                    zorder=2,
-                )
-            ax_res.axhline(0, color="gray", ls="--", lw=0.8, alpha=0.7)
-
-            # Error-envelope bands on residual panel
-            if self._has_noise_floor and panel_err is not None and len(panel_err) > 0:
-                # Show the ORIGINAL +/-1 sigma band (pipeline errors only)
-                ax_res.fill_between(
-                    panel_wave, -panel_err_raw, panel_err_raw,
-                    color="salmon", alpha=0.13, zorder=1,
-                    label=r"$\pm 1\,\sigma_{\rm pipe}$" if idx == 0 else "",
-                )
-                # Show the EXPANDED +/-1 sigma_eff band (with noise floor)
-                ax_res.fill_between(
-                    panel_wave, -panel_err, panel_err,
-                    color="dodgerblue", alpha=0.13, zorder=1,
-                    label=r"$\pm 1\,\sigma_{\rm eff}$" if idx == 0 else "",
-                )
-
-            # Residual y-limits (pre-computed in pass 1)
-            ax_res.set_ylim(*res_ylims[idx])
-
-            ax_res.set_xlim(*xr)
-            ax_res.tick_params(axis="x", labelbottom=True, labelsize=7)
-            ax_res.tick_params(axis="y", labelsize=7)
-            ax_res.xaxis.set_major_locator(
-                MaxNLocator(nbins=8, prune="both")
-            )
-            ax_res.yaxis.set_major_locator(
-                MaxNLocator(nbins=4, prune="both")
-            )
-            # Only label the x-axis on the very bottom residual panel
-            if is_last:
-                ax_res.set_xlabel("Wavelength (μm)", fontsize=8, color=fg)
-            else:
-                ax_res.set_xlabel("")
-
-            # --- Shade excluded ranges ---------------------------------
-            for exc_lo, exc_hi in self.excluded_ranges:
-                if exc_hi >= xr[0] and exc_lo <= xr[1]:
-                    for _ax in (ax_spec, ax_res):
-                        _ax.axvspan(
-                            max(exc_lo, xr[0]),
-                            min(exc_hi, xr[1]),
-                            color="lightcoral",
-                            alpha=0.15,
-                        )
-
-            # Shade atomic-line exclusion windows
-            if (
-                self.exclude_lines_half_width is not None
-                and self.atomic_lines is not None
-                and len(self.atomic_lines) > 0
-            ):
-                hw = self.exclude_lines_half_width
-                for _, arow in self.atomic_lines.iterrows():
-                    wl = arow["wave"]
-                    a_lo, a_hi = wl - hw, wl + hw
-                    if a_hi >= xr[0] and a_lo <= xr[1]:
-                        for _ax in (ax_spec, ax_res):
-                            _ax.axvspan(
-                                max(a_lo, xr[0]),
-                                min(a_hi, xr[1]),
-                                color="lightsalmon",
-                                alpha=0.12,
-                            )
-
-            # --- Per-panel chi-squared ---------------------------------
-            if (
-                self.show_chi2_per_panel
-                and panel_err is not None
-                and len(panel_err) > 0
-            ):
+            if panel_err is not None and len(panel_err) > 0:
                 fit_mask = self._get_fit_mask(panel_wave)
                 p_raw, p_adj, n_fit = self._compute_chi2(
                     panel_flux, panel_model_raw, panel_model,
@@ -657,9 +607,10 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
                 )
                 if n_fit > 0:
                     panel_dof = max(n_fit - 1, 1)
-                    total_chi2_raw += p_raw
-                    total_chi2_adj += p_adj
-                    total_n_points += n_fit
+                    # Accumulate for global totals
+                    self._total_chi2_raw += p_raw
+                    self._total_chi2_adj += p_adj
+                    self._total_n_points += n_fit
                     ann = self._format_chi2_annotation(
                         p_raw, p_adj, panel_dof, _has_nuisance,
                     )
@@ -670,12 +621,41 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
                         color=fg,
                     )
 
-        # --- Global labels & legend ------------------------------------
-        self.fig.supylabel("Flux Density (Jy)", fontsize=10, color=fg, x=0.01)
+    # ------------------------------------------------------------------
+    def generate_plot(self, **kwargs) -> None:
+        """Build the multi-panel figure with residual rows.
 
-        # Molecule colour legend on the first spectrum panel
-        if 0 in self.subplots and (mol_labels or self.model_components):
-            first_ax = self.subplots[0][0]
+        Pre-computes y-limits for both spectrum and residual sub-panels,
+        then delegates to the parent chain (FSP -> SSP) for stacking.
+        """
+        # Reset backward-compat dict
+        self.subplots.clear()
+
+        # Pre-compute y-limits for both sub-panel types
+        self._spec_ylims = self._compute_panel_ylims(
+            ylim_fn=self._spectrum_ylim_fn,
+        )
+        self._res_ylims = self._compute_panel_ylims(
+            uniform=self.uniform_ylim_residuals,
+            ylim_fn=self._residual_ylim_fn,
+        )
+
+        # Initialise global chi-squared accumulators
+        self._total_chi2_raw = 0.0
+        self._total_chi2_adj = 0.0
+        self._total_n_points = 0
+
+        # The parent FSP.generate_plot() handles:
+        #   - mol_cache, summed spectrum computation
+        #   - calling SSP.generate_plot() which iterates _create_cell
+        #   - _post_render_cell for each row
+        #   - legend on first panel
+        super().generate_plot(**kwargs)
+
+        # --- Override the legend to use model_components if needed ------
+        if 0 in self.subplots:
+            first_ax = self.subplots[0][0]  # spectrum axes of first row
+            mol_cache, mol_labels, mol_colors = self._build_mol_cache()
             if mol_labels:
                 BasePlot.build_molecule_legend(
                     first_ax, mol_labels, mol_colors,
@@ -684,8 +664,7 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
                     bbox_to_anchor=(0.5, 1.5),
                     use_figure_transform=False,
                 )
-            else:
-                # Build legend from model_components
+            elif self.model_components:
                 comp_labels = [c.get("label", "") for c in self.model_components if c.get("label")]
                 comp_colors = [c.get("color", "blue") for c in self.model_components if c.get("label")]
                 if comp_labels:
@@ -698,6 +677,9 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
                     )
 
         # --- Total chi-squared annotation at the bottom ----------------
+        fg = self._get_theme_value("foreground", "black")
+        _has_nuisance = self._has_continuum or self._has_noise_floor
+
         if self.show_total_chi2 and self.error_data is not None:
             full_fit_mask = self._get_fit_mask(self.wave_data)
             g_raw, g_adj, g_n = self._compute_chi2(
@@ -721,7 +703,7 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
                 if self._has_continuum:
                     extras.append(
                         f"$c_0 = {self.continuum_c0:.4f}$ Jy"
-                        f"  $c_1 = {self.continuum_c1:.5f}$ Jy/μm"
+                        f"  $c_1 = {self.continuum_c1:.5f}$ Jy/\u03bcm"
                     )
                 if extras:
                     chi2_text += "\n" + "    ".join(extras)
@@ -745,9 +727,6 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
                 fontsize=10, color=fg,
                 fontweight="bold", bbox=chi2_box,
             )
-
-        # Apply theme
-        self.apply_theme_to_figure()
 
     # ------------------------------------------------------------------
     # Convenience setters

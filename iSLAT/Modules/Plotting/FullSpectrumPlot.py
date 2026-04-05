@@ -1,9 +1,13 @@
 """
-FullSpectrumPlot — Multi-panel overview of an entire observed spectrum.
+FullSpectrumPlot -- Multi-panel overview of an entire observed spectrum.
 
 Generates a vertically stacked series of wavelength-range panels, each
 showing the observed data, individual molecule models, summed model
 spectrum, and optionally line-list annotations and atomic lines.
+
+Inherits the stacking layout from :class:`StackedSpectralPanel` and
+implements :meth:`_create_cell` to produce a single
+:class:`SpectrumPanel` per row.
 
 Can be used standalone (notebook / script) or embedded in a GUI layout.
 The interactive :class:`FullSpectrumView` composes an instance of this
@@ -19,15 +23,24 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
+from .StackedSpectralPanel import StackedSpectralPanel
+from .SpectralPanel import SpectralPanel
+from .SpectrumPanel import SpectrumPanel
 from .BasePlot import BasePlot
 
 if TYPE_CHECKING:
+    from matplotlib.gridspec import SubplotSpec
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
 
-class FullSpectrumPlot(BasePlot):
+
+class FullSpectrumPlot(StackedSpectralPanel):
     """
     Multi-panel full-spectrum plot.
+
+    Inherits from :class:`StackedSpectralPanel` which manages the
+    vertical stacking, GridSpec layout, and panel-edge computation.
+    Each row (cell) contains a single :class:`SpectrumPanel`.
 
     Parameters
     ----------
@@ -36,7 +49,7 @@ class FullSpectrumPlot(BasePlot):
     flux_data : np.ndarray
         Observed flux array.
     molecules : MoleculeDict, optional
-        Collection of molecules — visible ones are plotted.
+        Collection of molecules -- visible ones are plotted.
     error_data : np.ndarray, optional
         Flux uncertainties.
     line_list : pd.DataFrame, optional
@@ -58,8 +71,9 @@ class FullSpectrumPlot(BasePlot):
         panels.  Default *False* (each panel auto-scales independently).
     figsize : tuple, optional
         Figure size.  Height is scaled automatically if *None*.
-    fig : Figure, optional
-        Existing figure for embedding.
+    wave_data_obs : np.ndarray, optional
+        Observer-frame wavelengths, used by MoleculeDict methods
+        that apply the stellar RV correction internally.
     """
 
     def __init__(
@@ -79,48 +93,41 @@ class FullSpectrumPlot(BasePlot):
         wave_data_obs: Optional[np.ndarray] = None,
         **kwargs,
     ):
-        # Defer figsize — calculated once we know the number of panels
-        super().__init__(figsize=figsize, **kwargs)
-        self.wave_data = np.asarray(wave_data)
-        self.flux_data = np.asarray(flux_data)
-        # Observer-frame wavelengths for model computation (get_summed_flux,
-        # get_matched_sampling_wavelengths).  Falls back to wave_data when
-        # no observer-frame array is provided (e.g. notebook usage).
+        # Allow callers to pass row_height via kwargs; default to
+        # a compact 1.6 inches per cell for the full-spectrum layout.
+        kwargs.setdefault("row_height", 1.6)
+
+        super().__init__(
+            wave_data=wave_data,
+            flux_data=flux_data,
+            molecules=molecules,
+            error_data=error_data,
+            n_panels=n_panels,
+            step=step,
+            xlim_range=xlim_range,
+            ymax_factor=ymax_factor,
+            uniform_ylim=uniform_ylim,
+            figsize=figsize,
+            **kwargs,
+        )
+
+        # Observer-frame wavelengths for model computation
+        # (get_summed_flux, get_matched_sampling_wavelengths).
+        # Falls back to wave_data when no observer-frame array is
+        # provided (e.g. notebook usage).
         self.wave_data_obs: np.ndarray = (
             np.asarray(wave_data_obs) if wave_data_obs is not None
             else self.wave_data
         )
-        self.molecules = molecules
-        self.error_data = np.asarray(error_data) if error_data is not None else None
         self.line_list = line_list
         self.atomic_lines = atomic_lines
 
-        self.n_panels = n_panels
-        self.ymax_factor = ymax_factor
-        self.uniform_ylim = uniform_ylim
-
-        # Wavelength range
-        if xlim_range is not None:
-            self._xlim_start, self._xlim_end = xlim_range
-        else:
-            self._xlim_start = float(np.nanmin(self.wave_data))
-            self._xlim_end = float(np.nanmax(self.wave_data))
-
-        # Panel step
-        if step is not None:
-            self._step = step
-        else:
-            self._step = (self._xlim_end - self._xlim_start) / max(self.n_panels, 1)
-
-        # Pre-compute panel edges
-        self._panel_edges: np.ndarray = np.arange(
-            self._xlim_start, self._xlim_end, self._step
-        )
-        # Auto figsize if not given
-        if self._figsize is None:
+        # Override default figsize (SSP uses 14-wide; FSP uses 12)
+        if figsize is None:
             self._figsize = (12, 1.6 * len(self._panel_edges))
 
-        # Storage for subplot Axes objects
+        # Backward-compatible storage for single-Axes per row.
+        # Populated in _create_cell() from the cell panels.
         self.subplots: Dict[int, Axes] = {}
 
     # ------------------------------------------------------------------
@@ -233,62 +240,80 @@ class FullSpectrumPlot(BasePlot):
         return (-0.005, 0.1)
 
     # ------------------------------------------------------------------
-    def _compute_panel_ylims(
+    # StackedSpectralPanel factory
+    # ------------------------------------------------------------------
+    def _create_cell(
         self,
-        uniform: Optional[bool] = None,
-        ylim_fn: Optional[Callable[[np.ndarray], Tuple[float, float]]] = None,
-    ) -> List[Tuple[float, float]]:
-        """Compute per-panel y-limits.
+        idx: int,
+        xmin: float,
+        xmax: float,
+        gs_slot: "SubplotSpec",
+        **kwargs,
+    ) -> List[SpectralPanel]:
+        """Create a single :class:`SpectrumPanel` for the given row.
 
-        Iterates over :attr:`_panel_edges` and returns a list of
-        ``(ymin, ymax)`` tuples — one per panel.  The per-panel
-        computation is delegated to *ylim_fn* so that subclasses (e.g.
-        :class:`ResidualSpectrumPlot`) can reuse the same loop /
-        unification logic for residual panels.
-
-        Parameters
-        ----------
-        uniform : bool, optional
-            When *True* every entry is replaced with the global
-            extremes so that all panels share the same vertical scale.
-            Defaults to :attr:`uniform_ylim`.
-        ylim_fn : callable, optional
-            ``fn(mask) -> (ymin, ymax)`` where *mask* is a boolean
-            array indexing into :attr:`wave_data`.  Defaults to
-            :meth:`_spectrum_ylim_fn` (observed-flux auto-scale).
-
-        Returns
-        -------
-        list[tuple[float, float]]
-            One ``(ymin, ymax)`` pair per panel.
+        The summed spectrum and molecule cache are computed once in
+        :meth:`generate_plot` and forwarded via *kwargs*.
         """
-        if uniform is None:
-            uniform = self.uniform_ylim
-        if ylim_fn is None:
-            ylim_fn = self._spectrum_ylim_fn
+        ax = self.fig.add_subplot(gs_slot)
 
-        ylims: List[Tuple[float, float]] = []
-        for xlim_start in self._panel_edges:
-            panel_end = xlim_start + self._step
-            mask = (
-                (self.wave_data >= xlim_start) & (self.wave_data <= panel_end)
-            )
-            ylims.append(ylim_fn(mask))
+        panel = SpectrumPanel(
+            wave_data=self.wave_data,
+            flux_data=self.flux_data,
+            xmin=xmin,
+            xmax=xmax,
+            error_data=self.error_data,
+            molecules=self.molecules,
+            mol_cache=kwargs.get("mol_cache", []),
+            summed_wave=kwargs.get("summed_wave"),
+            summed_flux=kwargs.get("summed_flux"),
+            line_list=self.line_list,
+            atomic_lines=self.atomic_lines,
+            wave_data_obs=self.wave_data_obs,
+            ax=ax,
+        )
+        # Populate backward-compatible subplots dict
+        self.subplots[idx] = ax
+        return [panel]
 
-        if uniform and ylims:
-            g_ymin = min(yl[0] for yl in ylims)
-            g_ymax = max(yl[1] for yl in ylims)
-            ylims = [(g_ymin, g_ymax)] * len(ylims)
+    # ------------------------------------------------------------------
+    def _post_render_cell(
+        self,
+        idx: int,
+        cell_panels: List[SpectralPanel],
+        is_last: bool,
+    ) -> None:
+        """Apply per-panel y-limits, tick formatting, and annotations."""
+        fg = self._get_theme_value("foreground", "black")
 
-        return ylims
+        # Apply pre-computed y-limits
+        ylims = getattr(self, "_panel_ylims", None)
+        if ylims is not None and idx < len(ylims):
+            cell_panels[0].ax.set_ylim(*ylims[idx])
+
+        # --- Draw annotations AFTER y-limits are finalised -------------
+        for panel in cell_panels:
+            if hasattr(panel, "atomic_lines") and panel.atomic_lines is not None and len(panel.atomic_lines) > 0:
+                panel.plot_atomic_lines(panel.atomic_lines)
+            if hasattr(panel, "line_list") and panel.line_list is not None and len(panel.line_list) > 0:
+                panel.plot_saved_lines(panel.line_list)
+
+        ax = cell_panels[0].ax
+        ax.tick_params(axis="x", labelsize=7)
+        ax.tick_params(axis="y", labelsize=7)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=6, prune="both"))
+        if is_last:
+            ax.set_xlabel("Wavelength (\u03bcm)", color=fg)
 
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
-        """Build the multi-panel figure."""
-        n = len(self._panel_edges)
-        self._ensure_figure()
-        # Clear previous axes so regeneration doesn't stack on top
-        self.fig.clf()
+        """Build the multi-panel figure.
+
+        Pre-computes shared data (mol cache, summed spectrum, y-limits)
+        and passes them through *kwargs* to :meth:`_create_cell` via
+        the parent's :meth:`~StackedSpectralPanel.generate_plot`.
+        """
+        # Reset backward-compat dict before the parent clears panels
         self.subplots.clear()
 
         # Compute summed flux once (if molecules are available)
@@ -297,84 +322,32 @@ class FullSpectrumPlot(BasePlot):
         if self.molecules is not None:
             try:
                 summed_wave, summed_flux = self.molecules.get_summed_flux(
-                    self.wave_data_obs, visible_only=True
+                    self.wave_data_obs, visible_only=True,
                 )
             except Exception:
                 pass
 
-        # --- Pre-compute molecule data via shared helper ----------------
+        # Pre-compute molecule data via shared helper
         mol_cache, mol_labels, mol_colors = self._build_mol_cache()
 
-        # --- Pre-compute per-panel y-limits (pass 1) -------------------
-        panel_ylims = self._compute_panel_ylims()
+        # Pre-compute per-panel y-limits (pass 1)
+        self._panel_ylims = self._compute_panel_ylims(
+            ylim_fn=self._spectrum_ylim_fn,
+        )
 
-        for idx, xlim_start in enumerate(self._panel_edges):
-            is_last = idx == n - 1
-            panel_end = xlim_start + self._step
-            xr = (xlim_start, panel_end)
+        # Delegate stacking to the parent class
+        super().generate_plot(
+            mol_cache=mol_cache,
+            summed_wave=summed_wave,
+            summed_flux=summed_flux,
+            **kwargs,
+        )
 
-            ax = self.fig.add_subplot(n, 1, idx + 1)
-            self.subplots[idx] = ax
-
-            # --- observed spectrum --------------------------------------
-            mask = (self.wave_data >= xr[0]) & (self.wave_data <= xr[1])
-            panel_wave = self.wave_data[mask]
-            panel_flux = self.flux_data[mask]
-            panel_err = self.error_data[mask] if self.error_data is not None else None
-
-            self._plot_observed_spectrum(ax, panel_wave, panel_flux, panel_err,
-                                        deduplicate=True)
-
-            ymin, ymax = panel_ylims[idx]
-
-            # --- molecule models (slice pre-computed data) ---------------
-            for m_lam, m_flux, m_color, m_label, m_name in mol_cache:
-                m_mask = (m_lam >= xr[0]) & (m_lam <= xr[1])
-                if np.any(m_mask):
-                    line, = ax.plot(
-                        m_lam[m_mask], m_flux[m_mask],
-                        linestyle="--", color=m_color,
-                        alpha=self._get_theme_value("full_spectrum_model_alpha", 0.8),
-                        linewidth=self._get_theme_value("full_spectrum_model_linewidth", 0.8),
-                        label=m_label,
-                        zorder=self._get_theme_value("zorder_model", 3),
-                    )
-                    line._molecule_name = m_name
-
-            # --- summed spectrum ----------------------------------------
-            if summed_wave is not None and summed_flux is not None:
-                s_mask = (summed_wave >= xr[0]) & (summed_wave <= xr[1])
-                if np.any(s_mask):
-                    self._plot_summed_spectrum(ax, summed_wave[s_mask], summed_flux[s_mask])
-
-            # --- axes config (set BEFORE annotations so they read
-            #     correct ylim / xlim for label positioning) -------------
-            ax.set_xlim(*xr)
-            ax.set_ylim(ymin, ymax)
-            ax.tick_params(axis="x", labelsize=7)
-            ax.xaxis.set_major_locator(MaxNLocator(nbins=6, prune="both"))
-
-            # --- line annotations ---------------------------------------
-            if self.line_list is not None and len(self.line_list) > 0:
-                self._plot_line_annotations(ax, self.line_list, xr, ymin, ymax)
-
-            # --- atomic lines -------------------------------------------
-            if self.atomic_lines is not None and len(self.atomic_lines) > 0:
-                self._plot_atomic_lines(ax, self.atomic_lines, xr=xr)
-
-        # --- global labels & legend ------------------------------------
-        fg = self._get_theme_value("foreground", "black")
-        if self.subplots:
-            last_ax = self.subplots[n - 1]
-            last_ax.set_xlabel("Wavelength (μm)", color=fg)
-        self.fig.supylabel("Flux Density (Jy)", fontsize=10, color=fg)
-
+        # --- Global labels and legend ----------------------------------
         # Colour-legend on the first panel (handles removal when empty).
-        if 0 in self.subplots:
-            BasePlot.build_molecule_legend(self.subplots[0], mol_labels, mol_colors)
-
-        # Apply full theme (backgrounds, spines, etc.) to the figure
-        self.apply_theme_to_figure()
+        legend_ax = self._legend_axes
+        if legend_ax is not None:
+            BasePlot.build_molecule_legend(legend_ax, mol_labels, mol_colors)
 
     # ------------------------------------------------------------------
     def update_panels_inplace(self) -> None:
@@ -390,7 +363,7 @@ class FullSpectrumPlot(BasePlot):
         """
         n = len(self._panel_edges)
         if not self.subplots or len(self.subplots) != n:
-            # Structural mismatch — fall back to full rebuild
+            # Structural mismatch -- fall back to full rebuild
             self.generate_plot()
             return
 
@@ -400,7 +373,7 @@ class FullSpectrumPlot(BasePlot):
         if self.molecules is not None:
             try:
                 summed_wave, summed_flux = self.molecules.get_summed_flux(
-                    self.wave_data_obs, visible_only=True
+                    self.wave_data_obs, visible_only=True,
                 )
             except Exception:
                 pass
@@ -413,7 +386,9 @@ class FullSpectrumPlot(BasePlot):
         visible_names = {getattr(m, "name", None) for m in visible}
 
         # --- Pre-compute per-panel y-limits ----------------------------
-        panel_ylims = self._compute_panel_ylims()
+        panel_ylims = self._compute_panel_ylims(
+            ylim_fn=self._spectrum_ylim_fn,
+        )
 
         # --- Update each panel in place ---------------------------------
         for idx, xlim_start in enumerate(self._panel_edges):
@@ -484,14 +459,30 @@ class FullSpectrumPlot(BasePlot):
                     self._plot_summed_spectrum(ax, summed_wave[s_mask], summed_flux[s_mask])
 
         # --- Update legend on first panel -------------------------------
-        if 0 in self.subplots:
+        legend_ax = self._legend_axes
+        if legend_ax is not None:
             mol_labels = [self.get_molecule_display_name(m) for m in visible] if visible else []
             mol_colors = [self.get_molecule_color(m) for m in visible] if visible else []
-            BasePlot.build_molecule_legend(self.subplots[0], mol_labels, mol_colors)
+            BasePlot.build_molecule_legend(legend_ax, mol_labels, mol_colors)
 
     # ------------------------------------------------------------------
     # Convenience helpers
     # ------------------------------------------------------------------
+    @property
+    def _legend_axes(self) -> Optional["Axes"]:
+        """Return the axes that should receive the molecule colour legend.
+
+        For single-axes cells this is ``subplots[0]``.  For multi-axes
+        cells (e.g. :class:`ResidualSpectrumPlot` where each value is a
+        tuple) it returns the first element of the first cell.
+        """
+        val = self.subplots.get(0)
+        if val is None:
+            return None
+        if isinstance(val, tuple):
+            return val[0]
+        return val
+
     def set_line_list(self, df: pd.DataFrame) -> None:
         """Attach or replace the line-list DataFrame."""
         self.line_list = df

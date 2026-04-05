@@ -1,13 +1,21 @@
 """
-FullSpectrumView — :class:`PlotView` implementation for the multi-panel full
-spectrum layout.
+FullSpectrumView -- :class:`PlotView` implementation for multi-panel
+stacked spectrum layouts.
 
-This view **composes** a :class:`FullSpectrumPlot` (a :class:`BasePlot`
-subclass) for all rendering, then adds interactive features on top:
+This view **composes** a :class:`StackedSpectralPanel` subclass (by
+default a :class:`FullSpectrumPlot`) for all rendering, then adds
+interactive features on top:
 
 * Span selectors on every panel (click-to-inspect)
 * Dynamic overlay toggles (atomic / saved lines, summed spectrum)
 * Canvas lifecycle management for the Tk GUI
+
+The view is generic: it can drive **any** :class:`StackedSpectralPanel`
+implementation that exposes the standard stacked-panel interface (``fig``,
+``subplots``, ``_panel_edges``, ``_step``, ``_xlim_start``, ``_xlim_end``,
+``wave_data``, ``generate_plot()``, etc.).  The concrete plot class is
+determined by :meth:`_create_plot`, which subclasses can override to
+swap in a different stacked-panel implementation.
 """
 
 from __future__ import annotations
@@ -26,6 +34,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.widgets import SpanSelector
 
 from .PlotView import PlotView
+from .StackedSpectralPanel import StackedSpectralPanel
 from .FullSpectrumPlot import FullSpectrumPlot
 from .BasePlot import BasePlot
 
@@ -63,16 +72,20 @@ except ImportError:
 
 class FullSpectrumView(PlotView):
     """
-    Multi-panel full spectrum view backed by :class:`FullSpectrumPlot`.
+    Multi-panel full spectrum view backed by a :class:`StackedSpectralPanel`.
 
-    Rendering is delegated to the composed *FullSpectrumPlot* (a
-    :class:`BasePlot` subclass) which owns the figure, axes, and all
+    Rendering is delegated to the composed stacked-panel plot (by default
+    a :class:`FullSpectrumPlot`) which owns the figure, axes, and all
     the standard rendering helpers.  This view adds:
 
     - Tk canvas management (pack / unpack)
     - Span selectors for click-to-inspect
     - Interactive overlay toggles (atomic lines, saved lines, summed)
-    - PDF export (creates a fresh standalone FullSpectrumPlot)
+    - PDF export (creates a fresh standalone plot)
+
+    The view is **generic**: override :meth:`_create_plot` and
+    :meth:`_create_standalone_plot` to back it with any
+    :class:`StackedSpectralPanel` subclass.
     """
 
     def __init__(self, plot_manager: Any) -> None:
@@ -81,11 +94,12 @@ class FullSpectrumView(PlotView):
         self._renderer = plot_manager.plot_renderer
         self._parent_frame: Any = None
 
-        # Canvas — built lazily
+        # Canvas -- built lazily
         self._canvas: Optional[FigureCanvasTkAgg] = None
 
-        # The composed plot — created on first activation
-        self._plot: Optional[FullSpectrumPlot] = None
+        # The composed plot -- created on first activation.
+        # Typed as the abstract base so the view can drive any subclass.
+        self._plot: Optional[StackedSpectralPanel] = None
 
         # Span selectors for interactive inspection
         self.span_selectors: Dict[int, SpanSelector] = {}
@@ -105,7 +119,38 @@ class FullSpectrumView(PlotView):
 
     @property
     def subplots(self) -> Dict[int, "Axes"]:
-        return self._plot.subplots if self._plot is not None else {}
+        """Return a ``{idx: Axes}`` mapping for every panel in the plot.
+
+        For single-axes-per-cell layouts (e.g. :class:`FullSpectrumPlot`)
+        this returns the dict directly.  For multi-axes cells (e.g.
+        :class:`ResidualSpectrumPlot` where each cell is a tuple) the
+        first axes of each cell is returned so that overlay operations
+        have a consistent interface.
+        """
+        if self._plot is None:
+            return {}
+        raw = getattr(self._plot, "subplots", {})
+        if not raw:
+            return {}
+        # Peek at the first value to decide shape
+        first = next(iter(raw.values()))
+        if isinstance(first, tuple):
+            # Multi-axes cell -- return the primary (spectrum) axes
+            return {k: v[0] for k, v in raw.items()}
+        return raw
+
+    def _iter_all_axes(self) -> List["Axes"]:
+        """Yield every axes object across all cells (flat)."""
+        if self._plot is None:
+            return []
+        raw = getattr(self._plot, "subplots", {})
+        axes: List["Axes"] = []
+        for val in raw.values():
+            if isinstance(val, tuple):
+                axes.extend(val)
+            else:
+                axes.append(val)
+        return axes
 
     # ==================================================================
     # Data loading
@@ -136,25 +181,30 @@ class FullSpectrumView(PlotView):
             return None
 
     # ==================================================================
-    # Plot creation / refresh (delegates to FullSpectrumPlot)
+    # Plot creation / refresh (delegates to StackedSpectralPanel)
     # ==================================================================
-    def _create_plot(self) -> FullSpectrumPlot:
-        """Build a fresh :class:`FullSpectrumPlot` from the current iSLAT state."""
+    def _create_plot(self) -> StackedSpectralPanel:
+        """Build a fresh stacked-panel plot from the current iSLAT state.
+
+        Subclasses can override this to return a different
+        :class:`StackedSpectralPanel` implementation (e.g. a
+        :class:`ResidualSpectrumPlot`).
+        """
         wave, flux, wave_obs = self._load_spectrum_data()
         self.line_data = self._load_line_data()
 
         # Compute a figsize appropriate for the interactive GUI view.
-        # Without an explicit figsize the auto-calculation in
-        # FullSpectrumPlot produces dimensions suited for PDF export
-        # (e.g. 12 × 16 in) which are far too tall for an embedded
-        # canvas — especially on Windows where the oversized figure
+        # Without an explicit figsize the auto-calculation in the
+        # stacked panel produces dimensions suited for PDF export
+        # (e.g. 12 x 16 in) which are far too tall for an embedded
+        # canvas -- especially on Windows where the oversized figure
         # causes rendering/layout problems.
         # Cap the height to a screen-proportional value, matching the
         # approach used by FullSpectrumWindow._create_plot().
         figsize = self._compute_interactive_figsize(wave)
 
         # The composed plot handles all rendering via BasePlot helpers.
-        # We do NOT pass line_list / atomic_lines here — those are applied
+        # We do NOT pass line_list / atomic_lines here -- those are applied
         # dynamically by sync_toggle_state() so they can be toggled.
         plot = FullSpectrumPlot(
             wave_data=wave,
@@ -200,9 +250,10 @@ class FullSpectrumView(PlotView):
         """Refresh data and regenerate the composed plot.
 
         If the panel layout changed, the figure is rebuilt from scratch.
-        If only data/molecules changed, existing axes are updated in-place
-        via :meth:`FullSpectrumPlot.update_panels_inplace` for a significant
-        speed-up (avoids ``fig.clf()`` and re-creating all subplot objects).
+        If only data/molecules changed and the composed plot supports
+        fast in-place updates, existing axes are updated via
+        ``update_panels_inplace()`` for a significant speed-up (avoids
+        ``fig.clf()`` and re-creating all subplot objects).
         """
         wave, flux, wave_obs = self._load_spectrum_data()
         self.line_data = self._load_line_data()
@@ -213,29 +264,38 @@ class FullSpectrumView(PlotView):
             self._install_span_selectors()
             return
 
-        layout_changed = self._plot.update_data(
-            wave_data=wave,
-            flux_data=flux,
-            molecules=self._islat.molecules_dict,
-            wave_data_obs=wave_obs,
-        )
+        # Try the fast-path: update_data + update_panels_inplace
+        updater = getattr(self._plot, "update_data", None)
+        if updater is not None:
+            layout_changed = updater(
+                wave_data=wave,
+                flux_data=flux,
+                molecules=self._islat.molecules_dict,
+                wave_data_obs=wave_obs,
+            )
+        else:
+            layout_changed = True
 
         if layout_changed:
-            # Panel edges changed — full rebuild
+            # Panel edges changed -- full rebuild
             self.span_selectors.clear()
             self._plot.generate_plot()
             self._install_span_selectors()
         else:
-            # Layout unchanged — fast in-place update of existing axes
-            self._plot.update_panels_inplace()
+            # Layout unchanged -- fast in-place update of existing axes
+            inplace = getattr(self._plot, "update_panels_inplace", None)
+            if inplace is not None:
+                inplace()
+            else:
+                self._plot.generate_plot()
 
     # ==================================================================
     # Span selector (interactive-only feature)
     # ==================================================================
     def _install_span_selectors(self) -> None:
-        """Add span selectors to every subplot for click-to-inspect."""
+        """Add span selectors to every primary subplot for click-to-inspect."""
         self.span_selectors.clear()
-        for idx, ax in self._plot.subplots.items():
+        for idx, ax in self.subplots.items():
             span = SpanSelector(
                 ax,
                 lambda xmin, xmax, i=idx: self._on_span_select(xmin, xmax, i),
@@ -399,14 +459,22 @@ class FullSpectrumView(PlotView):
         # for display positioning, and observer-frame wavelengths for
         # model computation (get_summed_flux expects observer frame).
         rv_wave = self._plot.wave_data if self._plot is not None else wave_data
-        wave_obs = self._plot.wave_data_obs if self._plot is not None else wave_data
+        wave_obs = (
+            getattr(self._plot, "wave_data_obs", self._plot.wave_data)
+            if self._plot is not None
+            else wave_data
+        )
+
+        # Collect all axes for molecule artist operations
+        all_axes = self._iter_all_axes()
+        primary_axes = list(self.subplots.values())
 
         # 1. Toggle molecule line visibility per subplot.
         #    When force_rerender is True (parameters changed while hidden),
         #    destroy the stale artists and re-create them from fresh data.
         if force_rerender and is_visible:
             molecule = molecules_dict.get(molecule_name)
-            for ax in self.subplots.values():
+            for ax in all_axes:
                 self._renderer.remove_molecule_lines(
                     molecule_name, ax=ax, lines=list(ax.lines), update_legend=False,
                 )
@@ -417,7 +485,7 @@ class FullSpectrumView(PlotView):
         else:
             # Try fast artist-toggle first.
             toggled = False
-            for ax in self.subplots.values():
+            for ax in all_axes:
                 if self._renderer.set_molecule_visibility(
                     molecule_name, is_visible, ax=ax, lines=ax.lines,
                 ):
@@ -428,12 +496,12 @@ class FullSpectrumView(PlotView):
             if is_visible and not toggled:
                 molecule = molecules_dict.get(molecule_name)
                 if molecule is not None:
-                    for ax in self.subplots.values():
+                    for ax in all_axes:
                         self._renderer.render_individual_molecule_spectrum(
                             molecule, rv_wave, subplot=ax, update_legend=False,
                         )
 
-        # 2. Recompute summed spectrum — pass observer-frame wavelengths
+        # 2. Recompute summed spectrum -- pass observer-frame wavelengths
         #    so MoleculeDict handles the stellar RV correction internally.
         try:
             summed_wavelengths, summed_flux = molecules_dict.get_summed_flux(
@@ -448,7 +516,7 @@ class FullSpectrumView(PlotView):
             molecules_dict.get_visible_molecules(return_objects=True)
         )
 
-        for ax in self.subplots.values():
+        for ax in primary_axes:
             for coll in ax.collections[:]:
                 if hasattr(coll, "_islat_summed"):
                     coll.remove()
@@ -487,9 +555,9 @@ class FullSpectrumView(PlotView):
             self.line_data = self._load_line_data()
             self._add_saved_line_artists()
 
-        # Summed spectrum
+        # Summed spectrum -- toggle across all axes (primary + secondary)
         summed_on = toggle_state.get("summed", True)
-        for ax in self.subplots.values():
+        for ax in self._iter_all_axes():
             for coll in ax.collections[:]:
                 if hasattr(coll, "_islat_summed"):
                     coll.set_visible(summed_on)
@@ -505,7 +573,7 @@ class FullSpectrumView(PlotView):
     def toggle_summed_spectrum(self, visible: bool) -> None:
         if not self._initialised:
             return
-        for ax in self.subplots.values():
+        for ax in self._iter_all_axes():
             for coll in ax.collections[:]:
                 if hasattr(coll, "_islat_summed"):
                     coll.set_visible(visible)
@@ -549,10 +617,11 @@ class FullSpectrumView(PlotView):
     # Overlay artist helpers (interactive-only)
     # ==================================================================
     def _add_saved_line_artists(self) -> None:
-        """Add saved-line annotations to every subplot.
+        """Add saved-line annotations to every panel in the composed plot.
 
-        Delegates to :meth:`BasePlot._plot_line_annotations` with
-        ``tag='_islat_saved_line'`` so artists can be removed later.
+        Delegates to :meth:`StackedSpectralPanel.plot_saved_lines` which
+        iterates over every :class:`SpectralPanel` so each panel places
+        labels relative to its own y-limits.
         """
         if self._plot is None:
             return
@@ -567,52 +636,63 @@ class FullSpectrumView(PlotView):
         if "line" not in self.line_data.columns:
             self.line_data["line"] = [""] * len(self.line_data)
 
-        for n, ax in self.subplots.items():
-            is_last = n == len(self._plot._panel_edges) - 1
-            panel_start = self._plot._panel_edges[n]
-            panel_end = self._plot._xlim_end if is_last else panel_start + self._plot._step
-            xr = (panel_start, panel_end)
-            ymin, ymax = ax.get_ylim()
-
-            BasePlot._plot_line_annotations(
-                ax, self.line_data, xr, ymin, ymax,
-                tag="_islat_saved_line",
-            )
+        self._plot.plot_saved_lines(self.line_data)
 
     def _remove_saved_line_artists(self) -> None:
         """Remove all ``_islat_saved_line`` artists."""
-        for ax in self.subplots.values():
-            BasePlot._clear_tagged_artists(
-                ax, "_islat_saved_line", lines=True, collections=True, texts=True,
-            )
+        if self._plot is not None:
+            self._plot.remove_saved_lines()
 
     def _add_atomic_line_artists(self) -> None:
-        """Add atomic-line annotations to every subplot.
+        """Add atomic-line annotations to every panel in the composed plot.
 
-        Delegates to :meth:`BasePlot._plot_atomic_lines` with
-        ``tag='_islat_atomic_line'`` so artists can be removed later.
-        No dependency on :class:`PlotRenderer` is needed.
+        Delegates to :meth:`StackedSpectralPanel.plot_atomic_lines` which
+        iterates over every :class:`SpectralPanel` so each panel places
+        labels relative to its own y-limits.
         """
+        if self._plot is None:
+            return
+
         atomic_data = load_atomic_lines()
-        for n, ax in self.subplots.items():
-            is_last = n == len(self._plot._panel_edges) - 1
-            panel_start = self._plot._panel_edges[n]
-            panel_end = self._plot._xlim_end if is_last else panel_start + self._plot._step
-            xr = (panel_start, panel_end)
-            BasePlot._plot_atomic_lines(
-                ax, atomic_data, xr=xr, tag="_islat_atomic_line",
-            )
+        self._plot.plot_atomic_lines(atomic_data)
 
     def _remove_atomic_line_artists(self) -> None:
         """Remove all ``_islat_atomic_line`` artists."""
-        for ax in self.subplots.values():
-            BasePlot._clear_tagged_artists(
-                ax, "_islat_atomic_line", lines=True, collections=False, texts=True,
-            )
+        if self._plot is not None:
+            self._plot.remove_atomic_lines()
 
     # ==================================================================
     # File output  (overrides PlotView.save_figure)
     # ==================================================================
+    def _create_standalone_plot(
+        self,
+        wave: np.ndarray,
+        flux: np.ndarray,
+        wave_obs: np.ndarray,
+        *,
+        line_list: Optional[pd.DataFrame] = None,
+        atomic_lines: Optional[pd.DataFrame] = None,
+        figsize: Tuple[float, float] = (12, 16),
+    ) -> StackedSpectralPanel:
+        """Build a fresh standalone :class:`StackedSpectralPanel` for export.
+
+        Subclasses can override this to return a different stacked-panel
+        implementation (e.g. :class:`ResidualSpectrumPlot`) when the
+        user saves the figure from a residual-backed view.
+
+        The returned plot is **not yet rendered**; the caller is
+        responsible for calling :meth:`generate_plot`.
+        """
+        return FullSpectrumPlot(
+            wave_data=wave,
+            flux_data=flux,
+            molecules=self._islat.molecules_dict,
+            line_list=line_list,
+            atomic_lines=atomic_lines,
+            figsize=figsize,
+            wave_data_obs=wave_obs,
+        )
+
     def save_figure(
         self,
         save_path: str | None = None,
@@ -657,22 +737,26 @@ class FullSpectrumView(PlotView):
         if ts.get("atomic_lines", False):
             atomic_lines_df = load_atomic_lines()
 
-        # Create standalone figure — uses BasePlot._ensure_figure (non-pyplot)
+        # Create standalone figure via the overridable factory method
         wave, flux, wave_obs = self._load_spectrum_data()
-        standalone = FullSpectrumPlot(
-            wave_data=wave,
-            flux_data=flux,
-            molecules=self._islat.molecules_dict,
+        standalone = self._create_standalone_plot(
+            wave, flux, wave_obs,
             line_list=line_list_df,
             atomic_lines=atomic_lines_df,
             figsize=(12, 16),
-            wave_data_obs=wave_obs,
         )
         standalone.generate_plot()
 
-        # Respect summed toggle
+        # Respect summed toggle -- iterate all axes generically
         if not ts.get("summed", True):
-            for ax in standalone.subplots.values():
+            all_axes: list = []
+            raw = getattr(standalone, "subplots", {})
+            for val in raw.values():
+                if isinstance(val, tuple):
+                    all_axes.extend(val)
+                else:
+                    all_axes.append(val)
+            for ax in all_axes:
                 for coll in ax.collections[:]:
                     if hasattr(coll, "_islat_summed"):
                         coll.set_visible(False)
