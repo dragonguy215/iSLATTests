@@ -34,4 +34,7 @@ iSLAT/DATAFILES/LINELISTS/
 .idea/
 .venv/
 
+.vscode/
+.coverage
+
 .DS_store
