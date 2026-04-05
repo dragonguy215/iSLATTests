@@ -594,9 +594,12 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
                     )
 
         # --- Gap indicators (drawn after y-limits are finalised) -------
+        # Detect gaps once from the spectrum panel and share the list
+        # so that both sub-panels apply identical x-limit tightening.
         if self.gap_mode is GapMode.SKIP:
+            shared_gaps = spectrum_panel.detect_gaps()
             for panel in cell_panels:
-                panel.draw_gap_indicators()
+                panel.draw_gap_indicators(gaps=shared_gaps)
 
         # --- Per-panel chi-squared -------------------------------------
         _has_nuisance = self._has_continuum or self._has_noise_floor

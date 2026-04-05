@@ -278,10 +278,15 @@ class SpectralPanel(BasePlot):
         median_dw = float(np.nanmedian(dw)) if len(dw) > 0 else 0.0
         if median_dw > 0:
             # The step-based threshold must be at least 5 % of the
-            # total data span so that small irregular spacing in an
-            # otherwise continuous spectrum isn't misidentified as a gap.
+            # *panel* span so that small irregular spacing in an
+            # otherwise continuous spectrum isn't misidentified as a
+            # gap.  Using the panel span (xmax - xmin) rather than the
+            # data span prevents false positives when data is clustered
+            # at one end of a wide panel.
+            panel_span = float(self.xmax - self.xmin)
             data_span = float(wave[-1] - wave[0])
-            min_gap_width = 0.05 * data_span
+            reference_span = max(panel_span, data_span)
+            min_gap_width = 0.05 * reference_span
             step_gap_width = threshold * median_dw
             effective_gap_width = max(step_gap_width, min_gap_width)
             big = np.where(dw > effective_gap_width)[0]
@@ -359,10 +364,15 @@ class SpectralPanel(BasePlot):
     ) -> None:
         """Draw visual break indicators for each gap in the data.
 
-        Each gap region is blanked out with a background-coloured
-        rectangle, diagonal break lines are drawn at both edges, and a
-        text annotation is placed in the centre showing the skipped
-        wavelength range.
+        **Edge gaps** (gaps that touch the left or right panel boundary)
+        are handled by *tightening* the axes x-limits so the gap is
+        removed from the visible area entirely.  A small text label is
+        placed at the affected edge to show what was skipped.
+
+        **Internal gaps** (data on both sides) are blanked out with a
+        background-coloured rectangle, diagonal break lines are drawn
+        at both edges, and a text annotation is placed in the centre
+        showing the skipped wavelength range.
 
         Artists are tagged with :attr:`_GAP_TAG` so they can be removed
         later with :meth:`remove_gap_indicators`.
@@ -380,18 +390,76 @@ class SpectralPanel(BasePlot):
         if not gaps:
             return
 
-        xr = self.xlim
+        xr_lo, xr_hi = self.xlim
         bg = self._get_theme_value("background", "white")
         fg = self._get_theme_value("foreground", "black")
 
-        for g_start, g_end in gaps:
-            if g_end < xr[0] or g_start > xr[1]:
-                continue
-            # Clamp to panel range
-            lo = max(g_start, xr[0])
-            hi = min(g_end, xr[1])
+        # ---- 1. Tighten xlim to collapse edge gaps --------------------
+        # An "edge gap" is one whose start or end coincides (within a
+        # small tolerance) with the panel boundary.  We shrink the
+        # visible x-range so those gaps fall entirely outside the axes.
+        panel_span = xr_hi - xr_lo
+        tol = panel_span * 0.005  # 0.5 % of panel width
 
-            # 1. White-out the gap region so no data/grid shows through
+        new_lo, new_hi = xr_lo, xr_hi
+        edge_annotations: List[Tuple[str, float, str]] = []  # side, wave, label
+
+        for g_start, g_end in gaps:
+            if g_end < xr_lo or g_start > xr_hi:
+                continue
+            touches_left = (g_start - tol) <= new_lo
+            touches_right = (g_end + tol) >= new_hi
+
+            if touches_left and not touches_right:
+                # Gap at the left edge: move visible start past the gap
+                new_lo = max(new_lo, g_end)
+                lbl = f"\u2702 {g_start:.3f}\u2013{g_end:.3f} \u03bcm"
+                edge_annotations.append(("left", new_lo, lbl))
+            elif touches_right and not touches_left:
+                # Gap at the right edge: pull visible end before the gap
+                new_hi = min(new_hi, g_start)
+                lbl = f"\u2702 {g_start:.3f}\u2013{g_end:.3f} \u03bcm"
+                edge_annotations.append(("right", new_hi, lbl))
+
+        # Add a small margin so data points don't sit on the axes edge.
+        margin = (new_hi - new_lo) * 0.012
+        new_lo = max(xr_lo, new_lo - margin)
+        new_hi = min(xr_hi, new_hi + margin)
+
+        if new_lo < new_hi:
+            ax.set_xlim(new_lo, new_hi)
+
+        # Place small annotations at the edges that were tightened.
+        ylo, yhi = ax.get_ylim()
+        for side, wave_pos, lbl in edge_annotations:
+            ha = "left" if side == "left" else "right"
+            x_pos = new_lo if side == "left" else new_hi
+            txt = ax.text(
+                x_pos, yhi, lbl,
+                fontsize=4.5,
+                color=fg,
+                alpha=0.50,
+                ha=ha,
+                va="top",
+                fontstyle="italic",
+                zorder=92,
+            )
+            setattr(txt, self._GAP_TAG, True)
+
+        # ---- 2. Internal gaps (data on both sides) --------------------
+        # Re-read the (potentially updated) xlim.
+        vis_lo, vis_hi = ax.get_xlim()
+
+        for g_start, g_end in gaps:
+            # Skip gaps that are now entirely outside the visible range
+            # (including those collapsed by edge-tightening above).
+            if g_end <= vis_lo or g_start >= vis_hi:
+                continue
+
+            lo = max(g_start, vis_lo)
+            hi = min(g_end, vis_hi)
+
+            # 2a. White-out the gap region
             span = ax.axvspan(
                 lo, hi,
                 facecolor=bg,
@@ -402,11 +470,11 @@ class SpectralPanel(BasePlot):
             )
             setattr(span, self._GAP_TAG, True)
 
-            # 2. Draw diagonal break marks at each edge of the gap
+            # 2b. Diagonal break marks at each edge
             ylo, yhi = ax.get_ylim()
             y_range = yhi - ylo
-            break_width = (hi - lo) * 0.08  # small fraction of the gap
-            d = y_range * 0.04  # height of the diagonal jog
+            break_width = (hi - lo) * 0.08
+            d = y_range * 0.04
 
             for edge in (lo, hi):
                 bw = break_width if edge == lo else -break_width
@@ -421,7 +489,7 @@ class SpectralPanel(BasePlot):
                 )
                 setattr(line, self._GAP_TAG, True)
 
-            # 3. Text annotation showing the skipped range
+            # 2c. Text annotation showing the skipped range
             mid_x = (lo + hi) / 2.0
             mid_y = (ylo + yhi) / 2.0
             lbl = f"\u2702 {g_start:.3f}\u2013{g_end:.3f} \u03bcm"
