@@ -118,7 +118,7 @@ class TestSpectresResampling:
 
     def test_identity_resampling(self):
         """Resampling onto the same grid should return ~same fluxes."""
-        from iSLAT.Modules.DataTypes.Molecule import _spectres
+        from iSLAT.Modules.DataProcessing.spectral_utils import spectres as _spectres
         wavs = np.linspace(10, 20, 100)
         flux = np.sin(wavs)
         result = _spectres(wavs, wavs, flux)
@@ -126,7 +126,7 @@ class TestSpectresResampling:
 
     def test_resampling_preserves_constant(self):
         """Resampling a constant spectrum should give the same constant."""
-        from iSLAT.Modules.DataTypes.Molecule import _spectres
+        from iSLAT.Modules.DataProcessing.spectral_utils import spectres as _spectres
         old_wavs = np.linspace(10, 20, 200)
         new_wavs = np.linspace(11, 19, 50)
         constant_flux = np.ones_like(old_wavs) * 5.0
@@ -135,7 +135,7 @@ class TestSpectresResampling:
 
     def test_out_of_range_fill(self):
         """New wavelengths outside old range should be filled with fill value."""
-        from iSLAT.Modules.DataTypes.Molecule import _spectres
+        from iSLAT.Modules.DataProcessing.spectral_utils import spectres as _spectres
         old_wavs = np.linspace(10, 20, 100)
         new_wavs = np.array([5.0, 15.0, 25.0])
         flux = np.ones_like(old_wavs)

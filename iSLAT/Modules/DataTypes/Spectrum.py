@@ -19,23 +19,12 @@ This class Spectrum creates a spectrum from intensity instances
 import numpy as np
 from typing import Optional, List, Dict, Any, Union
 
-# Lazy imports
-pd = None
-
 import iSLAT.Constants as c
-#from .constants import constants as c
 
-def _get_pandas():
-    """Lazy import of pandas"""
-    global pd
-    if pd is None:
-        try:
-            import pandas as pd
-        except ImportError:
-            raise ImportError("Pandas is required for table functionality")
-    return pd
+from ._pandas_import import get_pandas as _get_pandas
+from ._mixins import CacheStatsMixin, WavelengthRangeMixin
 
-class Spectrum:
+class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
     """
     Spectrum class for creating and managing spectral data from intensity instances.
     
@@ -126,7 +115,7 @@ class Spectrum:
         self._flux_valid = False
         self._convolution_cache = {}
         self._kernel_cache = {}
-        self._cache_stats = {'hits': 0, 'misses': 0, 'invalidations': 0}
+        self._init_cache_stats()
         self._unique_cache = None  # Cached (key, lam, index_wavelength) from np.unique
 
     def reset(self):
@@ -208,7 +197,7 @@ class Spectrum:
         self._flux_jy = None
         self._flux_valid = False
         self._unique_cache = None
-        self._cache_stats['invalidations'] += 1
+        self._record_cache_invalidation()
 
     # Number of sigma bins for per-group kernel sizing.
     # Lines are grouped by similar Gaussian width so narrow lines use a tighter
@@ -345,11 +334,11 @@ class Spectrum:
     def flux(self) -> np.ndarray:
         """np.ndarray: Flux density in erg/s/cm^2/micron"""
         if self._flux is None or not self._flux_valid:
-            self._cache_stats['misses'] += 1
+            self._record_cache_miss()
             self._flux = self._convol_flux()
             self._flux_valid = True
         else:
-            self._cache_stats['hits'] += 1
+            self._record_cache_hit()
         return self._flux
 
     @property
@@ -361,17 +350,11 @@ class Spectrum:
             self._flux_jy = flux_data * self._FLUX_JY_FACTOR * (self._lamgrid ** 2)
         return self._flux_jy
 
-    @property
-    def wavelength_range(self) -> tuple:
-        """tuple: Active wavelength range ``(lam_min, lam_max)`` in microns."""
-        return self._wavelength_range
+    # wavelength_range property provided by WavelengthRangeMixin
 
-    @wavelength_range.setter
-    def wavelength_range(self, value: tuple):
-        """Set the wavelength range filter.  Invalidates cached flux."""
-        if value != self._wavelength_range:
-            self._wavelength_range = value
-            self._invalidate_flux_cache()
+    def _on_wavelength_range_changed(self, old, new):
+        """Hook called by WavelengthRangeMixin when wavelength_range changes."""
+        self._invalidate_flux_cache()
 
     @property
     def lamgrid(self) -> np.ndarray:
@@ -415,7 +398,7 @@ class Spectrum:
         rv_shift : float, optional
             Radial-velocity shift in km/s to apply to the model grid
             **before** resampling.  Positive values red-shift the model
-            (i.e. ``λ_obs = λ_rest × (1 + rv / c)``).
+            (i.e. ``λ_obs = λ_rest x (1 + rv / c)``).
         fill : float, optional
             Value used for target pixels that fall outside the model grid.
 
@@ -425,7 +408,9 @@ class Spectrum:
             Resampled flux array with the same length as
             *target_wavelengths*.
         """
-        from .Molecule import _spectres
+        import importlib as _il
+        _su = _il.import_module('iSLAT.Modules.DataProcessing.spectral_utils')
+        _spectres = _su.spectres
 
         source_wave = self._lamgrid
         if rv_shift != 0.0:
@@ -454,9 +439,7 @@ class Spectrum:
             'flux_jy': flux_jy_data
         })
 
-    def get_cache_stats(self) -> Dict[str, int]:
-        """Get cache performance statistics."""
-        return self._cache_stats.copy()
+    # get_cache_stats() provided by CacheStatsMixin
 
     def _repr_html_(self):
         # noinspection PyProtectedMember

@@ -11,6 +11,7 @@ from iSLAT.Modules.Debug.PerformanceLogger import perf_log, log_timing, Performa
 
 from .Molecule import Molecule
 import iSLAT.Constants as default_parms
+from ._mixins import ObservableMixin
 
 def _ci_get(data: dict, key: str):
     """Look up *key* in *data* with a case-insensitive fallback.
@@ -64,7 +65,7 @@ def _safe_float(data: dict, key: Union[str, List[str]], default=None,
     except (ValueError, TypeError):
         return default
 
-class MoleculeDict(dict):
+class MoleculeDict(ObservableMixin, dict):
     """
     A dictionary to store Molecule objects with their names as keys.
     Provides efficient operations on collections of molecules with unified processing.
@@ -95,7 +96,7 @@ class MoleculeDict(dict):
         # Flag to enable matched spectral sampling (interpolate model to data wavelengths)
         self._match_spectral_sampling = False
         
-        self._global_parameter_change_callbacks: List[Callable] = []
+        self._init_callbacks()  # ObservableMixin: initialises self._callbacks
         self._suppress_global_callbacks: bool = False
         
         from .Molecule import Molecule
@@ -287,7 +288,11 @@ class MoleculeDict(dict):
                 continue
 
             molecule = self[mol_name]
-            molecule._wavelength_range = self._global_wavelength_range
+            # Safety: ensure molecule uses the global range.
+            # Use the property setter so dirty flags and sub-object
+            # propagation are handled by the mixin hook.
+            if molecule._wavelength_range != self._global_wavelength_range:
+                molecule.wavelength_range = self._global_wavelength_range
 
             try:
                 # Call get_flux the same way individual plotting does:
@@ -579,7 +584,9 @@ class MoleculeDict(dict):
                 return (mol_name, None, None, 0.0)
 
             molecule = self[mol_name]
-            molecule._wavelength_range = self._global_wavelength_range
+            # Safety: ensure molecule uses the global range.
+            if molecule._wavelength_range != self._global_wavelength_range:
+                molecule.wavelength_range = self._global_wavelength_range
 
             try:
                 mol_wavelengths, mol_flux = molecule.get_flux(
@@ -1400,15 +1407,15 @@ class MoleculeDict(dict):
         return total_estimated_lines > 100000 and num_molecules > 3
     
     # Global parameter management
+    # add_callback / remove_callback provided by ObservableMixin
+    # Backward-compatible aliases:
     def add_global_parameter_change_callback(self, callback: Callable) -> None:
         """Add a callback for global parameter changes."""
-        if callback not in self._global_parameter_change_callbacks:
-            self._global_parameter_change_callbacks.append(callback)
+        self.add_callback(callback)
     
     def remove_global_parameter_change_callback(self, callback: Callable) -> None:
         """Remove a callback for global parameter changes."""
-        if callback in self._global_parameter_change_callbacks:
-            self._global_parameter_change_callbacks.remove(callback)
+        self.remove_callback(callback)
 
     def _notify_global_parameter_change(self, parameter_name: str, old_value: Any, new_value: Any) -> None:
         """Notify callbacks of global parameter changes.
@@ -1419,11 +1426,7 @@ class MoleculeDict(dict):
         """
         if self._suppress_global_callbacks:
             return
-        for callback in self._global_parameter_change_callbacks:
-            try:
-                callback(parameter_name, old_value, new_value)
-            except Exception as e:
-                print(f"Error in global parameter change callback: {e}")
+        self.notify_callbacks(parameter_name, old_value, new_value)
 
     # Simplified global parameter properties
     @property
@@ -1446,11 +1449,19 @@ class MoleculeDict(dict):
         old_value = self._global_wavelength_range
         if value != old_value:
             self._global_wavelength_range = value
-            # Update all molecules to use new range — this propagates through
-            # Molecule.wavelength_range → MoleculeLineList.wavelength_range
-            # so that each molecule only evaluates lines in the visible window.
+            # Propagate to every molecule *without* firing per-molecule
+            # class callbacks (which would trigger intermediate plot
+            # refreshes before all molecules are consistent).  The lazy
+            # _ensure_*_calculated() methods inside Molecule.get_flux()
+            # will pick up the new _wavelength_range and propagate it to
+            # the MoleculeLineList / Intensity objects on next access.
             for molecule in self.values():
-                molecule.wavelength_range = value
+                if molecule._wavelength_range != value:
+                    molecule._wavelength_range = value
+                    molecule._dirty_flags['intensity'] = True
+                    molecule._dirty_flags['spectrum'] = True
+                    molecule._dirty_flags['flux'] = True
+                    molecule._flux_cache.clear()
             
             self._summed_flux_cache.clear()
             self._notify_global_parameter_change('wavelength_range', old_value, value)

@@ -16,19 +16,7 @@ from iSLAT.Modules.Debug.DebugConfig import debug_config
 #from .MoleculeLine import MoleculeLine
 
 # Lazy imports for performance
-_pandas_imported = False
-
-def _get_pandas():
-    """Lazy import of pandas"""
-    global _pandas_imported, pd
-    if not _pandas_imported:
-        try:
-            import pandas as pd
-            _pandas_imported = True
-        except ImportError:
-            pd = None
-            _pandas_imported = True
-    return pd
+from ._pandas_import import get_pandas as _get_pandas
 
 # Cache version - increment when cache format changes
 # v2: Switched from compressed npz to separate uncompressed npy files for faster loading
@@ -73,7 +61,9 @@ _LINE_DTYPE = np.dtype([
     ('g_low', np.int32)
 ])
 
-class MoleculeLineList:
+from ._mixins import WavelengthRangeMixin
+
+class MoleculeLineList(WavelengthRangeMixin):
     """
     Efficient molecular line list with lazy loading and caching.
     """
@@ -273,19 +263,13 @@ class MoleculeLineList:
     # ================================
     # Wavelength Range Filtering
     # ================================
-    @property
-    def wavelength_range(self):
-        """Active wavelength range filter, or ``None`` for all lines."""
-        return self._wavelength_range
+    # wavelength_range property provided by WavelengthRangeMixin
 
-    @wavelength_range.setter
-    def wavelength_range(self, value):
-        """Set the wavelength range filter.  Invalidates all caches."""
-        if value != self._wavelength_range:
-            self._wavelength_range = value
-            self._filtered_raw_data = None
-            self.lines = None  # Force recreation of line objects
-            self._invalidate_caches()
+    def _on_wavelength_range_changed(self, old, new):
+        """Hook called by WavelengthRangeMixin when wavelength_range changes."""
+        self._filtered_raw_data = None
+        self.lines = None  # Force recreation of line objects
+        self._invalidate_caches()
 
     def _get_active_raw_data(self):
         """Return raw line data filtered by *wavelength_range* (if set).
@@ -678,6 +662,46 @@ class MoleculeLineList:
         self._pandas_df_cache = None  # Invalidate DataFrame cache too
         self._filtered_raw_data = None  # Force re-filter on next access
 
+    def _get_column(self, column_name: str, cache_attr: str) -> np.ndarray:
+        """Generic cached column accessor.
+
+        All nine per-column getter methods (``get_wavelengths``,
+        ``get_frequencies``, …) delegate here.  The logic is:
+
+        1. Ensure lazy data is loaded.
+        2. Return the cached array if present.
+        3. Otherwise extract the column from the structured array
+           (fast path) or fall back to iterating over ``MoleculeLine``
+           objects, cache the result, and return it.
+
+        Parameters
+        ----------
+        column_name : str
+            Name of the field in the structured ``_LINE_DTYPE`` array
+            (e.g. ``'lam'``, ``'freq'``, ``'a_stein'``).
+        cache_attr : str
+            Name of the instance attribute used to cache the result
+            (e.g. ``'_wavelengths_cache'``).
+        """
+        self._ensure_data_loaded()
+
+        cached = getattr(self, cache_attr)
+        if cached is not None:
+            return cached
+
+        active_data = self._get_active_raw_data()
+        if active_data is not None and len(active_data) > 0:
+            result = active_data[column_name].copy()
+        else:
+            self._ensure_lines_created()
+            if not self.lines:
+                result = np.array([])
+            else:
+                result = np.array([getattr(line, column_name) for line in self.lines])
+
+        setattr(self, cache_attr, result)
+        return result
+
     def get_ndarray(self) -> np.ndarray:
         """
         Convert the line data to a numpy ndarray.
@@ -837,24 +861,7 @@ class MoleculeLineList:
         np.ndarray
             Array of wavelengths in microns
         """
-        self._ensure_data_loaded()
-        
-        # Use cached wavelengths if available
-        if self._wavelengths_cache is not None:
-            return self._wavelengths_cache
-        
-        # Use direct structured array column access (O(1) slice)
-        active_data = self._get_active_raw_data()
-        if active_data is not None and len(active_data) > 0:
-            self._wavelengths_cache = active_data['lam'].copy()
-        else:
-            self._ensure_lines_created()
-            if not self.lines:
-                self._wavelengths_cache = np.array([])
-            else:
-                self._wavelengths_cache = np.array([line.lam for line in self.lines])
-                
-        return self._wavelengths_cache
+        return self._get_column('lam', '_wavelengths_cache')
     
     def get_frequencies(self):
         """
@@ -865,24 +872,7 @@ class MoleculeLineList:
         np.ndarray
             Array of frequencies in Hz
         """
-        self._ensure_data_loaded()
-        
-        # Use cached frequencies if available
-        if self._frequencies_cache is not None:
-            return self._frequencies_cache
-        
-        # Use direct structured array column access (O(1) slice)
-        active_data = self._get_active_raw_data()
-        if active_data is not None and len(active_data) > 0:
-            self._frequencies_cache = active_data['freq'].copy()
-        else:
-            self._ensure_lines_created()
-            if not self.lines:
-                self._frequencies_cache = np.array([])
-            else:
-                self._frequencies_cache = np.array([line.freq for line in self.lines])
-                
-        return self._frequencies_cache
+        return self._get_column('freq', '_frequencies_cache')
     
     def get_einstein_coefficients(self):
         """
@@ -893,24 +883,7 @@ class MoleculeLineList:
         np.ndarray
             Array of Einstein A coefficients
         """
-        self._ensure_data_loaded()
-        
-        # Use cached values if available
-        if self._a_stein_cache is not None:
-            return self._a_stein_cache
-        
-        # Use direct structured array column access (O(1) slice)
-        active_data = self._get_active_raw_data()
-        if active_data is not None and len(active_data) > 0:
-            self._a_stein_cache = active_data['a_stein'].copy()
-        else:
-            self._ensure_lines_created()
-            if not self.lines:
-                self._a_stein_cache = np.array([])
-            else:
-                self._a_stein_cache = np.array([line.a_stein for line in self.lines])
-                
-        return self._a_stein_cache
+        return self._get_column('a_stein', '_a_stein_cache')
     
     def get_upper_energies(self):
         """
@@ -921,24 +894,7 @@ class MoleculeLineList:
         np.ndarray
             Array of upper level energies in K
         """
-        self._ensure_data_loaded()
-        
-        # Use cached values if available
-        if self._e_up_cache is not None:
-            return self._e_up_cache
-        
-        # Use direct structured array column access (O(1) slice)
-        active_data = self._get_active_raw_data()
-        if active_data is not None and len(active_data) > 0:
-            self._e_up_cache = active_data['e_up'].copy()
-        else:
-            self._ensure_lines_created()
-            if not self.lines:
-                self._e_up_cache = np.array([])
-            else:
-                self._e_up_cache = np.array([line.e_up for line in self.lines])
-                
-        return self._e_up_cache
+        return self._get_column('e_up', '_e_up_cache')
     
     def get_lower_energies(self):
         """
@@ -949,24 +905,7 @@ class MoleculeLineList:
         np.ndarray
             Array of lower level energies in K
         """
-        self._ensure_data_loaded()
-        
-        # Use cached values if available
-        if self._e_low_cache is not None:
-            return self._e_low_cache
-        
-        # Use direct structured array column access (O(1) slice)
-        active_data = self._get_active_raw_data()
-        if active_data is not None and len(active_data) > 0:
-            self._e_low_cache = active_data['e_low'].copy()
-        else:
-            self._ensure_lines_created()
-            if not self.lines:
-                self._e_low_cache = np.array([])
-            else:
-                self._e_low_cache = np.array([line.e_low for line in self.lines])
-                
-        return self._e_low_cache
+        return self._get_column('e_low', '_e_low_cache')
     
     def get_upper_weights(self):
         """
@@ -977,24 +916,7 @@ class MoleculeLineList:
         np.ndarray
             Array of upper level statistical weights
         """
-        self._ensure_data_loaded()
-        
-        # Use cached values if available
-        if self._g_up_cache is not None:
-            return self._g_up_cache
-        
-        # Use direct structured array column access (O(1) slice)
-        active_data = self._get_active_raw_data()
-        if active_data is not None and len(active_data) > 0:
-            self._g_up_cache = active_data['g_up'].copy()
-        else:
-            self._ensure_lines_created()
-            if not self.lines:
-                self._g_up_cache = np.array([])
-            else:
-                self._g_up_cache = np.array([line.g_up for line in self.lines])
-                
-        return self._g_up_cache
+        return self._get_column('g_up', '_g_up_cache')
     
     def get_lower_weights(self):
         """
@@ -1005,24 +927,7 @@ class MoleculeLineList:
         np.ndarray
             Array of lower level statistical weights
         """
-        self._ensure_data_loaded()
-        
-        # Use cached values if available
-        if self._g_low_cache is not None:
-            return self._g_low_cache
-        
-        # Use direct structured array column access (O(1) slice)
-        active_data = self._get_active_raw_data()
-        if active_data is not None and len(active_data) > 0:
-            self._g_low_cache = active_data['g_low'].copy()
-        else:
-            self._ensure_lines_created()
-            if not self.lines:
-                self._g_low_cache = np.array([])
-            else:
-                self._g_low_cache = np.array([line.g_low for line in self.lines])
-                
-        return self._g_low_cache
+        return self._get_column('g_low', '_g_low_cache')
     
     def get_lines_in_range(self, lam_min: float, lam_max: float):
         """
@@ -1185,59 +1090,25 @@ class MoleculeLineList:
     
     def get_upper_levels(self) -> np.ndarray:
         """
-        Get all upper level energies from the lines.
+        Get all upper level quantum state labels from the lines.
         
         Returns
         -------
         np.ndarray
-            Array of upper level energies
+            Array of upper level quantum state labels
         """
-        self._ensure_data_loaded()
-        
-        # Use cached values if available
-        if self._lev_up_cache is not None:
-            return self._lev_up_cache
-        
-        # Use direct structured array column access (O(1) slice)
-        active_data = self._get_active_raw_data()
-        if active_data is not None and len(active_data) > 0:
-            self._lev_up_cache = active_data['lev_up'].copy()
-        else:
-            self._ensure_lines_created()
-            if not self.lines:
-                self._lev_up_cache = np.array([])
-            else:
-                self._lev_up_cache = np.array([line.lev_up for line in self.lines])
-                
-        return self._lev_up_cache
+        return self._get_column('lev_up', '_lev_up_cache')
     
     def get_lower_levels(self) -> np.ndarray:
         """
-        Get all lower level energies from the lines.
+        Get all lower level quantum state labels from the lines.
         
         Returns
         -------
         np.ndarray
-            Array of lower level energies
+            Array of lower level quantum state labels
         """
-        self._ensure_data_loaded()
-        
-        # Use cached values if available
-        if self._lev_low_cache is not None:
-            return self._lev_low_cache
-        
-        # Use direct structured array column access (O(1) slice)
-        active_data = self._get_active_raw_data()
-        if active_data is not None and len(active_data) > 0:
-            self._lev_low_cache = active_data['lev_low'].copy()
-        else:
-            self._ensure_lines_created()
-            if not self.lines:
-                self._lev_low_cache = np.array([])
-            else:
-                self._lev_low_cache = np.array([line.lev_low for line in self.lines])
-                
-        return self._lev_low_cache
+        return self._get_column('lev_low', '_lev_low_cache')
 
     # ================================
     # .par File Writing

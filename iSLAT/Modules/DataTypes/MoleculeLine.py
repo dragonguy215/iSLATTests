@@ -1,18 +1,7 @@
 from typing import Dict, Any, Optional, Union
 import numpy as np
 
-# Lazy import for pandas
-pd = None
-
-def _get_pandas():
-    """Lazy import of pandas"""
-    global pd
-    if pd is None:
-        try:
-            import pandas as pd
-        except ImportError:
-            raise ImportError("Pandas is required for table functionality")
-    return pd
+from ._pandas_import import get_pandas as _get_pandas
 
 class MoleculeLine:
     """

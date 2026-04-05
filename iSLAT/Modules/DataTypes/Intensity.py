@@ -26,7 +26,6 @@ from iSLAT.Modules.Debug.PerformanceLogger import perf_log, log_timing, Performa
 
 # Lazy imports for performance
 _scipy_imported = False
-_pd_imported = False
 
 def _get_scipy():
     """Lazy import of scipy components"""
@@ -37,17 +36,8 @@ def _get_scipy():
         _scipy_imported = True
     return fixed_quad
 
-def _get_pandas():
-    """Lazy import of pandas"""
-    global _pd_imported, pd
-    if not _pd_imported:
-        try:
-            import pandas as pd
-            _pd_imported = True
-        except ImportError:
-            pd = None
-            _pd_imported = True
-    return pd
+from ._pandas_import import get_pandas as _get_pandas
+from ._mixins import WavelengthRangeMixin
 
 if TYPE_CHECKING:
     import pandas
@@ -60,7 +50,7 @@ else:
 
 __all__ = ["Intensity"]
 
-class Intensity:
+class Intensity(WavelengthRangeMixin):
     __slots__ = ('_molecule', '_intensity', '_tau', '_t_kin', '_n_mol', '_dv', '_cache_valid', '_sorted_idx', '_sorted_freq',
                  '_cached_line_scalar', '_cached_e_delta', '_cached_dv_star',
                  '_cached_freq_ratio', '_wavelength_range')
@@ -200,6 +190,43 @@ class Intensity:
     _GAUSS_QUAD_X = None
     _GAUSS_QUAD_W = None
     _GAUSS_QUAD_INITIALIZED = False
+
+    # Strategy registry for intensity calculation methods
+    _strategy_registry: dict = {}
+
+    @classmethod
+    def _ensure_strategy_registry(cls) -> None:
+        """Populate the strategy registry lazily (avoids circular imports)."""
+        if not cls._strategy_registry:
+            from ._intensity_strategies import DEFAULT_STRATEGIES
+            cls._strategy_registry.update(DEFAULT_STRATEGIES)
+
+    @classmethod
+    def register_strategy(cls, method_name: str, strategy) -> None:
+        """Register a new (or replacement) intensity calculation strategy.
+
+        Parameters
+        ----------
+        method_name : str
+            Key used in ``calc_intensity(method=...)``.
+        strategy : IntensityStrategy
+            Any object with a ``calculate(...)`` method matching the
+            :class:`IntensityStrategy` protocol.
+        """
+        cls._ensure_strategy_registry()
+        cls._strategy_registry[method_name] = strategy
+
+    @classmethod
+    def _get_strategy(cls, method: str):
+        """Look up a strategy by *method* name, raising on unknown keys."""
+        cls._ensure_strategy_registry()
+        strategy = cls._strategy_registry.get(method)
+        if strategy is None:
+            raise ValueError(
+                f"Unknown intensity method {method!r}. "
+                f"Available: {sorted(cls._strategy_registry)}"
+            )
+        return strategy
     
     @classmethod
     def _initialize_gauss_quad(cls):
@@ -731,27 +758,11 @@ class Intensity:
         # Use pre-computed constant
         sqrt_ln2_inv = cls._SQRT_LN2_INV
         
-        if method == "radex":
-            intensity = (c.FGAUSS_PREFACTOR * 1e5 * dv_flat[:, np.newaxis] * 
-                                freq_ratio * bb_vals * (-np.expm1(-center_tau)))
-        elif method == "curve_growth":
-            intensity = self._fint_multi(center_tau, dv_flat, 
-                                      bb_vals, freq_ratio, sqrt_ln2_inv, lines.freq)
-        elif method == "curve_growth_no_overlap":
-            # Replicate the old curve_growth method without overlap treatment
-            # Initialize quadrature if needed
-            cls = self.__class__
-            if not cls._GAUSS_QUAD_INITIALIZED:
-                cls._initialize_gauss_quad()
-            
-            # Calculate fint using the old method (pre-computed exp(-x^2) values)
-            original_shape = center_tau.shape
-            tau_flat = center_tau.ravel()
-            integrand = 1.0 - np.exp(-tau_flat[:, np.newaxis] * cls._GAUSS_QUAD_EXP[np.newaxis, :])
-            fint_vals = np.dot(integrand, cls._GAUSS_QUAD_W).reshape(original_shape)
-            
-            # Calculate intensity using the old formula
-            intensity = sqrt_ln2_inv * 1e5 * dv_flat[:, np.newaxis] * freq_ratio * bb_vals * fint_vals
+        # Dispatch to the registered strategy for the requested method
+        strategy = self._get_strategy(method)
+        intensity = strategy.calculate(
+            self, center_tau, dv_flat, bb_vals, freq_ratio, sqrt_ln2_inv, lines.freq
+        )
         
         if not was_scalar:
             intensity = intensity.reshape(output_shape + (len(lines.freq),))
@@ -974,26 +985,19 @@ class Intensity:
         """float: Line width in km/s used for calculation"""
         return self._dv
 
-    @property
-    def wavelength_range(self) -> Optional[tuple]:
-        """tuple or None: Active wavelength range ``(lam_min, lam_max)`` in microns."""
-        return self._wavelength_range
+    # wavelength_range property provided by WavelengthRangeMixin
 
-    @wavelength_range.setter
-    def wavelength_range(self, value: Optional[tuple]):
-        """Set the wavelength range filter.  Propagates to the underlying
-        MoleculeLineList and invalidates all caches."""
-        if value != self._wavelength_range:
-            self._wavelength_range = value
-            self._molecule.wavelength_range = value
-            self.invalidate_cache()
-            # Also invalidate pre-computed line constants since the set of lines changed
-            self._sorted_idx = None
-            self._sorted_freq = None
-            self._cached_line_scalar = None
-            self._cached_e_delta = None
-            self._cached_dv_star = None
-            self._cached_freq_ratio = None
+    def _on_wavelength_range_changed(self, old, new):
+        """Hook called by WavelengthRangeMixin when wavelength_range changes."""
+        self._molecule.wavelength_range = new
+        self.invalidate_cache()
+        # Also invalidate pre-computed line constants since the set of lines changed
+        self._sorted_idx = None
+        self._sorted_freq = None
+        self._cached_line_scalar = None
+        self._cached_e_delta = None
+        self._cached_dv_star = None
+        self._cached_freq_ratio = None
 
     def __repr__(self) -> str:
         return f"Intensity(Mol-Name={self.molecule.name}, t_kin={self.t_kin} n_mol={self.n_mol} dv={self.dv}, " \

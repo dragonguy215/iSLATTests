@@ -173,6 +173,67 @@ class TestMoleculeDict:
         # target should be RV-corrected wavelengths
         assert not np.array_equal(target, wave)
 
+    # ── global_wavelength_range setter ─────────────────────────────
+
+    def test_global_wavelength_range_no_intermediate_class_callbacks(self):
+        """Setting global_wavelength_range must NOT fire per-molecule
+        class callbacks (which would trigger intermediate plot refreshes
+        before all molecules are consistent)."""
+        from iSLAT.Modules.DataTypes.Molecule import Molecule
+
+        md = self._make_dict()
+        mol_a = self._make_molecule('MolA')
+        mol_b = self._make_molecule('MolB')
+        md['MolA'] = mol_a
+        md['MolB'] = mol_b
+
+        original_range = (4.5, 28.0)
+        md._global_wavelength_range = original_range
+        mol_a._wavelength_range = original_range
+        mol_b._wavelength_range = original_range
+
+        # Track per-molecule class callbacks
+        class_cb_calls = []
+        def class_cb(mol_name, param_name, old_val, new_val):
+            class_cb_calls.append((mol_name, param_name))
+
+        Molecule.add_molecule_parameter_change_callback(class_cb)
+        try:
+            md.global_wavelength_range = (5.0, 20.0)
+
+            # No per-molecule class callbacks should have fired
+            wl_calls = [c for c in class_cb_calls if c[1] == 'wavelength_range']
+            assert len(wl_calls) == 0, (
+                f"Expected 0 per-molecule wavelength_range callbacks, got {len(wl_calls)}"
+            )
+
+            # But every molecule should have the new range and dirty flags
+            for mol in md.values():
+                assert mol._wavelength_range == (5.0, 20.0)
+                assert mol._dirty_flags['intensity'] is True
+                assert mol._dirty_flags['spectrum'] is True
+                assert mol._dirty_flags['flux'] is True
+        finally:
+            Molecule.remove_molecule_parameter_change_callback(class_cb)
+
+    def test_global_wavelength_range_fires_global_callback(self):
+        """The global callback should fire exactly once after all molecules
+        are updated."""
+        md = self._make_dict()
+        mol_a = self._make_molecule('MolA')
+        md['MolA'] = mol_a
+        md._global_wavelength_range = (4.5, 28.0)
+        mol_a._wavelength_range = (4.5, 28.0)
+
+        global_cb_calls = []
+        md.add_global_parameter_change_callback(
+            lambda p, o, n: global_cb_calls.append((p, o, n))
+        )
+        md.global_wavelength_range = (5.0, 20.0)
+
+        assert len(global_cb_calls) == 1
+        assert global_cb_calls[0] == ('wavelength_range', (4.5, 28.0), (5.0, 20.0))
+
 
 class TestMoleculeDictHelpers:
     """Tests for MoleculeDict helper functions (_ci_get, _safe_float)."""
