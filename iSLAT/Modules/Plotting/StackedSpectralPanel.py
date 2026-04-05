@@ -47,6 +47,7 @@ from matplotlib.ticker import MaxNLocator
 
 from .BasePlot import BasePlot
 from .SpectralPanel import SpectralPanel, GapMode, XScaling
+from .LegendStrategy import LegendStrategy, MoleculeColorLegend
 
 if TYPE_CHECKING:
     from matplotlib.gridspec import SubplotSpec
@@ -117,6 +118,13 @@ class StackedSpectralPanel(BasePlot):
         **kwargs,
     ):
         super().__init__(figsize=figsize, **kwargs)
+
+        # Stacked-panel plots default to the molecule colour legend.
+        if not isinstance(self.legend_strategy, MoleculeColorLegend):
+            # Only override if caller didn't explicitly pass a strategy.
+            if 'legend_strategy' not in kwargs:
+                self.legend_strategy = MoleculeColorLegend()
+
         self.wave_data = np.asarray(wave_data)
         self.flux_data = np.asarray(flux_data)
         self.error_data = (

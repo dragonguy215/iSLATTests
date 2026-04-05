@@ -30,6 +30,10 @@ Class hierarchy::
     ├── MainPlotGrid               — 3-panel composite (spectrum + inspection + pop-diagram)
     └── FitLinesPlotGrid           — grid of individual line-fit results
 
+    LegendStrategy (ABC)       — pluggable legend provider
+    ├── StandardLegend         — standard artist-based legend (default for BasePlot)
+    └── MoleculeColorLegend    — text-only colour key (default for stacked plots)
+
     GapMode (Enum)             — CONNECT (default) | SKIP (break lines at gaps)
     XScaling (Enum)            — WAVELENGTH (default) | DATA_DENSITY (uniform point density)
 
@@ -41,6 +45,7 @@ Class hierarchy::
 from .BasePlot import BasePlot, DEFAULT_THEME, _detect_system_theme
 from .BasePlot import BasePlot as _BP
 load_theme = _BP.load_theme  # Convenience alias at package level
+from .LegendStrategy import LegendStrategy, StandardLegend, MoleculeColorLegend
 from .SpectralPanel import SpectralPanel, GapMode, XScaling
 from .StackedSpectralPanel import StackedSpectralPanel
 from .CompositeStackedPanel import CompositeStackedPanel
@@ -60,6 +65,9 @@ __all__ = [
     "BasePlot",
     "DEFAULT_THEME",
     "load_theme",
+    "LegendStrategy",
+    "StandardLegend",
+    "MoleculeColorLegend",
     "GapMode",
     "XScaling",
     "SpectralPanel",

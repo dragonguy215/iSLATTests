@@ -681,23 +681,17 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
             first_ax = self.subplots[0][0]  # spectrum axes of first row
             mol_cache, mol_labels, mol_colors = self._build_mol_cache()
             if mol_labels:
-                BasePlot.build_molecule_legend(
-                    first_ax, mol_labels, mol_colors,
+                self.legend_strategy.build_legend(
+                    first_ax, self.fig, mol_labels, mol_colors,
                     fontsize=7,
-                    ncols=4,
-                    bbox_to_anchor=(0.5, 1.5),
-                    use_figure_transform=False,
                 )
             elif self.model_components:
                 comp_labels = [c.get("label", "") for c in self.model_components if c.get("label")]
                 comp_colors = [c.get("color", "blue") for c in self.model_components if c.get("label")]
                 if comp_labels:
-                    BasePlot.build_molecule_legend(
-                        first_ax, comp_labels, comp_colors,
+                    self.legend_strategy.build_legend(
+                        first_ax, self.fig, comp_labels, comp_colors,
                         fontsize=7,
-                        ncols=4,
-                        bbox_to_anchor=(0.5, 1.5),
-                        use_figure_transform=False,
                     )
 
         # --- Total chi-squared annotation at the bottom ----------------

@@ -591,9 +591,9 @@ class FullSpectrumView(PlotView):
 
         # Legend
         legend_on = toggle_state.get("legend", True)
-        legend = self._get_legend()
-        if legend is not None:
-            legend.set_visible(legend_on)
+        legend_ax = self.subplots.get(0)
+        if legend_ax is not None:
+            self._plot.legend_strategy.update_visibility(legend_ax, legend_on)
 
         self.draw()
 
@@ -609,12 +609,17 @@ class FullSpectrumView(PlotView):
     def toggle_legend(self, visible: Optional[bool] = None) -> None:
         if not self._initialised:
             return
-        legend = self._get_legend()
+        legend_ax = self.subplots.get(0)
+        if legend_ax is None:
+            return
+        legend = legend_ax.get_legend()
         if legend is not None:
             if visible is not None:
-                legend.set_visible(visible)
+                self._plot.legend_strategy.update_visibility(legend_ax, visible)
             else:
-                legend.set_visible(not legend.get_visible())
+                self._plot.legend_strategy.update_visibility(
+                    legend_ax, not legend.get_visible(),
+                )
         self.draw()
 
     def toggle_saved_lines(self, show: bool, loaded_lines: Any = None) -> None:
@@ -841,13 +846,13 @@ class FullSpectrumView(PlotView):
         if legend_ax is None:
             return
 
-        BasePlot.build_molecule_legend(legend_ax, mol_labels, mol_colors)
+        self._plot.legend_strategy.build_legend(
+            legend_ax, self._plot.fig, mol_labels, mol_colors,
+        )
 
         # Respect the legend toggle state from the controller
         if not self._pm.legend_toggle:
-            legend = legend_ax.get_legend()
-            if legend is not None:
-                legend.set_visible(False)
+            self._plot.legend_strategy.update_visibility(legend_ax, False)
 
     # ==================================================================
     # Cleanup

@@ -358,7 +358,9 @@ class FullSpectrumPlot(StackedSpectralPanel):
         # Colour-legend on the first panel (handles removal when empty).
         legend_ax = self._legend_axes
         if legend_ax is not None:
-            BasePlot.build_molecule_legend(legend_ax, mol_labels, mol_colors)
+            self.legend_strategy.build_legend(
+                legend_ax, self.fig, mol_labels, mol_colors,
+            )
 
     # ------------------------------------------------------------------
     def update_panels_inplace(self) -> None:
@@ -474,7 +476,9 @@ class FullSpectrumPlot(StackedSpectralPanel):
         if legend_ax is not None:
             mol_labels = [self.get_molecule_display_name(m) for m in visible] if visible else []
             mol_colors = [self.get_molecule_color(m) for m in visible] if visible else []
-            BasePlot.build_molecule_legend(legend_ax, mol_labels, mol_colors)
+            self.legend_strategy.build_legend(
+                legend_ax, self.fig, mol_labels, mol_colors,
+            )
 
     # ------------------------------------------------------------------
     # Convenience helpers

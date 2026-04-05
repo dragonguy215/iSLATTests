@@ -21,6 +21,12 @@ from matplotlib.lines import Line2D
 
 import iSLAT.Constants as c
 
+from iSLAT.Modules.Plotting.LegendStrategy import (
+    LegendStrategy,
+    MoleculeColorLegend,
+    StandardLegend,
+)
+
 # Import display config to ensure rcParams are set early and to access the savefig DPI default.
 try:
     from iSLAT.Modules.GUI.DisplayConfig import display_config as _display_config
@@ -115,12 +121,16 @@ class BasePlot(ABC):
         figsize: Optional[Tuple[float, float]] = None,
         theme: Optional[Dict[str, Any]] = None,
         fig: Optional[MplFigure] = None,
+        legend_strategy: Optional[LegendStrategy] = None,
         **kwargs,
     ):
         self._figsize = figsize
         self.theme: Dict[str, Any] = theme if theme is not None else DEFAULT_THEME.copy()
         self.fig: Optional[MplFigure] = fig
         self._owns_figure = fig is None  # True when we create the figure ourselves
+        self.legend_strategy: LegendStrategy = (
+            legend_strategy if legend_strategy is not None else StandardLegend()
+        )
 
     # ------------------------------------------------------------------
     # Theme helpers
@@ -169,17 +179,8 @@ class BasePlot(ABC):
                     artist.set_facecolor(summed_color)
                     artist.set_edgecolor(summed_color)
 
-            # Theme the legend text if one exists
-            legend = ax.get_legend()
-            if legend is not None:
-                frame = legend.get_frame()
-                if legend.get_visible() and frame.get_visible():
-                    frame.set_facecolor(graph_bg)
-                    frame.set_edgecolor(fg)
-                for text in legend.get_texts():
-                    # Skip texts that carry per-molecule colour
-                    if not getattr(text, '_islat_mol_color', False):
-                        text.set_color(fg)
+            # Theme the legend via the strategy if one exists
+            self.legend_strategy.apply_theme(ax, self.theme)
 
     @staticmethod
     def load_theme(name: str = "auto") -> Dict[str, Any]:
@@ -632,28 +633,15 @@ class BasePlot(ABC):
 
     @staticmethod
     def _update_legend(ax: Axes) -> None:
-        """Add or update the legend on *ax*, excluding invisible artists."""
-        handles, labels = ax.get_legend_handles_labels()
-        # Filter to only visible artists
-        visible_handles = []
-        visible_labels = []
-        for h, l in zip(handles, labels):
-            # ErrorbarContainer and similar containers don't have get_visible()
-            # directly — check the first child artist (the data line) instead.
-            try:
-                is_visible = h.get_visible()
-            except AttributeError:
-                is_visible = h[0].get_visible() if len(h) > 0 else True
-            if is_visible:
-                visible_handles.append(h)
-                visible_labels.append(l)
-        if visible_handles:
-            ncols = 2 if len(visible_handles) > 8 else 1
-            ax.legend(visible_handles, visible_labels, ncols=ncols)
-        else:
-            legend = ax.get_legend()
-            if legend is not None:
-                legend.remove()
+        """Add or update the legend on *ax*, excluding invisible artists.
+
+        This static method is kept for backward compatibility with
+        :class:`PlotRenderer` and other callers that invoke it directly.
+        It delegates to :class:`StandardLegend`.
+        """
+        _fallback = StandardLegend()
+        fig = ax.get_figure()
+        _fallback.build_legend(ax, fig, [], [])
 
     @staticmethod
     def _clear_tagged_artists(
