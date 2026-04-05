@@ -25,6 +25,8 @@ Usage sketch::
     plot.show()
 """
 
+from __future__ import annotations
+
 from abc import abstractmethod
 from typing import (
     Callable,
@@ -37,9 +39,10 @@ from typing import (
 )
 
 import numpy as np
+import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure as MplFigure
-from matplotlib.gridspec import GridSpec
+from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 from matplotlib.ticker import MaxNLocator
 
 from .BasePlot import BasePlot
@@ -48,6 +51,7 @@ from .SpectralPanel import SpectralPanel
 if TYPE_CHECKING:
     from matplotlib.gridspec import SubplotSpec
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+    from .CompositeStackedPanel import CompositeStackedPanel
 
 
 class StackedSpectralPanel(BasePlot):
@@ -330,6 +334,139 @@ class StackedSpectralPanel(BasePlot):
                     panel.remove_saved_lines(tag=tag)
 
     # ------------------------------------------------------------------
+    # Cell / panel label helpers
+    # ------------------------------------------------------------------
+    _LABEL_TAG = "_islat_cell_label"
+
+    def set_cell_labels(
+        self,
+        labels: Dict[int, str],
+    ) -> None:
+        """Assign text labels to specific cells (rows).
+
+        The label is drawn in the **top-left corner** of the first
+        panel in the cell.  Previously drawn cell labels are removed
+        before new ones are placed.
+
+        Parameters
+        ----------
+        labels : dict[int, str]
+            Mapping of ``{cell_index: label_text}``.  Cells not present
+            in the dict are left unlabelled.
+        """
+        self._cell_labels = dict(labels)
+        # If the figure already exists, apply immediately.
+        if self.panels:
+            self._apply_cell_labels(self._cell_labels)
+
+    def set_panel_labels(
+        self,
+        labels: Dict[Tuple[int, int], str],
+    ) -> None:
+        """Assign text labels to specific sub-panels within cells.
+
+        Parameters
+        ----------
+        labels : dict[tuple[int, int], str]
+            Mapping of ``{(cell_index, panel_index): label_text}``.
+        """
+        self._panel_labels = dict(labels)
+        if self.panels:
+            self._apply_panel_labels(self._panel_labels)
+
+    def _apply_cell_labels(
+        self,
+        labels: Dict[int, str],
+    ) -> None:
+        """Render cell labels on the first panel of each labelled cell."""
+        fg = self._get_theme_value("foreground", "black")
+        for cell_idx, lbl in labels.items():
+            cell_panels = self.panels.get(cell_idx)
+            if not cell_panels or not lbl:
+                continue
+            ax = cell_panels[0].ax
+            if ax is None:
+                continue
+            # Remove any existing label for this cell.
+            tag = f"{self._LABEL_TAG}_{cell_idx}"
+            self._clear_tagged_artists(
+                ax, tag,
+                lines=False, collections=False, texts=True,
+            )
+            txt = ax.text(
+                0.01, 0.97, lbl,
+                transform=ax.transAxes,
+                fontsize=7,
+                fontweight="bold",
+                color=fg,
+                alpha=0.75,
+                va="top",
+                ha="left",
+                bbox=dict(
+                    boxstyle="round,pad=0.2",
+                    facecolor=self._get_theme_value("background", "white"),
+                    edgecolor="none",
+                    alpha=0.6,
+                ),
+                zorder=100,
+            )
+            setattr(txt, tag, True)
+
+    def _apply_panel_labels(
+        self,
+        labels: Dict[Tuple[int, int], str],
+    ) -> None:
+        """Render labels on individual sub-panels."""
+        fg = self._get_theme_value("foreground", "black")
+        for (cell_idx, panel_idx), lbl in labels.items():
+            cell_panels = self.panels.get(cell_idx)
+            if not cell_panels or panel_idx >= len(cell_panels) or not lbl:
+                continue
+            ax = cell_panels[panel_idx].ax
+            if ax is None:
+                continue
+            tag = f"{self._LABEL_TAG}_{cell_idx}_{panel_idx}"
+            self._clear_tagged_artists(
+                ax, tag, lines=False, collections=False, texts=True,
+            )
+            txt = ax.text(
+                0.01, 0.97, lbl,
+                transform=ax.transAxes,
+                fontsize=7,
+                fontweight="bold",
+                color=fg,
+                alpha=0.75,
+                va="top",
+                ha="left",
+                bbox=dict(
+                    boxstyle="round,pad=0.2",
+                    facecolor=self._get_theme_value("background", "white"),
+                    edgecolor="none",
+                    alpha=0.6,
+                ),
+                zorder=100,
+            )
+            setattr(txt, tag, True)
+
+    def clear_cell_labels(self) -> None:
+        """Remove all cell / panel labels from every panel."""
+        for cell_idx, cell_panels in self.panels.items():
+            for p_idx, panel in enumerate(cell_panels):
+                ax = panel.ax
+                if ax is None:
+                    continue
+                self._clear_tagged_artists(
+                    ax, f"{self._LABEL_TAG}_{cell_idx}",
+                    lines=False, collections=False, texts=True,
+                )
+                self._clear_tagged_artists(
+                    ax, f"{self._LABEL_TAG}_{cell_idx}_{p_idx}",
+                    lines=False, collections=False, texts=True,
+                )
+        self._cell_labels = {}
+        self._panel_labels = {}
+
+    # ------------------------------------------------------------------
     # Top-level plot generation
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
@@ -386,3 +523,113 @@ class StackedSpectralPanel(BasePlot):
 
         # Apply theme
         self.apply_theme_to_figure()
+
+    # ------------------------------------------------------------------
+    # Composition – stack two plots together
+    # ------------------------------------------------------------------
+    def stack_with(
+        self,
+        other: StackedSpectralPanel,
+        *,
+        hspace: float = 0.25,
+        row_height: Optional[float] = None,
+        figsize: Optional[Tuple[float, float]] = None,
+        labels: Optional[Tuple[str, str]] = None,
+    ) -> "CompositeStackedPanel":
+        """Combine two stacked-spectral plots into a single new panel.
+
+        Cells from *other* are paired with cells from *self* by
+        **closest matching wavelength range** (midpoint proximity).
+        Each matched pair occupies two consecutive rows — *self*'s cell
+        on top, *other*'s cell directly beneath.
+
+        Unmatched cells (those with no close counterpart in the partner
+        plot) are appended at the end of the figure.
+
+        Both plots are **re-rendered** into a shared figure so that the
+        axes, annotations, and theme all come out correctly.
+
+        Parameters
+        ----------
+        other : StackedSpectralPanel
+            The second plot whose cells will be interleaved beneath the
+            matching cells of *self*.
+        hspace : float
+            Vertical spacing between rows in the composite GridSpec.
+            Default 0.25.
+        row_height : float, optional
+            Base row height (inches) for each cell in the composite.
+            Defaults to ``max(self.row_height, other.row_height)``.
+        figsize : tuple, optional
+            Explicit figure size.  When *None* it is computed from the
+            total number of rows and ``row_height``.
+        labels : tuple[str, str], optional
+            Descriptive labels for *self* and *other* placed as text
+            annotations in the top-left corner of each panel row.  For
+            example ``("Observation A", "Observation B")``.
+
+        Returns
+        -------
+        CompositeStackedPanel
+            A new :class:`StackedSpectralPanel` subclass instance that
+            holds the combined figure.  It supports the full
+            ``show`` / ``save`` / ``close`` / annotation API inherited
+            from :class:`BasePlot`.
+
+        Examples
+        --------
+        >>> composite = plot_a.stack_with(plot_b)
+        >>> composite.show()
+
+        Using the ``+`` operator:
+
+        >>> composite = plot_a + plot_b
+        >>> composite.save("combined.png")
+        """
+        from .CompositeStackedPanel import CompositeStackedPanel
+
+        return CompositeStackedPanel.from_pair(
+            self,
+            other,
+            hspace=hspace,
+            row_height=row_height,
+            figsize=figsize,
+            labels=labels,
+        )
+
+    def __add__(self, other: StackedSpectralPanel) -> "CompositeStackedPanel":
+        """Syntactic sugar: ``plot_a + plot_b`` ≡ ``plot_a.stack_with(plot_b)``."""
+        if not isinstance(other, StackedSpectralPanel):
+            return NotImplemented
+        return self.stack_with(other)
+
+
+# ======================================================================
+# Helper – extract the kwargs that _create_cell expects
+# ======================================================================
+def _extract_cell_kwargs(ssp: StackedSpectralPanel) -> Dict[str, Any]:
+    """Collect the keyword arguments a concrete subclass passes to
+    ``_create_cell`` during its ``generate_plot`` override.
+
+    For :class:`FullSpectrumPlot` (and its subclass
+    :class:`ResidualSpectrumPlot`) this includes the molecule cache and
+    summed spectrum arrays.  For unknown subclasses we return an empty
+    dict — callers can always extend this function.
+    """
+    kw: Dict[str, Any] = {}
+
+    # FullSpectrumPlot forwards mol_cache, summed_wave, summed_flux.
+    if hasattr(ssp, "_build_mol_cache"):
+        mol_cache, _labels, _colors = ssp._build_mol_cache()
+        kw["mol_cache"] = mol_cache
+
+    if hasattr(ssp, "molecules") and ssp.molecules is not None:
+        try:
+            wave_obs = getattr(ssp, "wave_data_obs", ssp.wave_data)
+            sw, sf = ssp.molecules.get_summed_flux(wave_obs, visible_only=True)
+            kw["summed_wave"] = sw
+            kw["summed_flux"] = sf
+        except Exception:
+            pass
+
+    return kw

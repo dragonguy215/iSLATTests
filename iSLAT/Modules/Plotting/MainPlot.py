@@ -1320,38 +1320,21 @@ class iSLATPlot:
         tick / label / spine colours, canvas widget, toolbar, and the
         full-spectrum view.  No spectrum data is recomputed, so the
         update is near-instant.
+
+        Both views are updated unconditionally so that a theme change
+        made while one view is active is immediately reflected when the
+        user switches to the other view.  Each view's
+        :meth:`PlotView.apply_theme` implementation handles its own
+        figure, axes, canvas, and sub-delegates.
         """
         if theme:
             self.theme = theme
 
-        # Keep the PlotRenderer's theme reference in sync so that any
-        # subsequent render calls (e.g. on the next user interaction)
-        # use the new colours.
-        if hasattr(self, 'plot_renderer'):
-            self.plot_renderer.theme = self.theme
-            # Also update the sub-plot delegates if they exist
-            if hasattr(self.plot_renderer, '_line_inspection_plot') and self.plot_renderer._line_inspection_plot is not None:
-                self.plot_renderer._line_inspection_plot.theme = self.theme
-            if hasattr(self.plot_renderer, '_population_diagram_plot') and self.plot_renderer._population_diagram_plot is not None:
-                self.plot_renderer._population_diagram_plot.theme = self.theme
-
-        # Theme the three-panel axes (ax1/ax2/ax3)
-        self._apply_plot_theming()
-
-        # Theme the full-spectrum view's figure if it has been initialised
-        if hasattr(self, '_full_spectrum_view'):
-            fsv = self._full_spectrum_view
-            if fsv._plot is not None:
-                fsv._plot.theme = self.theme
-                fsv._plot.apply_theme_to_figure()
-            if fsv._canvas is not None:
-                try:
-                    fsv._canvas.get_tk_widget().configure(
-                        bg=self.theme.get("background", "#181A1B")
-                    )
-                    fsv._canvas.draw_idle()
-                except Exception:
-                    pass
+        # Propagate to both views — the currently invisible view will
+        # also be themed so the next activate() doesn't flash stale
+        # colours.
+        self._three_panel_view.apply_theme(self.theme)
+        self._full_spectrum_view.apply_theme(self.theme)
 
         # Theme the matplotlib toolbar
         if hasattr(self, 'toolbar') and self.toolbar is not None:
@@ -1366,10 +1349,6 @@ class iSLATPlot:
                         pass
             except Exception:
                 pass
-
-        # Single canvas draw for the three-panel view
-        if hasattr(self, 'canvas'):
-            self.canvas.draw_idle()
     
     def load_full_spectrum(self):
         """Activate the full-spectrum view (called by toggle_full_spectrum)."""

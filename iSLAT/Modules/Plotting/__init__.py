@@ -23,8 +23,9 @@ Class hierarchy::
     │   ├── SpectrumPanel          — concrete panel: spectrum + molecules
     │   └── ResidualPanel          — concrete panel: residual + chi^2
     ├── StackedSpectralPanel (ABC) — composer for vertically stacked panels
-    │   └── FullSpectrumPlot       — multi-panel full spectrum overview
-    │       └── ResidualSpectrumPlot — ...with per-panel residuals & chi^2
+    │   ├── FullSpectrumPlot       — multi-panel full spectrum overview
+    │   │   └── ResidualSpectrumPlot — ...with per-panel residuals & chi^2
+    │   └── CompositeStackedPanel  — merged cells from 2 source plots
     ├── PopulationDiagramPlot      — Boltzmann / rotation diagram
     ├── MainPlotGrid               — 3-panel composite (spectrum + inspection + pop-diagram)
     └── FitLinesPlotGrid           — grid of individual line-fit results
@@ -39,6 +40,7 @@ from .BasePlot import BasePlot as _BP
 load_theme = _BP.load_theme  # Convenience alias at package level
 from .SpectralPanel import SpectralPanel
 from .StackedSpectralPanel import StackedSpectralPanel
+from .CompositeStackedPanel import CompositeStackedPanel
 from .SpectrumPanel import SpectrumPanel
 from .ResidualPanel import ResidualPanel
 from .LineInspectionPlot import LineInspectionPlot
@@ -57,6 +59,7 @@ __all__ = [
     "load_theme",
     "SpectralPanel",
     "StackedSpectralPanel",
+    "CompositeStackedPanel",
     "SpectrumPanel",
     "ResidualPanel",
     "LineInspectionPlot",

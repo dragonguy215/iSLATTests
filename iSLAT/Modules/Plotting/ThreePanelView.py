@@ -101,6 +101,9 @@ class ThreePanelView(PlotView):
         """Show the original 3-panel canvas and refresh."""
         self._canvas.get_tk_widget().pack(fill="both", expand=True, padx=0, pady=0)
 
+        # Sync theme in case it changed while the other view was active.
+        self.apply_theme(self._pm.theme)
+
         if self._needs_refresh:
             # Data changed while we were inactive — full re-render
             self._do_update_model_plot()
@@ -115,6 +118,40 @@ class ThreePanelView(PlotView):
     def deactivate(self) -> None:
         """Hide the original canvas."""
         self._canvas.get_tk_widget().pack_forget()
+
+    # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+    def apply_theme(self, theme: dict) -> None:
+        """Apply *theme* to the three-panel figure, axes, and canvas.
+
+        Delegates to the controller's :meth:`_apply_plot_theming` which
+        already handles figure/axes/spine/tick colouring.  Also updates
+        the PlotRenderer and its sub-plot delegates so subsequent renders
+        pick up the new colours.
+        """
+        # Keep the controller's theme reference in sync
+        self._pm.theme = theme
+
+        if hasattr(self._pm, 'plot_renderer'):
+            self._pm.plot_renderer.theme = theme
+            if hasattr(self._pm.plot_renderer, '_line_inspection_plot') and self._pm.plot_renderer._line_inspection_plot is not None:
+                self._pm.plot_renderer._line_inspection_plot.theme = theme
+            if hasattr(self._pm.plot_renderer, '_population_diagram_plot') and self._pm.plot_renderer._population_diagram_plot is not None:
+                self._pm.plot_renderer._population_diagram_plot.theme = theme
+
+        # Restyle figure / axes / data artists
+        self._pm._apply_plot_theming()
+
+        # Restyle canvas widget background
+        try:
+            self._canvas.get_tk_widget().configure(
+                bg=theme.get("background", "#181A1B")
+            )
+        except Exception:
+            pass
+
+        self._canvas.draw_idle()
 
     # ------------------------------------------------------------------
     # Core rendering

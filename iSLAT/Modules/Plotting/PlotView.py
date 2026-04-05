@@ -99,6 +99,24 @@ class PlotView(ABC):
         ...
 
     # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+    @abstractmethod
+    def apply_theme(self, theme: dict) -> None:
+        """
+        Apply a new theme dictionary to this view.
+
+        Implementations must propagate the theme to every owned figure,
+        axes, canvas widget, and sub-plot delegate so that switching
+        between views always reflects the current theme.
+
+        Called by the controller's :meth:`iSLATPlot.apply_theme` and
+        automatically on :meth:`activate` when the theme has changed
+        since the view was last visible.
+        """
+        ...
+
+    # ------------------------------------------------------------------
     # Toggle helpers
     # ------------------------------------------------------------------
     @abstractmethod

@@ -212,6 +212,7 @@ class FullSpectrumView(PlotView):
             molecules=self._islat.molecules_dict,
             wave_data_obs=wave_obs,
             figsize=figsize,
+            theme=self._pm.theme,
         )
         return plot
 
@@ -399,6 +400,9 @@ class FullSpectrumView(PlotView):
         if self._canvas is not None:
             self._canvas.get_tk_widget().pack(fill="both", expand=True, padx=0, pady=0)
 
+        # Sync theme in case it changed while the other view was active.
+        self.apply_theme(self._pm.theme)
+
         # Reconcile overlays with the controller's toggle dict
         self.sync_toggle_state(self._pm.toggle_state)
 
@@ -408,6 +412,29 @@ class FullSpectrumView(PlotView):
     def deactivate(self) -> None:
         if self._canvas is not None:
             self._canvas.get_tk_widget().pack_forget()
+
+    # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+    def apply_theme(self, theme: dict) -> None:
+        """Apply *theme* to the composed plot, figure, and canvas widget.
+
+        Propagates the theme to:
+        - the composed :class:`StackedSpectralPanel` (``self._plot.theme``)
+        - every axes in the figure via :meth:`BasePlot.apply_theme_to_figure`
+        - the Tk canvas widget background
+        """
+        if self._plot is not None:
+            self._plot.theme = theme
+            self._plot.apply_theme_to_figure()
+        if self._canvas is not None:
+            try:
+                self._canvas.get_tk_widget().configure(
+                    bg=theme.get("background", "#181A1B")
+                )
+            except Exception:
+                pass
+            self._canvas.draw_idle()
 
     # ==================================================================
     # Core rendering
@@ -691,6 +718,7 @@ class FullSpectrumView(PlotView):
             atomic_lines=atomic_lines,
             figsize=figsize,
             wave_data_obs=wave_obs,
+            theme=self._pm.theme,
         )
 
     def save_figure(
@@ -855,8 +883,10 @@ def output_full_spectrum(islat_ref: Any, rasterized: bool = False) -> str | None
 
     # Read toggle state if available
     ts: dict = {}
+    theme: Optional[dict] = None
     if hasattr(islat_ref, "GUI") and hasattr(islat_ref.GUI, "plot"):
         ts = getattr(islat_ref.GUI.plot, "toggle_state", {})
+        theme = getattr(islat_ref.GUI.plot, "theme", None)
 
     line_list_df: Optional[pd.DataFrame] = None
     if ts.get("saved_lines", False):
@@ -870,7 +900,7 @@ def output_full_spectrum(islat_ref: Any, rasterized: bool = False) -> str | None
         atomic_lines_df = load_atomic_lines()
 
     # Create standalone plot — uses BasePlot._ensure_figure (non-pyplot MplFigure)
-    standalone = FullSpectrumPlot(
+    standalone_kwargs = dict(
         wave_data=wave,
         flux_data=flux,
         molecules=islat_ref.molecules_dict,
@@ -879,6 +909,9 @@ def output_full_spectrum(islat_ref: Any, rasterized: bool = False) -> str | None
         figsize=(12, 16),
         wave_data_obs=wave_obs,
     )
+    if theme is not None:
+        standalone_kwargs["theme"] = theme
+    standalone = FullSpectrumPlot(**standalone_kwargs)
     standalone.generate_plot()
 
     # Respect summed toggle
