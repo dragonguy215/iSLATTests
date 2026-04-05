@@ -234,9 +234,11 @@ class FullSpectrumPlot(StackedSpectralPanel):
             ``(ymin, ymax)`` for the panel.
         """
         if np.any(mask):
-            _ymax = float(np.nanmax(self.flux_data[mask]))
-            _ymax += _ymax * self.ymax_factor
-            return (-0.005, _ymax)
+            finite = np.isfinite(self.flux_data[mask])
+            if np.any(finite):
+                _ymax = float(np.nanmax(self.flux_data[mask][finite]))
+                _ymax += _ymax * self.ymax_factor
+                return (-0.005, _ymax)
         return (-0.005, 0.1)
 
     # ------------------------------------------------------------------
@@ -271,6 +273,8 @@ class FullSpectrumPlot(StackedSpectralPanel):
             atomic_lines=self.atomic_lines,
             wave_data_obs=self.wave_data_obs,
             ax=ax,
+            gap_mode=self.gap_mode,
+            gap_threshold=self.gap_threshold,
         )
         # Populate backward-compatible subplots dict
         self.subplots[idx] = ax

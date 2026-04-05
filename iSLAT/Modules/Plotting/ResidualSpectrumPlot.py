@@ -373,10 +373,16 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
         )
         if len(panel_flux) > 0:
             residuals = panel_flux - panel_model
-            res_abs_max = float(np.nanmax(np.abs(residuals)))
+            finite = np.isfinite(residuals)
+            if np.any(finite):
+                res_abs_max = float(np.nanmax(np.abs(residuals[finite])))
+            else:
+                res_abs_max = 0.0
             if panel_err is not None and len(panel_err) > 0:
-                err_max = float(np.nanmax(panel_err))
-                res_abs_max = max(res_abs_max, err_max)
+                finite_err = np.isfinite(panel_err)
+                if np.any(finite_err):
+                    err_max = float(np.nanmax(panel_err[finite_err]))
+                    res_abs_max = max(res_abs_max, err_max)
             res_pad = res_abs_max * 1.3 if res_abs_max > 0 else 0.01
             return (-res_pad, res_pad)
         return (-0.01, 0.01)
@@ -438,6 +444,8 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
             atomic_lines=self.atomic_lines,
             wave_data_obs=getattr(self, "wave_data_obs", None),
             ax=ax_spec,
+            gap_mode=self.gap_mode,
+            gap_threshold=self.gap_threshold,
         )
         # Attach model_components for rendering in _post_render_cell
         spectrum_panel._model_components = self.model_components
@@ -462,6 +470,8 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
             exclude_lines_half_width=self.exclude_lines_half_width,
             is_first_row=(idx == 0),
             ax=ax_res,
+            gap_mode=self.gap_mode,
+            gap_threshold=self.gap_threshold,
         )
 
         return [spectrum_panel, residual_panel]

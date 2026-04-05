@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
 
-from .SpectralPanel import SpectralPanel
+from .SpectralPanel import SpectralPanel, GapMode
 
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
@@ -101,10 +101,15 @@ class SpectrumPanel(SpectralPanel):
         xr = self.xlim
 
         # -- Observed spectrum ------------------------------------------
-        panel_wave, panel_flux, panel_err = self.get_panel_data()
+        # Use gap-aware data when gap_mode is SKIP.
+        panel_wave, panel_flux, panel_err = self.get_panel_data_with_gaps()
         self._plot_observed_spectrum(
             ax, panel_wave, panel_flux, panel_err, deduplicate=True,
         )
+
+        # -- Gap indicators ---------------------------------------------
+        if self.gap_mode is GapMode.SKIP:
+            self.draw_gap_indicators()
 
         # -- Molecule models (slice pre-computed cache) -----------------
         for m_lam, m_flux, m_color, m_label, m_name in self.mol_cache:

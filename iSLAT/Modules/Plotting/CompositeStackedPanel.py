@@ -27,7 +27,7 @@ import numpy as np
 from matplotlib.gridspec import GridSpec
 
 from .StackedSpectralPanel import StackedSpectralPanel, _extract_cell_kwargs
-from .SpectralPanel import SpectralPanel
+from .SpectralPanel import SpectralPanel, GapMode
 
 if TYPE_CHECKING:
     from matplotlib.gridspec import SubplotSpec
@@ -169,6 +169,17 @@ class CompositeStackedPanel(StackedSpectralPanel):
 
         rh = row_height or max(plot_a.row_height, plot_b.row_height)
 
+        # Inherit gap_mode from sources if either uses SKIP.
+        src_gap_mode = GapMode.CONNECT
+        src_gap_threshold = None
+        if plot_a.gap_mode is GapMode.SKIP or plot_b.gap_mode is GapMode.SKIP:
+            src_gap_mode = GapMode.SKIP
+            src_gap_threshold = (
+                plot_a.gap_threshold
+                if plot_a.gap_threshold is not None
+                else plot_b.gap_threshold
+            )
+
         return cls(
             row_plan=row_plan,
             sources=(plot_a, plot_b),
@@ -176,7 +187,29 @@ class CompositeStackedPanel(StackedSpectralPanel):
             row_height=rh,
             figsize=figsize,
             labels=labels,
+            gap_mode=src_gap_mode,
+            gap_threshold=src_gap_threshold,
         )
+
+    # ------------------------------------------------------------------
+    # Gap-skip override — delegate to the source that owns the row
+    # ------------------------------------------------------------------
+    def _cell_has_data(self, xmin: float, xmax: float) -> bool:
+        """Delegate to the real source plot for the row at this position.
+
+        The composite uses dummy panel_edges, so the base-class
+        implementation (which checks ``self.wave_data``) would give
+        wrong results.  Instead we look up the source that owns each
+        row and ask *it* whether the cell has data.
+        """
+        # xmin in the composite is a dummy integer (0, 1, 2, ...).
+        # Map it back to the row_plan entry.
+        row_idx = int(round(xmin))
+        if row_idx < 0 or row_idx >= len(self.row_plan):
+            return True  # Fallback: keep the row
+        owner, cell_idx = self.row_plan[row_idx]
+        edge = owner._panel_edges[cell_idx]
+        return owner._cell_has_data(edge, edge + owner._step)
 
     # ------------------------------------------------------------------
     # _create_cell — delegate to the source plot

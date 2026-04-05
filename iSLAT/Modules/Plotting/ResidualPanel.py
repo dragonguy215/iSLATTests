@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
 
-from .SpectralPanel import SpectralPanel
+from .SpectralPanel import SpectralPanel, GapMode
 
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
@@ -108,6 +108,19 @@ class ResidualPanel(SpectralPanel):
 
         residuals = panel_flux - panel_model
 
+        # When gap_mode is SKIP, filter out NaN residuals so the
+        # scatter / errorbar calls receive only finite values.
+        if self.gap_mode is GapMode.SKIP:
+            finite = np.isfinite(residuals)
+            panel_wave = panel_wave[finite]
+            residuals = residuals[finite]
+            panel_flux = panel_flux[finite]
+            panel_model = panel_model[finite]
+            if panel_err_raw is not None:
+                panel_err_raw = panel_err_raw[finite]
+            if panel_err is not None:
+                panel_err = panel_err[finite]
+
         # -- Residual data points ---------------------------------------
         if panel_err is not None and len(panel_err) == len(residuals):
             ax.errorbar(
@@ -195,6 +208,10 @@ class ResidualPanel(SpectralPanel):
                         alpha=0.12,
                     )
 
+        # -- Gap indicators ---------------------------------------------
+        if self.gap_mode is GapMode.SKIP:
+            self.draw_gap_indicators()
+
     # ------------------------------------------------------------------
     def compute_ylim(self, ymax_factor: float = 0.3) -> Tuple[float, float]:
         """Symmetric y-limits based on the worst-case residual / error.
@@ -209,10 +226,16 @@ class ResidualPanel(SpectralPanel):
         )
         if len(panel_flux) > 0:
             residuals = panel_flux - panel_model
-            res_abs_max = float(np.nanmax(np.abs(residuals)))
+            finite = np.isfinite(residuals)
+            if np.any(finite):
+                res_abs_max = float(np.nanmax(np.abs(residuals[finite])))
+            else:
+                res_abs_max = 0.0
             if panel_err is not None and len(panel_err) > 0:
-                err_max = float(np.nanmax(panel_err))
-                res_abs_max = max(res_abs_max, err_max)
+                finite_err = np.isfinite(panel_err)
+                if np.any(finite_err):
+                    err_max = float(np.nanmax(panel_err[finite_err]))
+                    res_abs_max = max(res_abs_max, err_max)
             res_pad = res_abs_max * 1.3 if res_abs_max > 0 else 0.01
             return (-res_pad, res_pad)
         return (-0.01, 0.01)

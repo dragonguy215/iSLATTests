@@ -46,7 +46,7 @@ from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 from matplotlib.ticker import MaxNLocator
 
 from .BasePlot import BasePlot
-from .SpectralPanel import SpectralPanel
+from .SpectralPanel import SpectralPanel, GapMode
 
 if TYPE_CHECKING:
     from matplotlib.gridspec import SubplotSpec
@@ -111,6 +111,8 @@ class StackedSpectralPanel(BasePlot):
         hspace: float = 0.15,
         row_height: float = 2.0,
         figsize: Optional[Tuple[float, float]] = None,
+        gap_mode: GapMode | str = GapMode.CONNECT,
+        gap_threshold: Optional[float] = None,
         **kwargs,
     ):
         super().__init__(figsize=figsize, **kwargs)
@@ -125,6 +127,12 @@ class StackedSpectralPanel(BasePlot):
         self.uniform_ylim = uniform_ylim
         self.hspace = hspace
         self.row_height = row_height
+
+        # Gap handling
+        if isinstance(gap_mode, str):
+            gap_mode = GapMode(gap_mode)
+        self.gap_mode: GapMode = gap_mode
+        self.gap_threshold: Optional[float] = gap_threshold
 
         # Wavelength range
         if xlim_range is not None:
@@ -238,8 +246,10 @@ class StackedSpectralPanel(BasePlot):
     ) -> Tuple[float, float]:
         """Compute default ``(ymin, ymax)`` from observed flux."""
         if np.any(mask):
-            peak = float(np.nanmax(flux_data[mask]))
-            return (-0.005, peak + peak * ymax_factor)
+            finite = np.isfinite(flux_data[mask])
+            if np.any(finite):
+                peak = float(np.nanmax(flux_data[mask][finite]))
+                return (-0.005, peak + peak * ymax_factor)
         return (-0.005, 0.1)
 
     def _compute_panel_ylims(
@@ -467,6 +477,71 @@ class StackedSpectralPanel(BasePlot):
         self._panel_labels = {}
 
     # ------------------------------------------------------------------
+    # Gap-skip helpers
+    # ------------------------------------------------------------------
+    _GAP_SKIP_TAG = "_islat_gap_skip"
+
+    def _cell_has_data(self, xmin: float, xmax: float) -> bool:
+        """Return *True* if the wavelength window ``[xmin, xmax]``
+        contains at least one finite observed-flux data point."""
+        mask = (self.wave_data >= xmin) & (self.wave_data <= xmax)
+        if not np.any(mask):
+            return False
+        return bool(np.any(np.isfinite(self.flux_data[mask])))
+
+    def _active_panel_edges(
+        self,
+    ) -> Tuple[List[int], np.ndarray]:
+        """Return the indices and edges of cells that have data.
+
+        When :attr:`gap_mode` is not ``SKIP`` this returns all cells.
+
+        Returns
+        -------
+        active_indices : list[int]
+            Indices into :attr:`_panel_edges` that contain data.
+        active_edges : np.ndarray
+            Corresponding edge values.
+        """
+        if self.gap_mode is not GapMode.SKIP:
+            return list(range(len(self._panel_edges))), self._panel_edges
+
+        active_idx: List[int] = []
+        for i, edge in enumerate(self._panel_edges):
+            xmin = edge
+            xmax = edge + self._step
+            if self._cell_has_data(xmin, xmax):
+                active_idx.append(i)
+        return active_idx, self._panel_edges[active_idx] if active_idx else np.array([])
+
+    def _draw_gap_skip_annotation(
+        self,
+        ax_above: Axes,
+        ax_below: Axes,
+        skipped_start: float,
+        skipped_end: float,
+    ) -> None:
+        """Draw a small annotation between two axes indicating that a
+        wavelength region was skipped.
+
+        The annotation is placed at the bottom of *ax_above* in axes
+        coordinates.
+        """
+        fg = self._get_theme_value("foreground", "black")
+        lbl = f"\u2702 {skipped_start:.3f}\u2013{skipped_end:.3f} \u03bcm skipped"
+        txt = ax_above.text(
+            0.5, -0.01, lbl,
+            transform=ax_above.transAxes,
+            fontsize=6,
+            color=fg,
+            alpha=0.55,
+            ha="center",
+            va="top",
+            fontstyle="italic",
+        )
+        setattr(txt, self._GAP_SKIP_TAG, True)
+
+    # ------------------------------------------------------------------
     # Top-level plot generation
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
@@ -476,8 +551,26 @@ class StackedSpectralPanel(BasePlot):
         each child panel's :meth:`~SpectralPanel.generate_plot` is
         invoked, and :meth:`_post_render_cell` is called for per-row
         decoration.
+
+        When :attr:`gap_mode` is :attr:`GapMode.SKIP`, cells whose
+        wavelength range contains no finite observed data are omitted
+        entirely.  A small "skipped" annotation is placed between
+        adjacent rows that span a gap.
         """
-        n = len(self._panel_edges)
+        # Determine which cells to render.
+        active_indices, active_edges = self._active_panel_edges()
+        n_active = len(active_indices)
+        if n_active == 0:
+            # Nothing to draw -- create an empty figure.
+            self._ensure_figure()
+            self.fig.clf()
+            self.panels.clear()
+            return
+
+        # Adjust figsize for the number of *active* rows.
+        if self.gap_mode is GapMode.SKIP:
+            self._figsize = (self._figsize[0], self.row_height * n_active)
+
         self._ensure_figure()
         self.fig.clf()
         self.panels.clear()
@@ -486,7 +579,7 @@ class StackedSpectralPanel(BasePlot):
         self.fig.set_layout_engine(None)
 
         gs = GridSpec(
-            nrows=n,
+            nrows=n_active,
             ncols=1,
             figure=self.fig,
             hspace=self.hspace,
@@ -498,23 +591,52 @@ class StackedSpectralPanel(BasePlot):
 
         fg = self._get_theme_value("foreground", "black")
 
-        for idx, xlim_start in enumerate(self._panel_edges):
-            is_last = idx == n - 1
+        # Map from active row position -> original cell index.
+        prev_bottom_ax: Optional[Axes] = None
+        prev_original_idx: Optional[int] = None
+
+        for row_pos, orig_idx in enumerate(active_indices):
+            is_last = row_pos == n_active - 1
+            xlim_start = self._panel_edges[orig_idx]
             panel_end = xlim_start + self._step
             xmin, xmax = xlim_start, panel_end
 
             # Delegate cell creation to the concrete subclass.
             cell_panels = self._create_cell(
-                idx, xmin, xmax, gs[idx, 0], **kwargs,
+                orig_idx, xmin, xmax, gs[row_pos, 0], **kwargs,
             )
-            self.panels[idx] = cell_panels
+            self.panels[orig_idx] = cell_panels
 
             # Render each sub-panel in the cell.
             for panel in cell_panels:
                 panel.generate_plot(**kwargs)
 
             # Per-row decoration hook.
-            self._post_render_cell(idx, cell_panels, is_last)
+            self._post_render_cell(orig_idx, cell_panels, is_last)
+
+            # --- Gap-skip annotation between non-adjacent rows ---------
+            if (
+                self.gap_mode is GapMode.SKIP
+                and prev_original_idx is not None
+                and orig_idx != prev_original_idx + 1
+                and prev_bottom_ax is not None
+            ):
+                # There were skipped cells between prev and current row.
+                skipped_start = (
+                    self._panel_edges[prev_original_idx]
+                    + self._step
+                )
+                skipped_end = xlim_start
+                self._draw_gap_skip_annotation(
+                    prev_bottom_ax,
+                    cell_panels[0].ax,
+                    skipped_start,
+                    skipped_end,
+                )
+
+            # Track the bottom axes of this cell for annotation.
+            prev_bottom_ax = cell_panels[-1].ax
+            prev_original_idx = orig_idx
 
         # --- Global figure labels --------------------------------------
         self.fig.supylabel(

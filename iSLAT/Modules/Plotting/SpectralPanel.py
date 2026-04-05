@@ -16,13 +16,33 @@ The :class:`StackedSpectralPanel` composer creates and manages many
 """
 
 from abc import abstractmethod
-from typing import Optional, Tuple, Dict, Any, TYPE_CHECKING
+from enum import Enum
+from typing import Optional, Tuple, Dict, Any, List, TYPE_CHECKING
 
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure as MplFigure
 
 from .BasePlot import BasePlot
+
+
+class GapMode(Enum):
+    """Strategy for handling gaps in observed wavelength/flux data.
+
+    Attributes
+    ----------
+    CONNECT : str
+        Default matplotlib behaviour -- all data points are connected
+        by a continuous line, even across large wavelength jumps or
+        NaN regions.
+    SKIP : str
+        Gaps are detected automatically (via NaN flux values or large
+        wavelength jumps) and the line is broken.  A visual indicator
+        (hatched shading) is drawn over each gap region so the viewer
+        can see that data is missing.
+    """
+    CONNECT = "connect"
+    SKIP = "skip"
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -61,6 +81,10 @@ class SpectralPanel(BasePlot):
         Forwarded to :class:`BasePlot`.
     """
 
+    #: Attribute tag used for gap-indicator artists so they can be
+    #: selectively removed with :meth:`BasePlot._clear_tagged_artists`.
+    _GAP_TAG = "_islat_gap_indicator"
+
     def __init__(
         self,
         wave_data: np.ndarray,
@@ -71,6 +95,8 @@ class SpectralPanel(BasePlot):
         molecules: Optional["MoleculeDict"] = None,
         figsize: Optional[Tuple[float, float]] = None,
         ax: Optional[Axes] = None,
+        gap_mode: GapMode | str = GapMode.CONNECT,
+        gap_threshold: Optional[float] = None,
         **kwargs,
     ):
         super().__init__(figsize=figsize or (10, 4), **kwargs)
@@ -84,6 +110,12 @@ class SpectralPanel(BasePlot):
         self.molecules = molecules
         self._external_ax: Optional[Axes] = ax
         self._ax: Optional[Axes] = None
+
+        # Gap handling
+        if isinstance(gap_mode, str):
+            gap_mode = GapMode(gap_mode)
+        self.gap_mode: GapMode = gap_mode
+        self.gap_threshold: Optional[float] = gap_threshold
 
     # ------------------------------------------------------------------
     # Panel range property
@@ -144,9 +176,197 @@ class SpectralPanel(BasePlot):
         """
         mask = self.get_panel_mask()
         if np.any(mask):
-            peak = float(np.nanmax(self.flux_data[mask]))
-            return (-0.005, peak + peak * ymax_factor)
+            finite = np.isfinite(self.flux_data[mask])
+            if np.any(finite):
+                peak = float(np.nanmax(self.flux_data[mask][finite]))
+                return (-0.005, peak + peak * ymax_factor)
         return (-0.005, 0.1)
+
+    # ------------------------------------------------------------------
+    # Gap detection and handling
+    # ------------------------------------------------------------------
+    def detect_gaps(
+        self,
+        wave: Optional[np.ndarray] = None,
+        flux: Optional[np.ndarray] = None,
+        threshold: Optional[float] = None,
+    ) -> List[Tuple[float, float]]:
+        """Detect gaps in the wavelength/flux data.
+
+        A gap is defined as:
+        * A run of NaN values in the flux array, or
+        * A wavelength step larger than *threshold* times the median
+          step size.
+
+        Parameters
+        ----------
+        wave, flux : np.ndarray, optional
+            Arrays to scan.  Defaults to the panel-masked data.
+        threshold : float, optional
+            Multiplier on the median step for detecting jumps.
+            Defaults to :attr:`gap_threshold`, or ``3.0`` when that is
+            *None*.
+
+        Returns
+        -------
+        list[tuple[float, float]]
+            ``(gap_start_wave, gap_end_wave)`` for every detected gap.
+        """
+        if wave is None or flux is None:
+            mask = self.get_panel_mask()
+            wave = self.wave_data[mask]
+            flux = self.flux_data[mask]
+        if len(wave) < 2:
+            return []
+
+        if threshold is None:
+            threshold = self.gap_threshold if self.gap_threshold is not None else 3.0
+
+        gaps: List[Tuple[float, float]] = []
+
+        # 1. NaN runs
+        is_nan = np.isnan(flux)
+        if np.any(is_nan):
+            # Find contiguous NaN blocks
+            diff = np.diff(is_nan.astype(int))
+            starts = np.where(diff == 1)[0] + 1   # index of first NaN
+            ends = np.where(diff == -1)[0] + 1     # index after last NaN
+            # Handle leading / trailing NaN
+            if is_nan[0]:
+                starts = np.concatenate(([0], starts))
+            if is_nan[-1]:
+                ends = np.concatenate((ends, [len(is_nan)]))
+            for s, e in zip(starts, ends):
+                w0 = float(wave[max(s - 1, 0)])
+                w1 = float(wave[min(e, len(wave) - 1)])
+                gaps.append((w0, w1))
+
+        # 2. Large wavelength jumps
+        dw = np.diff(wave)
+        median_dw = float(np.nanmedian(dw)) if len(dw) > 0 else 0.0
+        if median_dw > 0:
+            big = np.where(dw > threshold * median_dw)[0]
+            for idx in big:
+                g_start = float(wave[idx])
+                g_end = float(wave[idx + 1])
+                # Avoid duplicating a gap already captured by NaN scan
+                if not any(
+                    (gs <= g_start <= ge) or (gs <= g_end <= ge)
+                    for gs, ge in gaps
+                ):
+                    gaps.append((g_start, g_end))
+
+        # Sort by start wavelength
+        gaps.sort(key=lambda g: g[0])
+        return gaps
+
+    def get_panel_data_with_gaps(
+        self,
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+        """Like :meth:`get_panel_data` but inserts NaN breaks at gaps.
+
+        When :attr:`gap_mode` is :attr:`GapMode.SKIP`, each detected
+        gap is replaced by a ``NaN`` sentinel so matplotlib draws a
+        broken line.  Otherwise this is identical to
+        :meth:`get_panel_data`.
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray, np.ndarray | None]
+        """
+        wave, flux, err = self.get_panel_data()
+        if self.gap_mode is not GapMode.SKIP or len(wave) < 2:
+            return wave, flux, err
+
+        gaps = self.detect_gaps(wave, flux)
+        if not gaps:
+            return wave, flux, err
+
+        # Insert NaN break-points at each gap boundary
+        new_wave = list(wave)
+        new_flux = list(flux)
+        new_err = list(err) if err is not None else None
+        offset = 0
+        for g_start, g_end in gaps:
+            # Find insertion point: the first index where wave > g_start
+            idx = np.searchsorted(wave, g_start, side="right")
+            ins = idx + offset
+            mid = (g_start + g_end) / 2.0
+            new_wave.insert(ins, mid)
+            new_flux.insert(ins, np.nan)
+            if new_err is not None:
+                new_err.insert(ins, np.nan)
+            offset += 1
+
+        result_wave = np.array(new_wave)
+        result_flux = np.array(new_flux)
+        result_err = np.array(new_err) if new_err is not None else None
+        return result_wave, result_flux, result_err
+
+    def panel_has_data(self) -> bool:
+        """Return *True* if this panel has any finite observed flux.
+
+        Useful for :class:`StackedSpectralPanel` to decide whether to
+        skip an empty cell when ``gap_mode`` is ``SKIP``.
+        """
+        mask = self.get_panel_mask()
+        if not np.any(mask):
+            return False
+        return bool(np.any(np.isfinite(self.flux_data[mask])))
+
+    def draw_gap_indicators(
+        self,
+        gaps: Optional[List[Tuple[float, float]]] = None,
+    ) -> None:
+        """Draw hatched shading on the axes for each gap region.
+
+        Artists are tagged with :attr:`_GAP_TAG` so they can be removed
+        later with :meth:`remove_gap_indicators`.
+
+        Parameters
+        ----------
+        gaps : list[tuple[float, float]], optional
+            Explicit gap list.  Defaults to :meth:`detect_gaps`.
+        """
+        ax = self.ax
+        if ax is None:
+            return
+        if gaps is None:
+            gaps = self.detect_gaps()
+        if not gaps:
+            return
+
+        xr = self.xlim
+        for g_start, g_end in gaps:
+            if g_end < xr[0] or g_start > xr[1]:
+                continue
+            # Clamp to panel range
+            lo = max(g_start, xr[0])
+            hi = min(g_end, xr[1])
+            span = ax.axvspan(
+                lo, hi,
+                facecolor="gray",
+                alpha=0.12,
+                hatch="//",
+                edgecolor="gray",
+                linewidth=0.0,
+                zorder=0,
+            )
+            setattr(span, self._GAP_TAG, True)
+
+    def remove_gap_indicators(self) -> None:
+        """Remove previously drawn gap-indicator artists."""
+        ax = self.ax
+        if ax is None:
+            return
+        # axvspan creates Polygon patches, so check both patches and
+        # collections (different matplotlib versions may vary).
+        self._clear_tagged_artists(
+            ax, self._GAP_TAG, lines=False, collections=True, texts=False,
+        )
+        for artist in ax.patches[:]:
+            if hasattr(artist, self._GAP_TAG):
+                artist.remove()
 
     # ------------------------------------------------------------------
     # Post-render annotation helpers
