@@ -295,13 +295,6 @@ class FullSpectrumPlot(StackedSpectralPanel):
         if ylims is not None and idx < len(ylims):
             cell_panels[0].ax.set_ylim(*ylims[idx])
 
-        # --- Draw annotations AFTER y-limits are finalised -------------
-        for panel in cell_panels:
-            if hasattr(panel, "atomic_lines") and panel.atomic_lines is not None and len(panel.atomic_lines) > 0:
-                panel.plot_atomic_lines(panel.atomic_lines)
-            if hasattr(panel, "line_list") and panel.line_list is not None and len(panel.line_list) > 0:
-                panel.plot_saved_lines(panel.line_list)
-
         ax = cell_panels[0].ax
         ax.tick_params(axis="x", labelsize=7)
         ax.tick_params(axis="y", labelsize=7)
@@ -309,10 +302,19 @@ class FullSpectrumPlot(StackedSpectralPanel):
         if is_last:
             ax.set_xlabel("Wavelength (\u03bcm)", color=fg)
 
-        # --- Gap indicators (drawn after y-limits are finalised) -------
+        # --- Gap indicators (BEFORE annotations so that xlim tightening
+        #     is not undone by annotation artists outside the visible range)
         if self.gap_mode is GapMode.SKIP:
             for panel in cell_panels:
                 panel.draw_gap_indicators()
+
+        # --- Draw annotations AFTER gap indicators (use the tightened
+        #     xlim so annotations are clipped to the visible range) ------
+        for panel in cell_panels:
+            if hasattr(panel, "atomic_lines") and panel.atomic_lines is not None and len(panel.atomic_lines) > 0:
+                panel.plot_atomic_lines(panel.atomic_lines)
+            if hasattr(panel, "line_list") and panel.line_list is not None and len(panel.line_list) > 0:
+                panel.plot_saved_lines(panel.line_list)
 
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:

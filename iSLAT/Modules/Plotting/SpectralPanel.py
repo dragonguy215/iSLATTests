@@ -536,13 +536,15 @@ class SpectralPanel(BasePlot):
     ) -> None:
         """Draw atomic-line markers on the panel's axes.
 
-        Uses the panel's current y-limits for correct label placement.
-        Safe to call after :meth:`generate_plot`.
+        Uses the current *visible* x-range (which may have been
+        tightened by :meth:`draw_gap_indicators`) so that markers
+        are not placed in cropped gap regions.
         """
         ax = self.ax
         if ax is None:
             return
-        self._plot_atomic_lines(ax, atomic_df, xr=self.xlim, tag=tag)
+        xr = tuple(ax.get_xlim())
+        self._plot_atomic_lines(ax, atomic_df, xr=xr, tag=tag)
 
     def remove_atomic_lines(
         self,
@@ -563,15 +565,17 @@ class SpectralPanel(BasePlot):
     ) -> None:
         """Draw saved-line annotations on the panel's axes.
 
-        Uses the panel's current y-limits for correct label placement.
-        Safe to call after :meth:`generate_plot`.
+        Uses the current *visible* x-range (which may have been
+        tightened by :meth:`draw_gap_indicators`) so that markers
+        are not placed in cropped gap regions.
         """
         ax = self.ax
         if ax is None:
             return
+        xr = tuple(ax.get_xlim())
         ymin, ymax = ax.get_ylim()
         self._plot_line_annotations(
-            ax, line_data, self.xlim, ymin, ymax, tag=tag,
+            ax, line_data, xr, ymin, ymax, tag=tag,
         )
 
     def remove_saved_lines(

@@ -194,12 +194,17 @@ class StackedSpectralPanel(BasePlot):
             # Equal-wavelength-width mode (original behaviour).
             if step is not None:
                 self._step = step
+                edges = np.arange(start, end, self._step)
+                self._panel_edges = edges
+                self._panel_ends = np.append(edges[1:], end)
             else:
-                self._step = (end - start) / max(self.n_panels, 1)
-
-            edges = np.arange(start, end, self._step)
-            self._panel_edges = edges
-            self._panel_ends = np.append(edges[1:], end)
+                # Use linspace to guarantee exactly n_panels panels
+                # (np.arange may produce off-by-one due to float rounding).
+                n = max(self.n_panels, 1)
+                boundaries = np.linspace(start, end, n + 1)
+                self._step = float(boundaries[1] - boundaries[0])
+                self._panel_edges = boundaries[:-1]
+                self._panel_ends = boundaries[1:]
 
     def _density_edges(
         self,

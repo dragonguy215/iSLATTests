@@ -508,7 +508,19 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
         if res_ylims is not None and idx < len(res_ylims):
             ax_res.set_ylim(*res_ylims[idx])
 
-        # --- Draw annotations AFTER y-limits are finalised -------------
+        # --- Gap indicators (BEFORE annotations and shading so that
+        #     xlim tightening is not undone by artists drawn in gap regions)
+        if self.gap_mode is GapMode.SKIP:
+            shared_gaps = spectrum_panel.detect_gaps()
+            for panel in cell_panels:
+                panel.draw_gap_indicators(gaps=shared_gaps)
+
+        # Re-read the (potentially tightened) x-limits for subsequent
+        # annotation and shading operations.
+        xr = tuple(ax_spec.get_xlim())
+
+        # --- Draw annotations AFTER gap indicators (use the tightened
+        #     xlim so annotations are clipped to the visible range) ------
         for panel in cell_panels:
             if hasattr(panel, "atomic_lines") and panel.atomic_lines is not None and len(panel.atomic_lines) > 0:
                 panel.plot_atomic_lines(panel.atomic_lines)
@@ -592,14 +604,6 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
                         color="lightsalmon",
                         alpha=0.12,
                     )
-
-        # --- Gap indicators (drawn after y-limits are finalised) -------
-        # Detect gaps once from the spectrum panel and share the list
-        # so that both sub-panels apply identical x-limit tightening.
-        if self.gap_mode is GapMode.SKIP:
-            shared_gaps = spectrum_panel.detect_gaps()
-            for panel in cell_panels:
-                panel.draw_gap_indicators(gaps=shared_gaps)
 
         # --- Per-panel chi-squared -------------------------------------
         _has_nuisance = self._has_continuum or self._has_noise_floor
