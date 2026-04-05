@@ -209,8 +209,9 @@ class ResidualPanel(SpectralPanel):
                     )
 
         # -- Gap indicators ---------------------------------------------
-        if self.gap_mode is GapMode.SKIP:
-            self.draw_gap_indicators()
+        # NOTE: Gap indicators are drawn later by _post_render_cell()
+        # after y-limits are finalised, so that the break-mark lines
+        # and text annotations are positioned correctly.
 
     # ------------------------------------------------------------------
     def compute_ylim(self, ymax_factor: float = 0.3) -> Tuple[float, float]:

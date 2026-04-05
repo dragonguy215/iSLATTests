@@ -318,6 +318,11 @@ class StackedSpectralPanel(BasePlot):
             else:
                 ax.tick_params(axis="x", labelbottom=is_bottom_ax)
 
+        # --- Gap indicators (drawn after y-limits are finalised) -------
+        if self.gap_mode is GapMode.SKIP:
+            for panel in cell_panels:
+                panel.draw_gap_indicators()
+
     # ------------------------------------------------------------------
     # y-limit computation
     # ------------------------------------------------------------------

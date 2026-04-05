@@ -107,9 +107,9 @@ class SpectrumPanel(SpectralPanel):
             ax, panel_wave, panel_flux, panel_err, deduplicate=True,
         )
 
-        # -- Gap indicators ---------------------------------------------
-        if self.gap_mode is GapMode.SKIP:
-            self.draw_gap_indicators()
+        # NOTE: Gap indicators are drawn later by _post_render_cell()
+        # after y-limits are finalised, so that the break-mark lines
+        # and text annotations are positioned correctly.
 
         # -- Molecule models (slice pre-computed cache) -----------------
         for m_lam, m_flux, m_color, m_label, m_name in self.mol_cache:

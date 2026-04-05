@@ -277,7 +277,14 @@ class SpectralPanel(BasePlot):
         dw = np.diff(wave)
         median_dw = float(np.nanmedian(dw)) if len(dw) > 0 else 0.0
         if median_dw > 0:
-            big = np.where(dw > threshold * median_dw)[0]
+            # The step-based threshold must be at least 5 % of the
+            # total data span so that small irregular spacing in an
+            # otherwise continuous spectrum isn't misidentified as a gap.
+            data_span = float(wave[-1] - wave[0])
+            min_gap_width = 0.05 * data_span
+            step_gap_width = threshold * median_dw
+            effective_gap_width = max(step_gap_width, min_gap_width)
+            big = np.where(dw > effective_gap_width)[0]
             for idx in big:
                 g_start = float(wave[idx])
                 g_end = float(wave[idx + 1])
@@ -350,7 +357,12 @@ class SpectralPanel(BasePlot):
         self,
         gaps: Optional[List[Tuple[float, float]]] = None,
     ) -> None:
-        """Draw hatched shading on the axes for each gap region.
+        """Draw visual break indicators for each gap in the data.
+
+        Each gap region is blanked out with a background-coloured
+        rectangle, diagonal break lines are drawn at both edges, and a
+        text annotation is placed in the centre showing the skipped
+        wavelength range.
 
         Artists are tagged with :attr:`_GAP_TAG` so they can be removed
         later with :meth:`remove_gap_indicators`.
@@ -369,32 +381,78 @@ class SpectralPanel(BasePlot):
             return
 
         xr = self.xlim
+        bg = self._get_theme_value("background", "white")
+        fg = self._get_theme_value("foreground", "black")
+
         for g_start, g_end in gaps:
             if g_end < xr[0] or g_start > xr[1]:
                 continue
             # Clamp to panel range
             lo = max(g_start, xr[0])
             hi = min(g_end, xr[1])
+
+            # 1. White-out the gap region so no data/grid shows through
             span = ax.axvspan(
                 lo, hi,
-                facecolor="gray",
-                alpha=0.12,
-                hatch="//",
-                edgecolor="gray",
+                facecolor=bg,
+                alpha=1.0,
+                edgecolor="none",
                 linewidth=0.0,
-                zorder=0,
+                zorder=90,
             )
             setattr(span, self._GAP_TAG, True)
+
+            # 2. Draw diagonal break marks at each edge of the gap
+            ylo, yhi = ax.get_ylim()
+            y_range = yhi - ylo
+            break_width = (hi - lo) * 0.08  # small fraction of the gap
+            d = y_range * 0.04  # height of the diagonal jog
+
+            for edge in (lo, hi):
+                bw = break_width if edge == lo else -break_width
+                line, = ax.plot(
+                    [edge - bw, edge + bw],
+                    [ylo - d, yhi + d],
+                    color="gray",
+                    linewidth=1.2,
+                    alpha=0.7,
+                    zorder=91,
+                    clip_on=False,
+                )
+                setattr(line, self._GAP_TAG, True)
+
+            # 3. Text annotation showing the skipped range
+            mid_x = (lo + hi) / 2.0
+            mid_y = (ylo + yhi) / 2.0
+            lbl = f"\u2702 {g_start:.3f}\u2013{g_end:.3f} \u03bcm"
+            txt = ax.text(
+                mid_x, mid_y, lbl,
+                fontsize=5.5,
+                color=fg,
+                alpha=0.55,
+                ha="center",
+                va="center",
+                fontstyle="italic",
+                rotation=90,
+                zorder=92,
+                bbox=dict(
+                    boxstyle="round,pad=0.15",
+                    facecolor=bg,
+                    edgecolor="none",
+                    alpha=0.8,
+                ),
+            )
+            setattr(txt, self._GAP_TAG, True)
 
     def remove_gap_indicators(self) -> None:
         """Remove previously drawn gap-indicator artists."""
         ax = self.ax
         if ax is None:
             return
-        # axvspan creates Polygon patches, so check both patches and
-        # collections (different matplotlib versions may vary).
+        # The gap indicators include patches (axvspan), lines (break
+        # marks), and texts (wavelength annotations).
         self._clear_tagged_artists(
-            ax, self._GAP_TAG, lines=False, collections=True, texts=False,
+            ax, self._GAP_TAG, lines=True, collections=True, texts=True,
         )
         for artist in ax.patches[:]:
             if hasattr(artist, self._GAP_TAG):

@@ -26,7 +26,7 @@ from matplotlib.ticker import MaxNLocator
 from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 
 from .FullSpectrumPlot import FullSpectrumPlot
-from .SpectralPanel import SpectralPanel
+from .SpectralPanel import SpectralPanel, GapMode
 from .SpectrumPanel import SpectrumPanel
 from .ResidualPanel import ResidualPanel
 from .BasePlot import BasePlot
@@ -592,6 +592,11 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
                         color="lightsalmon",
                         alpha=0.12,
                     )
+
+        # --- Gap indicators (drawn after y-limits are finalised) -------
+        if self.gap_mode is GapMode.SKIP:
+            for panel in cell_panels:
+                panel.draw_gap_indicators()
 
         # --- Per-panel chi-squared -------------------------------------
         _has_nuisance = self._has_continuum or self._has_noise_floor

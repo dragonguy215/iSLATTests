@@ -24,7 +24,7 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
 from .StackedSpectralPanel import StackedSpectralPanel
-from .SpectralPanel import SpectralPanel
+from .SpectralPanel import SpectralPanel, GapMode
 from .SpectrumPanel import SpectrumPanel
 from .BasePlot import BasePlot
 
@@ -308,6 +308,11 @@ class FullSpectrumPlot(StackedSpectralPanel):
         ax.xaxis.set_major_locator(MaxNLocator(nbins=6, prune="both"))
         if is_last:
             ax.set_xlabel("Wavelength (\u03bcm)", color=fg)
+
+        # --- Gap indicators (drawn after y-limits are finalised) -------
+        if self.gap_mode is GapMode.SKIP:
+            for panel in cell_panels:
+                panel.draw_gap_indicators()
 
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
