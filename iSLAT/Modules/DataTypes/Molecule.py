@@ -11,8 +11,6 @@ from iSLAT.Modules.Debug.DebugConfig import debug_config
 # ================================
 # Spectral Resampling Functions (canonical home: DataProcessing.spectral_utils)
 # ================================
-# Spectral Resampling Functions (canonical home: DataProcessing.spectral_utils)
-# ================================
 # Deferred import to avoid circular dependency:
 #   Molecule -> DataProcessing.__init__ -> Slabfit -> Molecule
 _spectral_utils_cache = None
