@@ -82,6 +82,7 @@ class iSLATPlot:
             "saved_lines":  False,
             "summed":       True,
             "legend":       True,
+            "show_residuals": False,
             "current_selection": None,   # (xmin, xmax) or None
         }
 
@@ -184,6 +185,14 @@ class iSLATPlot:
     @legend_toggle.setter
     def legend_toggle(self, value: bool) -> None:
         self.toggle_state["legend"] = value
+
+    @property
+    def residual_toggle(self) -> bool:
+        return self.toggle_state["show_residuals"]
+
+    @residual_toggle.setter
+    def residual_toggle(self, value: bool) -> None:
+        self.toggle_state["show_residuals"] = value
 
     def initialize_data(self):
         """
@@ -1360,6 +1369,27 @@ class iSLATPlot:
         """Toggle visibility of the summed spectral flux."""
         self.summed_toggle = not self.summed_toggle
         self.active_view.toggle_summed_spectrum(self.summed_toggle)
+
+    def toggle_residuals(self) -> None:
+        """Toggle residual sub-panels in the full-spectrum view.
+
+        When activated while the full-spectrum view is showing, the view
+        switches from :class:`FullSpectrumPlot` to
+        :class:`ResidualSpectrumPlot` (and vice-versa) by rebuilding
+        the composed plot.
+
+        If the three-panel view is active the flag is stored but no
+        visual change occurs until the user enters full-spectrum mode.
+        """
+        self.residual_toggle = not self.residual_toggle
+        debug_config.info(
+            "main_plot",
+            f"toggle_residuals: show_residuals = {self.residual_toggle}",
+        )
+
+        # Only trigger a rebuild when the full-spectrum view is active
+        if self.is_full_spectrum:
+            self._full_spectrum_view.toggle_residuals(self.residual_toggle)
 
     def toggle_full_spectrum(self):
         """Toggle between the regular three-panel view and the full spectrum view."""

@@ -36,6 +36,7 @@ from matplotlib.widgets import SpanSelector
 from .PlotView import PlotView
 from .StackedSpectralPanel import StackedSpectralPanel
 from .FullSpectrumPlot import FullSpectrumPlot
+from .ResidualSpectrumPlot import ResidualSpectrumPlot
 from .BasePlot import BasePlot
 
 if TYPE_CHECKING:
@@ -186,9 +187,12 @@ class FullSpectrumView(PlotView):
     def _create_plot(self) -> StackedSpectralPanel:
         """Build a fresh stacked-panel plot from the current iSLAT state.
 
+        When ``show_residuals`` is active in the toggle state a
+        :class:`ResidualSpectrumPlot` (spectrum + residual sub-panels)
+        is returned; otherwise a plain :class:`FullSpectrumPlot`.
+
         Subclasses can override this to return a different
-        :class:`StackedSpectralPanel` implementation (e.g. a
-        :class:`ResidualSpectrumPlot`).
+        :class:`StackedSpectralPanel` implementation.
         """
         wave, flux, wave_obs = self._load_spectrum_data()
         self.line_data = self._load_line_data()
@@ -203,18 +207,70 @@ class FullSpectrumView(PlotView):
         # approach used by FullSpectrumWindow._create_plot().
         figsize = self._compute_interactive_figsize(wave)
 
-        # The composed plot handles all rendering via BasePlot helpers.
-        # We do NOT pass line_list / atomic_lines here -- those are applied
-        # dynamically by sync_toggle_state() so they can be toggled.
-        plot = FullSpectrumPlot(
-            wave_data=wave,
-            flux_data=flux,
-            molecules=self._islat.molecules_dict,
-            wave_data_obs=wave_obs,
-            figsize=figsize,
-            theme=self._pm.theme,
-        )
+        show_residuals = self._pm.toggle_state.get("show_residuals", False)
+
+        if show_residuals:
+            model_flux = self._compute_model_flux(wave_obs, wave)
+            error_data = getattr(self._islat, "err_data", None)
+            plot = ResidualSpectrumPlot(
+                wave_data=wave,
+                flux_data=flux,
+                model_flux=model_flux,
+                error_data=error_data,
+                molecules=self._islat.molecules_dict,
+                wave_data_obs=wave_obs,
+                figsize=figsize,
+                theme=self._pm.theme,
+            )
+        else:
+            # The composed plot handles all rendering via BasePlot helpers.
+            # We do NOT pass line_list / atomic_lines here -- those are applied
+            # dynamically by sync_toggle_state() so they can be toggled.
+            plot = FullSpectrumPlot(
+                wave_data=wave,
+                flux_data=flux,
+                molecules=self._islat.molecules_dict,
+                wave_data_obs=wave_obs,
+                figsize=figsize,
+                theme=self._pm.theme,
+            )
         return plot
+
+    # ------------------------------------------------------------------
+    # Model-flux helpers
+    # ------------------------------------------------------------------
+    def _compute_model_flux(
+        self,
+        wave_obs: np.ndarray,
+        wave_rest: np.ndarray,
+    ) -> np.ndarray:
+        """Return the summed model flux on the rest-frame wavelength grid.
+
+        The model is constructed from the visible molecules via
+        :meth:`MoleculeDict.get_summed_flux`.  The result is mapped
+        onto *wave_rest* so it is pixel-aligned with the observed data
+        arrays that are passed to :class:`ResidualSpectrumPlot`.
+        """
+        try:
+            mol_wave, mol_flux = self._islat.molecules_dict.get_summed_flux(
+                wave_obs, visible_only=False,
+            )
+        except Exception as exc:
+            debug_config.warning(
+                "full_spectrum_view",
+                f"Could not compute model flux for residuals: {exc}",
+            )
+            return np.zeros_like(wave_rest)
+
+        if len(mol_flux) == 0:
+            return np.zeros_like(wave_rest)
+
+        # The returned wavelengths are in the rest frame.  If the grids
+        # match we can use them directly; otherwise interpolate.
+        if mol_wave.shape == wave_rest.shape and np.allclose(mol_wave, wave_rest, atol=1e-10):
+            return mol_flux
+
+        return np.interp(wave_rest, mol_wave, mol_flux, left=0.0, right=0.0)
 
     def _compute_interactive_figsize(
         self, wave: np.ndarray
@@ -255,6 +311,10 @@ class FullSpectrumView(PlotView):
         fast in-place updates, existing axes are updated via
         ``update_panels_inplace()`` for a significant speed-up (avoids
         ``fig.clf()`` and re-creating all subplot objects).
+
+        When the plot type needs to change (e.g. the ``show_residuals``
+        toggle was flipped while the view was inactive), the plot is
+        rebuilt from scratch via :meth:`_create_plot`.
         """
         wave, flux, wave_obs = self._load_spectrum_data()
         self.line_data = self._load_line_data()
@@ -264,6 +324,26 @@ class FullSpectrumView(PlotView):
             self._plot.generate_plot()
             self._install_span_selectors()
             return
+
+        # Detect a plot-type mismatch (e.g. FSP is active but
+        # show_residuals is now True).  Force a full rebuild.
+        show_residuals = self._pm.toggle_state.get("show_residuals", False)
+        type_mismatch = (
+            (show_residuals and not isinstance(self._plot, ResidualSpectrumPlot))
+            or (not show_residuals and isinstance(self._plot, ResidualSpectrumPlot))
+        )
+        if type_mismatch:
+            self.span_selectors.clear()
+            self._plot = self._create_plot()
+            self._plot.generate_plot()
+            self._install_span_selectors()
+            return
+
+        # If the active plot is an RSP, keep its model_flux in sync.
+        if isinstance(self._plot, ResidualSpectrumPlot):
+            model_flux = self._compute_model_flux(wave_obs, wave)
+            self._plot.model_flux = model_flux
+            self._plot._model_flux_adj = model_flux
 
         # Try the fast-path: update_data + update_panels_inplace
         updater = getattr(self._plot, "update_data", None)
@@ -283,12 +363,21 @@ class FullSpectrumView(PlotView):
             self._plot.generate_plot()
             self._install_span_selectors()
         else:
-            # Layout unchanged -- fast in-place update of existing axes
-            inplace = getattr(self._plot, "update_panels_inplace", None)
-            if inplace is not None:
-                inplace()
-            else:
+            # Layout unchanged -- fast in-place update of existing axes.
+            # The inherited update_panels_inplace() from FullSpectrumPlot
+            # assumes plain Axes objects; ResidualSpectrumPlot stores
+            # tuple cells so we must skip the fast-path until RSP
+            # provides its own override.
+            if isinstance(self._plot, ResidualSpectrumPlot):
+                self.span_selectors.clear()
                 self._plot.generate_plot()
+                self._install_span_selectors()
+            else:
+                inplace = getattr(self._plot, "update_panels_inplace", None)
+                if inplace is not None:
+                    inplace()
+                else:
+                    self._plot.generate_plot()
 
     # ==================================================================
     # Span selector (interactive-only feature)
@@ -643,6 +732,40 @@ class FullSpectrumView(PlotView):
             self._add_atomic_line_artists()
         else:
             self._remove_atomic_line_artists()
+        self.draw()
+
+    def toggle_residuals(self, show: bool) -> None:
+        """Switch between :class:`FullSpectrumPlot` and :class:`ResidualSpectrumPlot`.
+
+        Triggers a full plot rebuild because the axes layout changes
+        (RSP has paired spectrum + residual sub-panels).  The canvas is
+        destroyed and re-created so the Tk widget reflects the new
+        figure dimensions.
+        """
+        if not self._initialised:
+            return
+
+        # Force a full teardown so the new figure replaces the old one
+        old_fig = self.fig
+        self.span_selectors.clear()
+        self._plot = self._create_plot()
+        self._plot.generate_plot()
+        self._install_span_selectors()
+
+        # If the figure object changed (it will), rebuild the canvas
+        if self.fig is not old_fig:
+            if self._canvas is not None:
+                self._canvas.get_tk_widget().pack_forget()
+                self._canvas.get_tk_widget().destroy()
+                self._canvas = None
+            self._ensure_canvas()
+            if self._canvas is not None and self._parent_frame is not None:
+                self._canvas.get_tk_widget().pack(
+                    fill="both", expand=True, padx=0, pady=0,
+                )
+
+        # Re-apply overlays
+        self.sync_toggle_state(self._pm.toggle_state)
         self.draw()
 
     # ==================================================================

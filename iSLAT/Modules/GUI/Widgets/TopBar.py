@@ -125,11 +125,13 @@ class TopBar(ResizableFrame):
         toggle_legend_tip = "Turn legend on/off\nKeybind: L"
         toggle_full_spectrum_tip = "Toggle full spectrum view on/off\nKeybind: F\n\nOpen in new window: Ctrl+F"
         toggle_summed_tip = "Toggle summed model flux on/off\n(gray fill in plot)\nKeybind: M"
+        toggle_residuals_tip = "Toggle residual sub-panels on/off\nin full spectrum mode\nKeybind: R"
         create_button(self.button_frame, self.theme, "Toggle Saved Lines", self.toggle_saved_lines, 0, 3, tip_text=saved_lines_tip)
         create_button(self.button_frame, self.theme, "Toggle Atomic Lines", self.toggle_atomic_lines, 0, 4, tip_text=atomic_lines_tip)
         create_button(self.button_frame, self.theme, "Toggle Full Spectrum", self.toggle_full_spectrum, 0, 5, tip_text=toggle_full_spectrum_tip)
         create_button(self.button_frame, self.theme, "Toggle Total Model", self.toggle_summed_spectrum, 0, 6, tip_text=toggle_summed_tip)
         create_button(self.button_frame, self.theme, "Toggle Legend", self.main_plot.toggle_legend, 0, 7, tip_text=toggle_legend_tip)
+        create_button(self.button_frame, self.theme, "Toggle Residuals", self.toggle_residuals, 0, 8, tip_text=toggle_residuals_tip)
 
     def save_line(self, save_type="selected"):
         """Save the currently selected line to the line saves file."""
@@ -720,6 +722,19 @@ class TopBar(ResizableFrame):
             self.main_plot.toggle_full_spectrum()
         except Exception as e:
             self.data_field.insert_text(f"Error toggling full spectrum: {e}\n")
+            traceback.print_exc()
+
+    def toggle_residuals(self):
+        """Toggle residual sub-panels in the full spectrum view.
+
+        If the user is not currently in full-spectrum mode the toggle is
+        stored and will take effect the next time the full-spectrum view
+        is activated.
+        """
+        try:
+            self.main_plot.toggle_residuals()
+        except Exception as e:
+            self.data_field.insert_text(f"Error toggling residuals: {e}\n")
             traceback.print_exc()
 
     def hitran_query(self):

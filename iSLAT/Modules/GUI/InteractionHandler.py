@@ -513,6 +513,11 @@ class InteractionHandler:
                 self._toggle_active_molecule_visibility()
             return 'break'
 
+        # Handle 'r' key for toggling residual sub-panels
+        elif keysym == 'r':
+            self._toggle_residuals()
+            return 'break'
+
     def _cycle_spectrum_previous(self):
         """Switch to the previous spectrum in the sample list."""
         if hasattr(self.islat, 'sample_spectra') and self.islat.sample_spectra:
@@ -600,6 +605,11 @@ class InteractionHandler:
         """Toggle summed spectrum visibility on the main plot"""
         if hasattr(self.plot_manager, 'toggle_summed_spectrum'):
             self.plot_manager.toggle_summed_spectrum()
+
+    def _toggle_residuals(self):
+        """Toggle residual sub-panels in the full spectrum view."""
+        if hasattr(self.plot_manager, 'toggle_residuals'):
+            self.plot_manager.toggle_residuals()
     
     def _toggle_atomic_lines(self):
         """Toggle atomic lines visibility"""
