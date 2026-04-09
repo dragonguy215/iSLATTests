@@ -471,15 +471,18 @@ class InteractionHandler:
                 self._toggle_saved_lines()
             return 'break'
         
-        # Handle Ctrl+L for load parameters, plain 'l' for toggle legend
+        # Handle Ctrl+Shift+L for load parameters from file, Ctrl+L for load parameters, plain 'l' for toggle legend
         elif keysym == 'l':
             ctrl_pressed = False
+            shift_pressed = bool(event.state & 0x1)
             if platform.system() == "Darwin":
                 ctrl_pressed = bool(event.state & 0x8) or bool(event.state & 0x4)
             else:
                 ctrl_pressed = bool(event.state & 0x4)
             
-            if ctrl_pressed:
+            if ctrl_pressed and shift_pressed:
+                self._load_parameters_from_file()
+            elif ctrl_pressed:
                 self._load_parameters()
             else:
                 self._toggle_legend()
@@ -703,6 +706,12 @@ class InteractionHandler:
         if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'top_bar'):
             if hasattr(self.islat.GUI.top_bar, 'load_parameters'):
                 self.islat.GUI.top_bar.load_parameters()
+    
+    def _load_parameters_from_file(self):
+        """Load parameters from a user-selected file in the SAVES folder"""
+        if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'top_bar'):
+            if hasattr(self.islat.GUI.top_bar, 'load_parameters_from_file'):
+                self.islat.GUI.top_bar.load_parameters_from_file()
     
     # Callback management
     def add_selection_callback(self, name: str, callback: Callable):

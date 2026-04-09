@@ -15,8 +15,9 @@ from iSLAT.Modules.GUI.PlotGridWindow import PlotGridWindow
 from iSLAT.Modules.GUI.FullSpectrumWindow import FullSpectrumWindow
 from iSLAT.Modules.FileHandling.iSLATFileHandling import (
     write_molecules_to_csv, generate_csv, line_saves_file_path,
-    line_saves_file_name, example_data_folder_path
+    line_saves_file_name, example_data_folder_path, read_from_user_csv
 )
+from iSLAT.Modules.FileHandling import save_folder_path
 from iSLAT.Modules.Plotting.FullSpectrumView import output_full_spectrum
 from iSLAT.Modules.DataProcessing.Slabfit import SlabFit as SlabModel
 from iSLAT.Modules.DataProcessing.BatchFittingService import BatchFittingService
@@ -95,6 +96,7 @@ class TopBar(ResizableFrame):
         )
         spectrum_menu.add_command(label="Save Parameters (Ctrl+S)", command=self.save_parameters)
         spectrum_menu.add_command(label="Load Parameters (Ctrl+L)", command=self.load_parameters)
+        spectrum_menu.add_command(label="Load Parameters From File (Ctrl+Shift+L)", command=self.load_parameters_from_file)
         spectrum_menu.add_command(label="Output Full Spectrum (Ctrl+Shift+F)", command=lambda: output_full_spectrum(self.islat))
         spectrum_menu.add_command(label="Display Full Spectrum (Ctrl+F)", command=lambda: FullSpectrumWindow(self.master, self.islat))
         spectrum_drpdwn.config(menu=spectrum_menu)
@@ -835,6 +837,85 @@ class TopBar(ResizableFrame):
                 self.main_plot.update_all_plots()
             if hasattr(self.islat.GUI, 'control_panel'):
                 self.islat.GUI.control_panel.refresh_from_molecules_dict()
+
+    def load_parameters_from_file(self):
+        """
+        Load molecule parameters from a user-selected CSV file in the SAVES folder.
+        Opens a file dialog to let the user pick any save file.
+        """
+        # Open file dialog starting in the SAVES folder
+        selected_file = filedialog.askopenfilename(
+            title="Select a save file to load",
+            initialdir=str(save_folder_path),
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        
+        if not selected_file:
+            return  # User cancelled
+        
+        # Display confirmation dialog
+        confirmed = messagebox.askquestion(
+            "Confirmation",
+            f"Are you sure you want to load parameters from:\n{os.path.basename(selected_file)}?\n\nMake sure to save any unsaved changes!"
+        )
+        if confirmed == "no":
+            return
+        
+        # Show loading message
+        if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+            self.islat.GUI.data_field.insert_text(
+                'Loading saved parameters, this may take a moment...',
+                clear_after=True
+            )
+        
+        try:
+            # Split selected file into directory and filename
+            file_dir = os.path.dirname(selected_file)
+            file_name = os.path.basename(selected_file)
+            
+            # Read molecule data from the selected file
+            mole_save_data = read_from_user_csv(
+                file_path=file_dir,
+                file_name=file_name,
+                update_save_file_names=self.islat.user_settings.get(
+                    "update_save_file_names_in_save_csv", False
+                )
+            )
+            
+            if mole_save_data is None:
+                if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+                    self.islat.GUI.data_field.insert_text(
+                        f'Failed to read save file: {file_name}',
+                        clear_after=True
+                    )
+                return
+            
+            # Clear existing molecules and load from file
+            self.islat.molecules_dict.clear()
+            self.islat.init_molecules(mole_save_data)
+            self.islat._molecules_loaded = True
+            
+            # Update GUI components
+            if hasattr(self.islat, 'GUI'):
+                if hasattr(self.islat.GUI, 'plot'):
+                    self.main_plot.update_all_plots()
+                if hasattr(self.islat.GUI, 'control_panel'):
+                    self.islat.GUI.control_panel.refresh_from_molecules_dict()
+                if hasattr(self.islat.GUI, 'data_field'):
+                    self.islat.GUI.data_field.insert_text(
+                        f'Loaded parameters from: {file_name}',
+                        clear_after=False
+                    )
+            
+            print(f"Successfully loaded parameters from: {selected_file}")
+            
+        except Exception as e:
+            print(f"Error loading parameters from file: {e}")
+            if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+                self.islat.GUI.data_field.insert_text(
+                    f'Error loading parameters: {str(e)}',
+                    clear_after=True
+                )
 
     def toggle_legend(self):
         #print("Toggled legend on plot")
