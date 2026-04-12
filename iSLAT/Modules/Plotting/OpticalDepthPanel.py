@@ -103,8 +103,38 @@ class OpticalDepthPanel(SpectralPanel):
         self.tau_floor = tau_floor
 
     # ------------------------------------------------------------------
+    def _ensure_mol_tau_cache(self) -> None:
+        """Populate *mol_tau_cache* from *molecule*/*molecules* if empty.
+
+        When an ``OpticalDepthPanel`` is used standalone (not embedded by
+        ``OpticalDepthSpectrumPlot``) the cache starts empty.  This
+        method builds it on-demand using :meth:`BasePlot.get_molecule_tau_data`.
+        """
+        if self.mol_tau_cache:
+            return
+
+        mols: list = []
+        if self.molecule is not None:
+            mols.append(self.molecule)
+        elif self.molecules is not None:
+            mols = list(
+                self.molecules.get_visible_molecules(return_objects=True)
+            )
+
+        for mol in mols:
+            lam, tau = self.get_molecule_tau_data(mol, self.wave_data)
+            if lam is not None and tau is not None and len(tau) > 0:
+                self.mol_tau_cache.append((
+                    lam, tau,
+                    self.get_molecule_color(mol),
+                    self.get_molecule_display_name(mol),
+                    getattr(mol, "name", "unknown"),
+                ))
+
+    # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
         """Render optical-depth profiles or stem markers."""
+        self._ensure_mol_tau_cache()
         ax = self._resolve_axes()
         xr = self.xlim
         fg = self._get_theme_value("foreground", "black")
