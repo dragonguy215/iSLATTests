@@ -66,6 +66,8 @@ class LineInspectionPlot(SpectralPanel):
         line_threshold: float = 0.0,
         figsize: Optional[Tuple[float, float]] = None,
         ax: Optional[Axes] = None,
+        wave_data_obs: Optional[np.ndarray] = None,
+        render_all_visible: bool = True,
         **kwargs,
     ):
         super().__init__(
@@ -82,6 +84,16 @@ class LineInspectionPlot(SpectralPanel):
         self.molecule = molecule
         self.line_data = line_data
         self.line_threshold = line_threshold
+        # When True (default), all visible molecules from *molecules* are
+        # rendered.  When False, only *molecule* (singular) is rendered;
+        # *molecules* is still used for matched-spectral-sampling queries.
+        self.render_all_visible: bool = render_all_visible
+        # Observer-frame wavelengths for matched spectral sampling.
+        # Falls back to wave_data when no observer-frame array is provided.
+        self.wave_data_obs: np.ndarray = (
+            np.asarray(wave_data_obs) if wave_data_obs is not None
+            else self.wave_data
+        )
 
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:  # noqa: D401
@@ -102,14 +114,27 @@ class LineInspectionPlot(SpectralPanel):
         max_y = float(np.nanmax(obs_flux)) if len(obs_flux) > 0 else 0.15
 
         # -- molecule model(s) ------------------------------------------
-        if self.molecules is not None:
+        # Determine matched spectral sampling settings (same logic as
+        # FullSpectrumPlot) so the line inspection plot honours the
+        # "Match Pix. Sampling" toggle.
+        use_interp = False
+        target_wave = None
+        if self.molecules is not None and hasattr(self.molecules, 'get_matched_sampling_wavelengths'):
+            use_interp, target_wave = self.molecules.get_matched_sampling_wavelengths(self.wave_data_obs)
+            if not use_interp:
+                target_wave = None
+
+        if self.molecules is not None and self.render_all_visible:
+            # Standalone / notebook mode: render every visible molecule.
             visible = self.molecules.get_visible_molecules(return_objects=True)
             for mol in visible:
-                mol_max = self._overlay_molecule(ax, mol)
+                mol_max = self._overlay_molecule(ax, mol, use_interp, target_wave)
                 if mol_max is not None and len(obs_flux) == 0:
                     max_y = max(max_y, mol_max)
         elif self.molecule is not None:
-            mol_max = self._overlay_molecule(ax, self.molecule)
+            # GUI mode (render_all_visible=False) or single-molecule mode:
+            # only render the active molecule.
+            mol_max = self._overlay_molecule(ax, self.molecule, use_interp, target_wave)
             if mol_max is not None and len(obs_flux) == 0:
                 max_y = max(max_y, mol_max)
 
@@ -133,12 +158,22 @@ class LineInspectionPlot(SpectralPanel):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _overlay_molecule(self, ax: Axes, molecule: "Molecule") -> Optional[float]:
+    def _overlay_molecule(
+        self,
+        ax: Axes,
+        molecule: "Molecule",
+        interpolate_to_input: bool = False,
+        target_wavelengths: Optional[np.ndarray] = None,
+    ) -> Optional[float]:
         """Plot one molecule model in the inspection range.
 
         Returns the max flux value in the range, or *None* if nothing was plotted.
         """
-        plot_lam, model_flux = self.get_molecule_spectrum_data(molecule, self.wave_data)
+        plot_lam, model_flux = self.get_molecule_spectrum_data(
+            molecule, self.wave_data,
+            interpolate_to_input=interpolate_to_input,
+            target_wavelengths=target_wavelengths,
+        )
         if plot_lam is None or model_flux is None:
             return None
         m = (plot_lam >= self.xmin) & (plot_lam <= self.xmax)
@@ -148,6 +183,13 @@ class LineInspectionPlot(SpectralPanel):
         model_flux_range = model_flux[m]
         if len(model_wave_range) == 0 or len(model_flux_range) == 0:
             return None
+
+        # Skip molecules whose flux is effectively zero in this range so
+        # they don't clutter the legend with a flat-line entry.
+        peak = float(np.nanmax(np.abs(model_flux_range)))
+        if peak < 1e-30:
+            return None
+
         ax.plot(
             model_wave_range,
             model_flux_range,
