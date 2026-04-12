@@ -112,6 +112,71 @@ class FullSpectrumView(PlotView):
         self._needs_refresh: bool = True  # Set True when data changes; cleared after re-render
 
     # ==================================================================
+    # View-specific field provider protocol
+    # ==================================================================
+    def get_view_fields(self):
+        """Return a descriptor for the N-Panels field."""
+        return [
+            {
+                "key": "n_panels",
+                "label": "N Panels:",
+                "default": self._plot.n_panels if self._plot is not None else 10,
+                "tip": "Number of panels in the\nfull-spectrum stacked layout",
+                "datatype": "int",
+                "width": 5,
+                "getter": self._get_n_panels,
+                "setter": self._set_n_panels,
+            },
+        ]
+
+    def get_display_range_binding(self):
+        """Bind Plot Start / Plot Range to the stacked-panel xlim range."""
+        if self._plot is None:
+            return None
+        return {
+            "getter": self._get_display_range,
+            "setter": self._set_display_range,
+        }
+
+    # --- helpers for the field provider ---
+    def _get_n_panels(self):
+        if self._plot is not None:
+            return self._plot.n_panels
+        return 10
+
+    def _set_n_panels(self, value):
+        if self._plot is None:
+            return
+        n = max(1, int(value))
+        if n == self._plot.n_panels:
+            return
+        self._plot.n_panels = n
+        self._plot._compute_panel_layout()
+        # Full rebuild required because subplot grid changes
+        self.span_selectors.clear()
+        self._plot.generate_plot()
+        self._install_span_selectors()
+        if self._canvas is not None:
+            self._canvas.draw_idle()
+
+    def _get_display_range(self):
+        if self._plot is not None:
+            return (self._plot._xlim_start, self._plot._xlim_end)
+        return (0.0, 0.0)
+
+    def _set_display_range(self, start, end):
+        if self._plot is None:
+            return
+        self._plot._xlim_start = float(start)
+        self._plot._xlim_end = float(end)
+        self._plot._compute_panel_layout()
+        self.span_selectors.clear()
+        self._plot.generate_plot()
+        self._install_span_selectors()
+        if self._canvas is not None:
+            self._canvas.draw_idle()
+
+    # ==================================================================
     # Convenience accessors (delegate to composed plot)
     # ==================================================================
     @property

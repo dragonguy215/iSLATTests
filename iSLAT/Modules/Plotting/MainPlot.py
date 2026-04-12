@@ -123,6 +123,9 @@ class iSLATPlot:
         self.active_view: PlotView = self._three_panel_view
         self.is_full_spectrum: bool = False
 
+        # View-change callbacks — notified when active_view switches
+        self._view_change_callbacks: list = []
+
         # Molecules whose parameters changed while they were hidden.
         # Consumed by on_molecule_visibility_changed to force a re-render
         # instead of simply toggling the (now stale) artists.
@@ -1363,11 +1366,44 @@ class iSLATPlot:
             except Exception:
                 pass
     
+    # ------------------------------------------------------------------
+    # View-change callback infrastructure
+    # ------------------------------------------------------------------
+    def add_view_change_callback(self, cb):
+        """Register a callback invoked when the active view changes.
+
+        The callback signature is ``cb(old_view, new_view)`` where both
+        arguments are :class:`PlotView` instances (or *None* for the
+        initial call).
+        """
+        if cb not in self._view_change_callbacks:
+            self._view_change_callbacks.append(cb)
+
+    def remove_view_change_callback(self, cb):
+        """Remove a previously registered view-change callback."""
+        try:
+            self._view_change_callbacks.remove(cb)
+        except ValueError:
+            pass
+
+    def _notify_view_change(self, old_view, new_view):
+        """Notify all registered listeners that the active view changed."""
+        for cb in self._view_change_callbacks:
+            try:
+                cb(old_view, new_view)
+            except Exception as exc:
+                debug_config.warning(
+                    "main_plot",
+                    f"View-change callback {cb} raised: {exc}",
+                )
+
     def load_full_spectrum(self):
         """Activate the full-spectrum view (called by toggle_full_spectrum)."""
+        old_view = self.active_view
         self._three_panel_view.deactivate()
         self._full_spectrum_view.activate(self.parent_frame)
         self.active_view = self._full_spectrum_view
+        self._notify_view_change(old_view, self.active_view)
 
     def toggle_summed_spectrum(self):
         """Toggle visibility of the summed spectral flux."""
@@ -1404,6 +1440,8 @@ class iSLATPlot:
             self.load_full_spectrum()
         else:
             # Switch back to three-panel view
+            old_view = self.active_view
             self._full_spectrum_view.deactivate()
             self.active_view = self._three_panel_view
             self._three_panel_view.activate(self.parent_frame)
+            self._notify_view_change(old_view, self.active_view)
