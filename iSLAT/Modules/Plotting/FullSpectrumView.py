@@ -333,8 +333,31 @@ class FullSpectrumView(PlotView):
             or (not show_residuals and isinstance(self._plot, ResidualSpectrumPlot))
         )
         if type_mismatch:
+            # Preserve the panel wavelength ranges so the user sees the
+            # same layout after the toggle.
+            old_edges = getattr(self._plot, "_panel_edges", None)
+            old_ends = getattr(self._plot, "_panel_ends", None)
+            old_step = getattr(self._plot, "_step", None)
+            old_xlim = (
+                getattr(self._plot, "_xlim_start", None),
+                getattr(self._plot, "_xlim_end", None),
+            )
+
             self.span_selectors.clear()
             self._plot = self._create_plot()
+
+            # Restore the panel layout from the previous plot so switching
+            # between FSP and RSP keeps the same wavelength ranges.
+            if old_edges is not None and old_ends is not None:
+                self._plot._panel_edges = old_edges
+                self._plot._panel_ends = old_ends
+                self._plot.n_panels = len(old_edges)
+                self._plot._step = old_step
+                if old_xlim[0] is not None:
+                    self._plot._xlim_start = old_xlim[0]
+                if old_xlim[1] is not None:
+                    self._plot._xlim_end = old_xlim[1]
+
             self._plot.generate_plot()
             self._install_span_selectors()
             return
@@ -581,8 +604,10 @@ class FullSpectrumView(PlotView):
             else wave_data
         )
 
-        # Collect all axes for molecule artist operations
-        all_axes = self._iter_all_axes()
+        # For molecule artist operations use the primary (spectrum)
+        # axes only.  For FSP these are the same as all axes; for RSP
+        # this avoids placing molecule overlays on residual sub-panels.
+        is_rsp = isinstance(self._plot, ResidualSpectrumPlot)
         primary_axes = list(self.subplots.values())
 
         # 1. Toggle molecule line visibility per subplot.
@@ -590,7 +615,7 @@ class FullSpectrumView(PlotView):
         #    destroy the stale artists and re-create them from fresh data.
         if force_rerender and is_visible:
             molecule = molecules_dict.get(molecule_name)
-            for ax in all_axes:
+            for ax in primary_axes:
                 self._renderer.remove_molecule_lines(
                     molecule_name, ax=ax, lines=list(ax.lines), update_legend=False,
                 )
@@ -601,7 +626,7 @@ class FullSpectrumView(PlotView):
         else:
             # Try fast artist-toggle first.
             toggled = False
-            for ax in all_axes:
+            for ax in primary_axes:
                 if self._renderer.set_molecule_visibility(
                     molecule_name, is_visible, ax=ax, lines=ax.lines,
                 ):
@@ -612,41 +637,44 @@ class FullSpectrumView(PlotView):
             if is_visible and not toggled:
                 molecule = molecules_dict.get(molecule_name)
                 if molecule is not None:
-                    for ax in all_axes:
+                    for ax in primary_axes:
                         self._renderer.render_individual_molecule_spectrum(
                             molecule, rv_wave, subplot=ax, update_legend=False,
                         )
 
-        # 2. Recompute summed spectrum -- pass observer-frame wavelengths
-        #    so MoleculeDict handles the stellar RV correction internally.
-        try:
-            summed_wavelengths, summed_flux = molecules_dict.get_summed_flux(
-                wave_obs, visible_only=True,
-            )
-        except Exception as exc:
-            debug_config.warning("full_spectrum_view", f"Could not compute summed flux: {exc}")
-            summed_wavelengths = rv_wave if rv_wave is not None else np.array([])
-            summed_flux = np.zeros_like(summed_wavelengths)
-
-        summed_visible = self._pm.summed_toggle and bool(
-            molecules_dict.get_visible_molecules(return_objects=True)
-        )
-
-        for ax in primary_axes:
-            for coll in ax.collections[:]:
-                if hasattr(coll, "_islat_summed"):
-                    coll.remove()
-            xlim = ax.get_xlim()
-            mask = (summed_wavelengths >= xlim[0]) & (summed_wavelengths <= xlim[1])
-            if np.any(mask) and np.any(summed_flux[mask] > 0):
-                fill = ax.fill_between(
-                    summed_wavelengths[mask], 0, summed_flux[mask],
-                    color=self._renderer._get_theme_value("summed_spectra_color", "lightgray"),
-                    alpha=1.0, label="Sum",
-                    zorder=self._renderer._get_theme_value("zorder_summed", 1),
+        # 2. Recompute summed spectrum on primary axes.
+        #    For RSP the "summed" fill represents the fixed model flux
+        #    (computed from all molecules), so we must not replace it
+        #    with the visible-only molecule sum.
+        if not is_rsp:
+            try:
+                summed_wavelengths, summed_flux = molecules_dict.get_summed_flux(
+                    wave_obs, visible_only=True,
                 )
-                fill._islat_summed = True
-                fill.set_visible(summed_visible)
+            except Exception as exc:
+                debug_config.warning("full_spectrum_view", f"Could not compute summed flux: {exc}")
+                summed_wavelengths = rv_wave if rv_wave is not None else np.array([])
+                summed_flux = np.zeros_like(summed_wavelengths)
+
+            summed_visible = self._pm.summed_toggle and bool(
+                molecules_dict.get_visible_molecules(return_objects=True)
+            )
+
+            for ax in primary_axes:
+                for coll in ax.collections[:]:
+                    if hasattr(coll, "_islat_summed"):
+                        coll.remove()
+                xlim = ax.get_xlim()
+                mask = (summed_wavelengths >= xlim[0]) & (summed_wavelengths <= xlim[1])
+                if np.any(mask) and np.any(summed_flux[mask] > 0):
+                    fill = ax.fill_between(
+                        summed_wavelengths[mask], 0, summed_flux[mask],
+                        color=self._renderer._get_theme_value("summed_spectra_color", "lightgray"),
+                        alpha=1.0, label="Sum",
+                        zorder=self._renderer._get_theme_value("zorder_summed", 1),
+                    )
+                    fill._islat_summed = True
+                    fill.set_visible(summed_visible)
 
         # 3. Rebuild legend
         self._update_full_spectrum_legend(molecules_dict)
@@ -745,10 +773,32 @@ class FullSpectrumView(PlotView):
         if not self._initialised:
             return
 
+        # Preserve panel layout from the current plot so the user
+        # sees the same wavelength ranges after the toggle.
+        old_edges = getattr(self._plot, "_panel_edges", None)
+        old_ends = getattr(self._plot, "_panel_ends", None)
+        old_step = getattr(self._plot, "_step", None)
+        old_xlim = (
+            getattr(self._plot, "_xlim_start", None),
+            getattr(self._plot, "_xlim_end", None),
+        )
+
         # Force a full teardown so the new figure replaces the old one
         old_fig = self.fig
         self.span_selectors.clear()
         self._plot = self._create_plot()
+
+        # Restore the panel layout from the previous plot.
+        if old_edges is not None and old_ends is not None:
+            self._plot._panel_edges = old_edges
+            self._plot._panel_ends = old_ends
+            self._plot.n_panels = len(old_edges)
+            self._plot._step = old_step
+            if old_xlim[0] is not None:
+                self._plot._xlim_start = old_xlim[0]
+            if old_xlim[1] is not None:
+                self._plot._xlim_end = old_xlim[1]
+
         self._plot.generate_plot()
         self._install_span_selectors()
 
