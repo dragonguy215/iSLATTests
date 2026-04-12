@@ -617,9 +617,62 @@ class TopBar(ResizableFrame):
             self.data_field.insert_text(f"Error during model subtraction: {e}\n", clear_after=False)
     
     def single_slab_fit(self):
-        """Run single slab fit analysis."""        
+        """Run single slab fit analysis.
+        
+        When no saved line list is loaded, prompts the user to select one,
+        runs the fit-saved-lines workflow first, and then uses the resulting
+        fitted-line measurements as input for the slab fit.
+        """
+        ran_saved_lines_fit = False
+
+        if not self.islat.input_line_list:
+            # Prompt user to load a line list
+            self.data_field.insert_text("No line list loaded. Please select a line list file.\n")
+            from iSLAT.Modules.FileHandling.iSLATFileHandling import load_input_line_list
+            result = load_input_line_list()
+
+            if result is None:
+                self.data_field.insert_text("No line list selected. Slab fit cancelled.\n")
+                return
+
+            file_path, file_name = result
+            self.islat.input_line_list = file_path
+            self.data_field.insert_text(f"Loaded line list: {file_name}\n")
+
+            # Update the FileInteractionPane label if available
+            if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'file_interaction_pane'):
+                self.islat.GUI.file_interaction_pane.refresh()
+
+            # Run fit saved lines to produce measurements with flux/error columns
+            self.data_field.insert_text("Fitting saved lines before slab fit...\n", clear_after=False)
+            self._perform_saved_lines_fit(plot_results=True)
+            ran_saved_lines_fit = True
+
+            # Determine the actual output file that fit saved lines wrote so the
+            # slab fit can read the fitted flux/error columns from it.
+            if self.islat.output_line_measurements:
+                self.islat.input_line_list = self.islat.output_line_measurements
+            else:
+                # No explicit output was configured — reconstruct the default
+                # path that save_fit_results used.
+                from iSLAT.Modules.FileHandling import fit_save_lines_file_name
+                spectrum_name = getattr(self.islat, 'loaded_spectrum_name', None)
+                if spectrum_name is not None:
+                    spectrum_base = os.path.splitext(spectrum_name)[0]
+                    out_name = f"{spectrum_base}-{os.path.basename(file_path)}"
+                else:
+                    out_name = fit_save_lines_file_name
+                output_path = self.batch_fitting_service._current_output_folder if hasattr(self.batch_fitting_service, '_current_output_folder') and self.batch_fitting_service._current_output_folder else str(line_saves_file_path)
+                default_output = os.path.join(output_path, out_name)
+                if os.path.exists(default_output):
+                    self.islat.input_line_list = default_output
+                    self.data_field.insert_text(f"Using fit results for slab fit: {out_name}\n", clear_after=False)
+                else:
+                    self.data_field.insert_text("Fit saved lines did not produce an output file. Cannot proceed with slab fit.\n")
+                    return
+
         if self.islat.input_line_list is None:
-            self.data_field.insert_text("No input line list specified. Cannot perform slab fit.\n", clear_after=True)
+            self.data_field.insert_text("No input line list available. Cannot perform slab fit.\n", clear_after=True)
             return
 
         self.data_field.insert_text("Running single slab fit analysis...\n", clear_after=False)
