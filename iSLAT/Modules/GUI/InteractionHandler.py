@@ -511,6 +511,16 @@ class InteractionHandler:
             self._toggle_residuals()
             return 'break'
 
+        # Handle 'n' key for advancing plot start by the current range
+        # Shift+N = retreat (subtract range), plain N = advance (add range)
+        elif keysym == 'n':
+            shift_pressed = bool(event.state & 0x1)
+            if shift_pressed:
+                self._retreat_plot_start()
+            else:
+                self._advance_plot_start()
+            return 'break'
+
     def _cycle_spectrum_previous(self):
         """Switch to the previous spectrum in the sample list."""
         if hasattr(self.islat, 'sample_spectra') and self.islat.sample_spectra:
@@ -603,7 +613,17 @@ class InteractionHandler:
         """Toggle residual sub-panels in the full spectrum view."""
         if hasattr(self.plot_manager, 'toggle_residuals'):
             self.plot_manager.toggle_residuals()
-    
+
+    def _advance_plot_start(self):
+        """Advance the plot start by the current plot range value."""
+        if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'control_panel'):
+            self.islat.GUI.control_panel.advance_plot_start()
+
+    def _retreat_plot_start(self):
+        """Retreat the plot start by the current plot range value."""
+        if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'control_panel'):
+            self.islat.GUI.control_panel.retreat_plot_start()
+
     def _toggle_atomic_lines(self):
         """Toggle atomic lines visibility"""
         if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'top_bar'):

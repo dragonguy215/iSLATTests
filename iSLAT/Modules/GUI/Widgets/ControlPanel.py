@@ -224,6 +224,12 @@ class ControlPanel(ttk.Frame):
         self.plot_range_entry, self.plot_range_var = self._create_simple_entry(parent,
             "Plot range:", initial_range, start_row, start_col + 2, lambda _: self._update_display_range(), param_name="display_range_range", tip_text=plot_range_tip)
 
+        # Advance button — adds the current range to the plot start
+        advance_tip = "Advance the plot start\nby the current range value\nShortcut: N\nShift+N to reverse"
+        self._advance_btn = ttk.Button(parent, text=">>", width=3, command=self.advance_plot_start)
+        self._advance_btn.grid(row=start_row, column=start_col + 4, padx=_ENTRY_LABEL_PADX)
+        CreateToolTip(self._advance_btn, advance_tip)
+
     def _create_wavelength_controls(self, parent, start_row, start_col):
         """Create wavelength range controls for model calculation range"""
         if not (hasattr(self.islat, 'molecules_dict') and self.islat.molecules_dict):
@@ -846,6 +852,28 @@ class ControlPanel(ttk.Frame):
                         self.islat.GUI.plot.match_display_range(match_y = True)
             except (ValueError, AttributeError):
                 pass
+
+    def advance_plot_start(self):
+        """Add the current plot range to the plot start value."""
+        try:
+            start = float(self.plot_start_var.get())
+            range_val = float(self.plot_range_var.get())
+            new_start = round(start + range_val, 6)
+            self._set_var(self.plot_start_var, self._format_value(new_start, "display_range_start"))
+            self._update_display_range()
+        except (ValueError, AttributeError):
+            pass
+
+    def retreat_plot_start(self):
+        """Subtract the current plot range from the plot start value."""
+        try:
+            start = float(self.plot_start_var.get())
+            range_val = float(self.plot_range_var.get())
+            new_start = round(start - range_val, 6)
+            self._set_var(self.plot_start_var, self._format_value(new_start, "display_range_start"))
+            self._update_display_range()
+        except (ValueError, AttributeError):
+            pass
 
     def _update_wavelength_range(self, value_str=None):
         """Update wavelength range for model calculations (not display)"""
