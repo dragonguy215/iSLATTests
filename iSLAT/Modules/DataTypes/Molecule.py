@@ -569,6 +569,7 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
                 output_grid = np.arange(lam_grid[0], lam_grid[-1], self._model_pixel_res)
                 if len(output_grid) < 2:
                     output_grid = lam_grid  # Fallback: pixel res too coarse for range
+                _, _spectres = _get_spectral_utils()
                 result_flux = _spectres(output_grid, lam_grid, rv_corrected_flux, fill=0.0)
                 result_wavelengths = output_grid
             else:
