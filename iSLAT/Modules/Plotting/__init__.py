@@ -21,10 +21,12 @@ Class hierarchy::
     ├── SpectralPanel (ABC)        — single panel of spectral data in a range
     │   ├── LineInspectionPlot     — zoomed wavelength region
     │   ├── SpectrumPanel          — concrete panel: spectrum + molecules
-    │   └── ResidualPanel          — concrete panel: residual + chi^2
+    │   ├── ResidualPanel          — concrete panel: residual + chi^2
+    │   └── OpticalDepthPanel      — concrete panel: optical depth τ(λ)
     ├── StackedSpectralPanel (ABC) — composer for vertically stacked panels
     │   ├── FullSpectrumPlot       — multi-panel full spectrum overview
     │   │   └── ResidualSpectrumPlot — ...with per-panel residuals & chi^2
+    │   ├── OpticalDepthSpectrumPlot — multi-panel optical depth overview
     │   └── CompositeStackedPanel  — merged cells from 2 source plots
     ├── PopulationDiagramPlot      — Boltzmann / rotation diagram
     ├── MainPlotGrid               — 3-panel composite (spectrum + inspection + pop-diagram)
@@ -55,6 +57,8 @@ from .LineInspectionPlot import LineInspectionPlot
 from .PopulationDiagramPlot import PopulationDiagramPlot
 from .FullSpectrumPlot import FullSpectrumPlot
 from .ResidualSpectrumPlot import ResidualSpectrumPlot
+from .OpticalDepthPanel import OpticalDepthPanel
+from .OpticalDepthSpectrumPlot import OpticalDepthSpectrumPlot
 from .MainPlotGrid import MainPlotGrid
 from .FitLinesPlotGrid import FitLinesPlotGrid
 from .PlotView import PlotView
@@ -84,4 +88,6 @@ __all__ = [
     "ThreePanelView",
     "FullSpectrumView",
     "ResidualSpectrumPlot",
+    "OpticalDepthPanel",
+    "OpticalDepthSpectrumPlot",
 ]

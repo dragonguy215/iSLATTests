@@ -358,6 +358,47 @@ class BasePlot(ABC):
             return None, None
 
     @staticmethod
+    def get_molecule_tau_data(
+        molecule: "Molecule",
+        wave_data: Optional[np.ndarray] = None,
+        interpolate_to_input: bool = False,
+        target_wavelengths: Optional[np.ndarray] = None,
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """Retrieve ``(wavelength, tau)`` from a *Molecule* object.
+
+        Mirrors :meth:`get_molecule_spectrum_data` but returns the
+        convolved optical-depth profile instead of flux.
+
+        Parameters
+        ----------
+        molecule : Molecule
+            The molecule to query.
+        wave_data : np.ndarray, optional
+            Wavelength array passed through to ``get_tau``.
+        interpolate_to_input : bool, default False
+            When True the model tau is resampled onto *target_wavelengths*
+            (or *wave_data* when *target_wavelengths* is None).
+        target_wavelengths : np.ndarray, optional
+            Rest-frame wavelength grid to interpolate onto.
+        """
+        if molecule is None:
+            return None, None
+        try:
+            interp_wave = target_wavelengths if target_wavelengths is not None else wave_data
+            lam, tau = molecule.get_tau(
+                wavelength_array=interp_wave,
+                return_wavelengths=True,
+                interpolate_to_input=interpolate_to_input,
+            )
+            if interpolate_to_input and target_wavelengths is not None and wave_data is not None:
+                lam = wave_data
+            return lam, tau
+        except Exception as exc:
+            print(f"[BasePlot] Could not get tau for "
+                  f"{BasePlot.get_molecule_display_name(molecule)}: {exc}")
+            return None, None
+
+    @staticmethod
     def get_intensity_data(
         molecule: "Molecule",
         *,

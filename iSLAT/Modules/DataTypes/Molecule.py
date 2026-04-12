@@ -600,6 +600,95 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         if return_wavelengths:
             return result_wavelengths, result_flux
         return result_flux
+
+    # ------------------------------------------------------------------
+    # Optical-depth retrieval (analogous to get_flux)
+    # ------------------------------------------------------------------
+
+    def get_tau(
+        self,
+        wavelength_array: Optional[np.ndarray] = None,
+        return_wavelengths: bool = False,
+        interpolate_to_input: bool = False,
+    ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+        """Get the convolved optical-depth profile with RV shift applied.
+
+        This mirrors :meth:`get_flux` but returns the dimensionless
+        optical depth τ(λ) instead of flux.
+
+        Parameters
+        ----------
+        wavelength_array : np.ndarray, optional
+            Input wavelength array for additional interpolation.
+        return_wavelengths : bool, default False
+            If True, return ``(wavelengths, tau)``.
+        interpolate_to_input : bool, default False
+            If True and *wavelength_array* is provided, interpolate to
+            match the input grid.
+
+        Returns
+        -------
+        np.ndarray or tuple[np.ndarray, np.ndarray]
+            Optical-depth array, or ``(wavelengths, tau)`` tuple.
+        """
+        self._ensure_spectrum_calculated()
+
+        if self.spectrum is None:
+            empty = np.array([])
+            return (empty, empty) if return_wavelengths else empty
+
+        lam_grid = self.spectrum._lamgrid
+        tau_grid = self.spectrum.tau_profile
+
+        if lam_grid is None or tau_grid is None:
+            empty = np.array([])
+            return (empty, empty) if return_wavelengths else empty
+
+        # Apply RV shift (same correction as get_flux)
+        if self._rv_shift != 0:
+            shifted_source_lam_grid = lam_grid + (
+                lam_grid / c.SPEED_OF_LIGHT_KMS * self._rv_shift
+            )
+            _, _spectres = _get_spectral_utils()
+            rv_corrected_tau = _spectres(
+                lam_grid, shifted_source_lam_grid, tau_grid, fill=0.0,
+            )
+        else:
+            rv_corrected_tau = tau_grid
+
+        if interpolate_to_input and wavelength_array is not None:
+            _, _spectres = _get_spectral_utils()
+            result_tau = _spectres(
+                wavelength_array, lam_grid, rv_corrected_tau, fill=0.0,
+            )
+            result_wavelengths = wavelength_array.copy()
+        else:
+            native_dlambda = (
+                lam_grid[1] - lam_grid[0] if len(lam_grid) > 1
+                else self._model_pixel_res
+            )
+            needs_resample = (
+                abs(self._model_pixel_res - native_dlambda)
+                > 1e-12 * native_dlambda
+            )
+            if needs_resample and self._model_pixel_res > native_dlambda:
+                output_grid = np.arange(
+                    lam_grid[0], lam_grid[-1], self._model_pixel_res,
+                )
+                if len(output_grid) < 2:
+                    output_grid = lam_grid
+                _, _spectres = _get_spectral_utils()
+                result_tau = _spectres(
+                    output_grid, lam_grid, rv_corrected_tau, fill=0.0,
+                )
+                result_wavelengths = output_grid
+            else:
+                result_wavelengths = lam_grid.copy()
+                result_tau = rv_corrected_tau
+
+        if return_wavelengths:
+            return result_wavelengths, result_tau
+        return result_tau
     
     # Define properties using a factory function approach
     def _make_property(attr_name, converter=float, special_setter=None):

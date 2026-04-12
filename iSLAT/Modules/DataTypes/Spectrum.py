@@ -42,7 +42,7 @@ class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
         '_lamgrid', '_flux', '_flux_jy', '_I_arrays', '_lam_arrays', '_tau_arrays',
         '_components', '_flux_valid', '_convolution_cache',
         '_kernel_cache', '_cache_stats', '_n_grid_points', '_unique_cache',
-        '_wavelength_range'
+        '_wavelength_range', '_tau_profile', '_tau_profile_valid',
     )
     
     def __init__(self, lam_min: float = None, lam_max: float = None, 
@@ -111,6 +111,10 @@ class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
         # list with the different intensity components building up the spectrum
         self._components = []
         
+        # Tau profile (cached result)
+        self._tau_profile = None
+        self._tau_profile_valid = False
+
         # Cache invalidation flag and caching system
         self._flux_valid = False
         self._convolution_cache = {}
@@ -132,6 +136,8 @@ class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
         self._flux = None
         self._flux_jy = None
         self._flux_valid = False
+        self._tau_profile = None
+        self._tau_profile_valid = False
         self._unique_cache = None
 
     def add_intensity(self, intensity, dA: float):
@@ -196,6 +202,8 @@ class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
         self._flux = None
         self._flux_jy = None
         self._flux_valid = False
+        self._tau_profile = None
+        self._tau_profile_valid = False
         self._unique_cache = None
         self._record_cache_invalidation()
 
@@ -349,6 +357,202 @@ class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
             # Use pre-computed conversion factor
             self._flux_jy = flux_data * self._FLUX_JY_FACTOR * (self._lamgrid ** 2)
         return self._flux_jy
+
+    # ------------------------------------------------------------------
+    # Optical-depth profile convolution
+    # ------------------------------------------------------------------
+
+    def _convol_tau(self):
+        """Convolve per-line optical-depth values into a spectral profile.
+
+        Uses the same Gaussian-kernel machinery as :meth:`_convol_flux`
+        but operates on ``_tau_arrays`` and applies **no** distance or area
+        scaling (optical depth is dimensionless).
+
+        Returns
+        -------
+        np.ndarray
+            Optical depth as a function of wavelength on ``_lamgrid``.
+        """
+        if len(self._tau_arrays) == 0:
+            return np.zeros_like(self._lamgrid)
+
+        tau_array = np.concatenate(self._tau_arrays)
+        lam_array = np.concatenate(self._lam_arrays)
+
+        lam_key = lam_array.data.tobytes()
+        if self._unique_cache is not None and self._unique_cache[0] == lam_key:
+            lam, index_wavelength = self._unique_cache[1], self._unique_cache[2]
+        else:
+            lam, index_wavelength = np.unique(lam_array, return_inverse=True)
+            self._unique_cache = (lam_key, lam, index_wavelength)
+
+        tau_sum = np.bincount(index_wavelength, weights=tau_array,
+                              minlength=lam.shape[0]).astype(np.float64)
+
+        n_grid = self._n_grid_points
+
+        if self._R_func is not None:
+            R_per_line = np.atleast_1d(np.asarray(self._R_func(lam), dtype=float))
+            fwhm = lam / R_per_line
+        else:
+            fwhm = lam / self._R
+        sigma = fwhm / self._FWHM_TO_SIGMA
+
+        norm_tau = (self._INV_SQRT_2PI / sigma) * tau_sum
+        inv_2sigma_sq = 0.5 / (sigma ** 2)
+
+        lam_grid_position = (n_grid * (lam - self._lam_min) /
+                             (self._lam_max - self._lam_min)).astype(np.int32)
+
+        result = np.zeros(n_grid, dtype=np.float64)
+
+        sigma_min = sigma.min()
+        sigma_max = sigma.max()
+
+        if sigma_min == sigma_max or lam.shape[0] <= 1:
+            sigma_groups = [np.arange(lam.shape[0])]
+            sigma_maxes = [sigma_max]
+        else:
+            bin_edges = np.geomspace(sigma_min * 0.999, sigma_max * 1.001,
+                                     num=self._N_SIGMA_BINS + 1)
+            group_ids = np.digitize(sigma, bin_edges) - 1
+            group_ids = np.clip(group_ids, 0, self._N_SIGMA_BINS - 1)
+            unique_groups = np.unique(group_ids)
+            sigma_groups = [np.where(group_ids == g)[0] for g in unique_groups]
+            sigma_maxes = [sigma[idx].max() for idx in sigma_groups]
+
+        lamgrid = self._lamgrid
+
+        for group_idx, group_sigma_max in zip(sigma_groups, sigma_maxes):
+            kernel_range_size = int(15.0 * group_sigma_max / self._dlambda)
+            kernel_range = np.arange(-kernel_range_size, kernel_range_size + 1,
+                                     dtype=np.int32)
+
+            g_pos = lam_grid_position[group_idx]
+            g_norm = norm_tau[group_idx]
+            g_inv2s = inv_2sigma_sq[group_idx]
+            g_lam = lam[group_idx]
+
+            grid_indices = g_pos[:, np.newaxis] + kernel_range[np.newaxis, :]
+            valid_mask = (grid_indices >= 0) & (grid_indices < n_grid)
+            safe_indices = np.clip(grid_indices, 0, n_grid - 1)
+
+            kernel = lamgrid[safe_indices] - g_lam[:, np.newaxis]
+            np.multiply(kernel, kernel, out=kernel)
+            kernel *= -g_inv2s[:, np.newaxis]
+            np.exp(kernel, out=kernel)
+            kernel *= g_norm[:, np.newaxis]
+            kernel *= valid_mask
+
+            flat_idx = safe_indices.ravel()
+            flat_wt = kernel.ravel()
+            result += np.bincount(flat_idx, weights=flat_wt, minlength=n_grid)
+
+        return result
+
+    @property
+    def tau_profile(self) -> np.ndarray:
+        """np.ndarray: Optical depth profile on the wavelength grid."""
+        if self._tau_profile is None or not self._tau_profile_valid:
+            self._tau_profile = self._convol_tau()
+            self._tau_profile_valid = True
+        return self._tau_profile
+
+    def _convol_tau_per_component(self) -> List[Dict[str, Any]]:
+        """Convolve tau for each component separately.
+
+        Returns
+        -------
+        list of dict
+            Each dict has keys ``'name'``, ``'lamgrid'``, ``'tau_profile'``.
+        """
+        results: List[Dict[str, Any]] = []
+        if len(self._tau_arrays) == 0:
+            return results
+
+        n_grid = self._n_grid_points
+        lamgrid = self._lamgrid
+
+        for comp_idx, comp in enumerate(self._components):
+            tau_arr = self._tau_arrays[comp_idx]
+            lam_arr = self._lam_arrays[comp_idx]
+
+            if len(tau_arr) == 0:
+                results.append({
+                    'name': comp['name'],
+                    'lamgrid': lamgrid,
+                    'tau_profile': np.zeros(n_grid, dtype=np.float64),
+                })
+                continue
+
+            lam, index_wavelength = np.unique(lam_arr, return_inverse=True)
+            tau_sum = np.bincount(index_wavelength, weights=tau_arr,
+                                  minlength=lam.shape[0]).astype(np.float64)
+
+            if self._R_func is not None:
+                R_per_line = np.atleast_1d(
+                    np.asarray(self._R_func(lam), dtype=float))
+                fwhm = lam / R_per_line
+            else:
+                fwhm = lam / self._R
+            sigma = fwhm / self._FWHM_TO_SIGMA
+
+            norm_tau = (self._INV_SQRT_2PI / sigma) * tau_sum
+            inv_2sigma_sq = 0.5 / (sigma ** 2)
+
+            lam_grid_position = (n_grid * (lam - self._lam_min) /
+                                 (self._lam_max - self._lam_min)).astype(np.int32)
+
+            profile = np.zeros(n_grid, dtype=np.float64)
+
+            sigma_min = sigma.min()
+            sigma_max = sigma.max()
+
+            if sigma_min == sigma_max or lam.shape[0] <= 1:
+                sigma_groups = [np.arange(lam.shape[0])]
+                sigma_maxes = [sigma_max]
+            else:
+                bin_edges = np.geomspace(sigma_min * 0.999, sigma_max * 1.001,
+                                         num=self._N_SIGMA_BINS + 1)
+                group_ids = np.digitize(sigma, bin_edges) - 1
+                group_ids = np.clip(group_ids, 0, self._N_SIGMA_BINS - 1)
+                unique_groups = np.unique(group_ids)
+                sigma_groups = [np.where(group_ids == g)[0] for g in unique_groups]
+                sigma_maxes = [sigma[idx].max() for idx in sigma_groups]
+
+            for group_idx, group_sigma_max in zip(sigma_groups, sigma_maxes):
+                kernel_range_size = int(15.0 * group_sigma_max / self._dlambda)
+                kernel_range = np.arange(-kernel_range_size, kernel_range_size + 1,
+                                         dtype=np.int32)
+
+                g_pos = lam_grid_position[group_idx]
+                g_norm = norm_tau[group_idx]
+                g_inv2s = inv_2sigma_sq[group_idx]
+                g_lam = lam[group_idx]
+
+                grid_indices = g_pos[:, np.newaxis] + kernel_range[np.newaxis, :]
+                valid_mask = (grid_indices >= 0) & (grid_indices < n_grid)
+                safe_indices = np.clip(grid_indices, 0, n_grid - 1)
+
+                kernel = lamgrid[safe_indices] - g_lam[:, np.newaxis]
+                np.multiply(kernel, kernel, out=kernel)
+                kernel *= -g_inv2s[:, np.newaxis]
+                np.exp(kernel, out=kernel)
+                kernel *= g_norm[:, np.newaxis]
+                kernel *= valid_mask
+
+                flat_idx = safe_indices.ravel()
+                flat_wt = kernel.ravel()
+                profile += np.bincount(flat_idx, weights=flat_wt, minlength=n_grid)
+
+            results.append({
+                'name': comp['name'],
+                'lamgrid': lamgrid,
+                'tau_profile': profile,
+            })
+
+        return results
 
     # wavelength_range property provided by WavelengthRangeMixin
 
