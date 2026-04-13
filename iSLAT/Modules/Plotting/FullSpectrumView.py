@@ -436,11 +436,13 @@ class FullSpectrumView(PlotView):
         # Try the fast-path: update_data + update_panels_inplace
         updater = getattr(self._plot, "update_data", None)
         if updater is not None:
+            error_data = getattr(self._islat, "err_data", None)
             layout_changed = updater(
                 wave_data=wave,
                 flux_data=flux,
                 molecules=self._islat.molecules_dict,
                 wave_data_obs=wave_obs,
+                error_data=error_data,
             )
         else:
             layout_changed = True

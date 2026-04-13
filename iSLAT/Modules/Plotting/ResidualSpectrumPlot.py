@@ -655,6 +655,13 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
         # Reset backward-compat dict
         self.subplots.clear()
 
+        # Recompute _error_adj from current error_data so it stays in
+        # sync with wave_data after a spectrum reload.
+        if self._has_noise_floor and self.error_data is not None:
+            self._error_adj = np.sqrt(self.error_data ** 2 + self.noise_floor ** 2)
+        else:
+            self._error_adj = self.error_data
+
         # Pre-compute y-limits for both sub-panel types
         self._spec_ylims = self._compute_panel_ylims(
             ylim_fn=self._spectrum_ylim_fn,
