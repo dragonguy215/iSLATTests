@@ -359,7 +359,8 @@ class TestControlPanelViewSwitch:
             from iSLAT.Modules.GUI.Widgets.ControlPanel import ControlPanel as CP
             import types
             for name in ('_rebuild_view_fields', '_create_view_field_entry',
-                         '_sync_display_range_from_binding', '_on_view_changed',
+                         '_sync_display_range_from_binding', '_restore_display_range_from_islat',
+                         '_on_view_changed',
                          '_update_display_range', '_format_value', '_set_var'):
                 if hasattr(CP, name):
                     setattr(cp, name, types.MethodType(getattr(CP, name), cp))
@@ -504,3 +505,75 @@ class TestDisplayRangeBinding:
         ControlPanel._sync_display_range_from_binding(cp)
         assert float(cp.plot_start_var.get()) == pytest.approx(10.0)
         assert float(cp.plot_range_var.get()) == pytest.approx(12.0)
+
+    def test_restore_display_range_from_islat(self, tk_root):
+        """_restore_display_range_from_islat should reset GUI vars from islat.display_range."""
+        import tkinter as tk
+
+        cp = MagicMock()
+        cp.plot_start_var = tk.StringVar(tk_root, value="10.0")
+        cp.plot_range_var = tk.StringVar(tk_root, value="12.0")
+        cp.islat = _make_mock_islat()
+        cp.islat.display_range = (4.9, 5.9)
+
+        def _set_var(var, val):
+            cp.updating = True
+            var.set(str(val))
+            cp.updating = False
+        cp._set_var = _set_var
+        cp._format_value = lambda v, p=None: str(round(v, 6))
+
+        from iSLAT.Modules.GUI.Widgets.ControlPanel import ControlPanel
+        ControlPanel._restore_display_range_from_islat(cp)
+        assert float(cp.plot_start_var.get()) == pytest.approx(4.9)
+        assert float(cp.plot_range_var.get()) == pytest.approx(1.0)
+
+    def test_view_switch_reverts_display_range(self, tk_root):
+        """Switching from FSP (binding) to 3-panel (no binding) should revert to islat.display_range."""
+        import tkinter as tk
+        from tkinter import ttk
+
+        cp = MagicMock()
+        cp.plot_start_var = tk.StringVar(tk_root, value="4.9")
+        cp.plot_range_var = tk.StringVar(tk_root, value="1.0")
+        cp.islat = _make_mock_islat()
+        cp.islat.display_range = (4.9, 5.9)
+        cp._view_fields_frame = ttk.Frame(tk_root)
+        cp._view_field_entries = {}
+        cp._current_display_range_binding = None
+
+        def _set_var(var, val):
+            cp.updating = True
+            var.set(str(val))
+            cp.updating = False
+        cp._set_var = _set_var
+        cp._format_value = lambda v, p=None: str(round(v, 6))
+
+        from iSLAT.Modules.GUI.Widgets.ControlPanel import ControlPanel
+
+        # Simulate FSP view with binding — sets display range to wider range
+        fsp_view = MagicMock()
+        fsp_view.get_view_fields.return_value = []
+        fsp_view.get_display_range_binding.return_value = {
+            "getter": lambda: (5.0, 28.0),
+            "setter": MagicMock(),
+        }
+
+        for name in ('_rebuild_view_fields', '_create_view_field_entry',
+                      '_sync_display_range_from_binding', '_restore_display_range_from_islat'):
+            if hasattr(ControlPanel, name):
+                import types
+                setattr(cp, name, types.MethodType(getattr(ControlPanel, name), cp))
+
+        cp._rebuild_view_fields(fsp_view)
+        assert float(cp.plot_start_var.get()) == pytest.approx(5.0)
+        assert float(cp.plot_range_var.get()) == pytest.approx(23.0)
+
+        # Now switch to 3-panel view (no binding) — should revert to islat.display_range
+        three_panel_view = MagicMock()
+        three_panel_view.get_view_fields.return_value = []
+        three_panel_view.get_display_range_binding.return_value = None
+
+        cp._rebuild_view_fields(three_panel_view)
+        assert float(cp.plot_start_var.get()) == pytest.approx(4.9)
+        assert float(cp.plot_range_var.get()) == pytest.approx(1.0)

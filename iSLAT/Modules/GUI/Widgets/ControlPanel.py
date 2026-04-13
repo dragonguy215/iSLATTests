@@ -880,8 +880,12 @@ class ControlPanel(ttk.Frame):
         # Store display-range binding
         self._current_display_range_binding = view.get_display_range_binding()
 
-        # Sync the Plot Start / Plot Range fields from the binding
-        self._sync_display_range_from_binding()
+        # Sync the Plot Start / Plot Range fields from the binding,
+        # or restore them from islat.display_range when no binding is active.
+        if self._current_display_range_binding is not None:
+            self._sync_display_range_from_binding()
+        else:
+            self._restore_display_range_from_islat()
 
     def _create_view_field_entry(self, parent, label_text, initial_value,
                                  row, col, getter, setter, datatype="float",
@@ -936,6 +940,16 @@ class ControlPanel(ttk.Frame):
             return
         try:
             start, end = binding["getter"]()
+            range_val = round(end - start, 2)
+            self._set_var(self.plot_start_var, self._format_value(start, "display_range_start"))
+            self._set_var(self.plot_range_var, self._format_value(range_val, "display_range_range"))
+        except Exception:
+            pass
+
+    def _restore_display_range_from_islat(self):
+        """Restore Plot Start / Plot Range fields from islat.display_range."""
+        try:
+            start, end = self.islat.display_range
             range_val = round(end - start, 2)
             self._set_var(self.plot_start_var, self._format_value(start, "display_range_start"))
             self._set_var(self.plot_range_var, self._format_value(range_val, "display_range_range"))
