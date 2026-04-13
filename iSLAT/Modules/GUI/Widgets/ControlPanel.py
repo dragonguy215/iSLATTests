@@ -72,8 +72,9 @@ class ControlPanel(ttk.Frame):
         self._create_global_parameter_controls(gen_config_frame, 2, 0)  
 
         # Dynamic view-specific fields section (populated on view switch)
+        # Row 5 — global params (start_row=2, row_offset=1) occupy rows 3-4
         self._view_fields_frame = ttk.Frame(gen_config_frame)
-        self._view_fields_frame.grid(row=3, column=0, columnspan=5, sticky="nsew")
+        self._view_fields_frame.grid(row=5, column=0, columnspan=5, sticky="nsew")
         self._view_field_entries = {}
         self._current_display_range_binding = None
 
