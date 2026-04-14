@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import iSLAT.Modules.FileHandling.iSLATFileHandling as ifh
 import iSLAT.Constants as c
 from ..GUIFunctions import create_button, create_menu_btn
+from ..Tooltips import CreateToolTip
 from .ResizableFrame import ResizableFrame
 from iSLAT.Modules.GUI.Widgets.ChartWindow import MoleculeSelector
 from iSLAT.Modules.GUI.PlotGridWindow import PlotGridWindow
@@ -134,6 +135,18 @@ class TopBar(ResizableFrame):
         create_button(self.button_frame, self.theme, "Toggle Total Model", self.toggle_summed_spectrum, 0, 6, tip_text=toggle_summed_tip)
         create_button(self.button_frame, self.theme, "Toggle Legend", self.main_plot.toggle_legend, 0, 7, tip_text=toggle_legend_tip)
         create_button(self.button_frame, self.theme, "Toggle Residuals", self.toggle_residuals, 0, 8, tip_text=toggle_residuals_tip)
+        
+        # Navigate buttons - compact with minimal padding
+        retreat_tip = "Retreat the plot start\nby the current range value\nShortcut: Shift+N"
+        advance_tip = "Advance the plot start\nby the current range value\nShortcut: N"
+        
+        self._retreat_btn = ttk.Button(self.button_frame, text="<", command=self.retreat_plot_start, width=2)
+        self._retreat_btn.grid(row=0, column=9, padx=(4, 0), pady=2, sticky="nsew")
+        CreateToolTip(self._retreat_btn, retreat_tip)
+        
+        self._advance_btn = ttk.Button(self.button_frame, text=">", command=self.advance_plot_start, width=2)
+        self._advance_btn.grid(row=0, column=10, padx=(0, 1), pady=2, sticky="nsew")
+        CreateToolTip(self._advance_btn, advance_tip)
 
     def save_line(self, save_type="selected"):
         """Save the currently selected line to the line saves file."""
@@ -970,6 +983,16 @@ class TopBar(ResizableFrame):
                     clear_after=True
                 )
 
+    def retreat_plot_start(self):
+        """Retreat the plot start by the current range value."""
+        if self.control_panel:
+            self.control_panel.retreat_plot_start()
+    
+    def advance_plot_start(self):
+        """Advance the plot start by the current range value."""
+        if self.control_panel:
+            self.control_panel.advance_plot_start()
+    
     def toggle_legend(self):
         #print("Toggled legend on plot")
         self.main_plot.toggle_legend()

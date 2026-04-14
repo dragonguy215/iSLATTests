@@ -74,7 +74,7 @@ class ControlPanel(ttk.Frame):
         # Dynamic view-specific fields section (populated on view switch)
         # Row 5 — global params (start_row=2, row_offset=1) occupy rows 3-4
         self._view_fields_frame = ttk.Frame(gen_config_frame)
-        self._view_fields_frame.grid(row=5, column=0, columnspan=5, sticky="nsew")
+        self._view_fields_frame.grid(row=5, column=0, columnspan=4, sticky="nsew")
         self._view_field_entries = {}
         self._current_display_range_binding = None
 
@@ -225,17 +225,11 @@ class ControlPanel(ttk.Frame):
         self.plot_start_entry, self.plot_start_var = self._create_simple_entry(parent,
             "Plot start:", initial_start, start_row, start_col, lambda _: self._update_display_range(), param_name="display_range_start", tip_text=plot_start_tip)
         
-        # Plot range  
+        # Plot range
         display_range = getattr(self.islat, 'display_range', [4.5, 5.5])
         initial_range = round(display_range[1] - display_range[0], 2) # round to 2 decimal places
         self.plot_range_entry, self.plot_range_var = self._create_simple_entry(parent,
             "Plot range:", initial_range, start_row, start_col + 2, lambda _: self._update_display_range(), param_name="display_range_range", tip_text=plot_range_tip)
-
-        # Advance button — adds the current range to the plot start
-        advance_tip = "Advance the plot start\nby the current range value\nShortcut: N\nShift+N to reverse"
-        self._advance_btn = ttk.Button(parent, text=">>", width=3, command=self.advance_plot_start)
-        self._advance_btn.grid(row=start_row, column=start_col + 4, padx=_ENTRY_LABEL_PADX)
-        CreateToolTip(self._advance_btn, advance_tip)
 
     def _create_wavelength_controls(self, parent, start_row, start_col):
         """Create wavelength range controls for model calculation range"""
