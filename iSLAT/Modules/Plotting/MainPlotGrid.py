@@ -319,17 +319,18 @@ class MainPlotGrid(BasePlot):
             ax.set_title("Population Diagram -- no molecule selected")
             return
 
-        # Multi-molecule mode: show all visible molecules
-        if self.molecules is not None and len(self.molecules) > 0:
+        # Default: always show only the active molecule.
+        # Fall back to all visible molecules only when there is no active molecule to display.
+        if self.active_molecule is not None:
             pdp = PopulationDiagramPlot(
-                molecules=self.molecules,
+                molecule=self.active_molecule,
                 highlight_lines=self.line_data,
                 ax=ax,
                 theme=self.theme,
             )
-        elif self.active_molecule is not None:
+        elif self.molecules is not None and len(self.molecules) > 0:
             pdp = PopulationDiagramPlot(
-                molecule=self.active_molecule,
+                molecules=self.molecules,
                 highlight_lines=self.line_data,
                 ax=ax,
                 theme=self.theme,
