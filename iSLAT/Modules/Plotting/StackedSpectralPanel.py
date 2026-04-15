@@ -54,7 +54,6 @@ if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from .CompositeStackedPanel import CompositeStackedPanel
 
-
 class StackedSpectralPanel(BasePlot):
     """
     Abstract base for vertically stacked :class:`SpectralPanel` figures.

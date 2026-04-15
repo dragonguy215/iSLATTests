@@ -17,7 +17,6 @@ from .SpectralPanel import SpectralPanel, GapMode
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
 
-
 class ResidualPanel(SpectralPanel):
     """
     Single-axes panel showing ``(data - model)`` residuals.

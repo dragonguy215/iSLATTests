@@ -98,12 +98,11 @@ class TestTauIntensityToSpectrum(_TauTestBase):
         spec_high = self._make_spectrum()
         spec_high.add_intensity(inten_high, dA=1.0)
 
-        integral_low = np.trapz(spec_low.tau_profile, spec_low.lamgrid)
-        integral_high = np.trapz(spec_high.tau_profile, spec_high.lamgrid)
+        integral_low = np.trapezoid(spec_low.tau_profile, spec_low.lamgrid)
+        integral_high = np.trapezoid(spec_high.tau_profile, spec_high.lamgrid)
 
         # Integral should be larger for higher column density
         assert integral_high > integral_low
-
 
 class TestTauMoleculeLevel(_TauTestBase):
     """Test Molecule.get_tau() integration (end-to-end through the full pipeline)."""
@@ -132,7 +131,6 @@ class TestTauMoleculeLevel(_TauTestBase):
         except (AttributeError, ValueError, TypeError):
             # Expected: molecule without data cannot compute tau
             pass
-
 
 class TestTauPerComponentIsolation(_TauTestBase):
     """Verify per-component tau isolation when multiple molecules are added."""
@@ -172,7 +170,6 @@ class TestTauPerComponentIsolation(_TauTestBase):
         per_comp = spec._convol_tau_per_component()
         summed = sum(c['tau_profile'] for c in per_comp)
         np.testing.assert_allclose(total, summed, rtol=1e-10)
-
 
 class TestTauCacheInvalidation(_TauTestBase):
     """Verify that tau cache invalidation works correctly across operations."""
