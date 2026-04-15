@@ -16,7 +16,7 @@ references in ``InteractionHandler`` and ``PlotRenderer`` stay valid.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional, Tuple, List
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, List
 
 import numpy as np
 
@@ -24,6 +24,7 @@ from .PlotView import PlotView
 from .BasePlot import BasePlot
 from .ToggleMixin import ToggleMixin
 from .MainPlotGrid import MainPlotGrid
+from .LineInspectionPlot import LineInspectionPlot
 
 if TYPE_CHECKING:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -32,8 +33,11 @@ if TYPE_CHECKING:
     from .PlotRenderer import PlotRenderer
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from iSLAT.Modules.DataTypes.Molecule import Molecule
+    from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
 
+import iSLAT.Constants as c
 from iSLAT.Modules.FileHandling.iSLATFileHandling import load_atomic_lines
+from iSLAT.Modules.DataProcessing.LineAnalyzer import LineAnalyzer
 
 # Import debug configuration
 try:
@@ -71,6 +75,12 @@ class ThreePanelView(ToggleMixin, PlotView):
         # _ensure_grid() because wave_data/flux_data are not available
         # until the first render call.
         self._grid: MainPlotGrid | None = None
+
+        # Active-line state (line inspection markers + pop-diagram scatter)
+        self.active_lines: List[Any] = []
+        self.selected_line: Optional[Dict[str, Any]] = None
+        self._pick_event_connected: bool = False
+        self._line_analyzer = LineAnalyzer()
 
     # ------------------------------------------------------------------
     # Helpers (private, short-hand access to controller state)
@@ -300,6 +310,216 @@ class ThreePanelView(ToggleMixin, PlotView):
         self._canvas.draw_idle()
 
     # ------------------------------------------------------------------
+    # Selection & line-inspection
+    # ------------------------------------------------------------------
+    def on_selection(self, xmin: float, xmax: float) -> None:
+        """Handle a span-selector drag — render line inspection + population diagram.
+
+        This is the main entry-point that replaces the old
+        ``iSLATPlot.plot_spectrum_around_line`` for the three-panel view.
+        """
+        debug_config.verbose("line_inspection", f"on_selection called", xmin=xmin, xmax=xmax)
+
+        active_mol = getattr(self._islat, 'active_molecule', None)
+
+        if active_mol is None:
+            return
+
+        # Get lines in range
+        try:
+            line_data = self._get_molecule_line_data(active_mol, xmin, xmax)
+            if not line_data:
+                if hasattr(self._islat, 'GUI') and hasattr(self._islat.GUI, 'data_field'):
+                    self._islat.GUI.data_field.insert_text(
+                        f"No transitions found for {active_mol.name} in the selected range"
+                    )
+                self.clear_active_lines()
+                self._render_population_diagram_base()
+                self._canvas.draw_idle()
+                return
+        except Exception as e:
+            debug_config.warning("three_panel_view", f"Could not get line data: {e}")
+            self.clear_active_lines()
+            self._render_population_diagram_base()
+            self._canvas.draw_idle()
+            return
+
+        # Clear previous active lines and render fresh ones
+        self.clear_active_lines()
+        self._render_line_inspection(xmin, xmax, line_data)
+        self._render_population_diagram_with_lines(line_data)
+
+        # Highlight strongest line AFTER both panels are populated
+        self._highlight_strongest_line()
+
+        # Connect pick event once
+        if not self._pick_event_connected:
+            self._canvas.mpl_connect('pick_event', self._on_pick_line)
+            self._pick_event_connected = True
+
+        self._canvas.draw_idle()
+        debug_config.verbose("line_inspection", "on_selection completed")
+
+    def clear_selection(self) -> None:
+        """Clear the current line-inspection selection and reset panels 2-3."""
+        self.clear_active_lines()
+        self.ax2.clear()
+        self._render_population_diagram_base()
+        self._canvas.draw_idle()
+
+    def clear_active_lines(self) -> None:
+        """Remove all active-line artists (vlines, text, scatter)."""
+        self._renderer.clear_active_lines(self.active_lines)
+
+    # ------------------------------------------------------------------
+    # Molecule lifecycle callbacks
+    # ------------------------------------------------------------------
+    def on_active_molecule_changed(
+        self,
+        new_molecule: Optional["Molecule"] = None,
+        current_selection: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        """The user selected a different active molecule."""
+        debug_config.info("active_molecule", "ThreePanelView.on_active_molecule_changed()")
+
+        if new_molecule is not None:
+            self.ax3.set_title(f'{new_molecule.displaylabel} Population diagram')
+
+        self.clear_active_lines()
+
+        if current_selection is not None:
+            xmin, xmax = current_selection
+            self.on_selection(xmin, xmax)
+        else:
+            self._render_population_diagram_base()
+            self._canvas.draw_idle()
+
+    def on_molecule_parameter_changed(
+        self,
+        molecule_name: str,
+        parameter_name: str,
+        current_selection: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        """A molecule parameter changed — update spectrum + possibly line inspection."""
+        # Visibility changes are handled separately
+        if parameter_name == 'is_visible':
+            return
+
+        mol_dict = getattr(self._islat, 'molecules_dict', None)
+        if mol_dict is None or molecule_name not in mol_dict:
+            return
+
+        molecule = mol_dict[molecule_name]
+
+        if molecule.is_visible:
+            # Re-render the full spectrum panel
+            self._do_update_model_plot()
+
+        active_mol = getattr(self._islat, 'active_molecule', None)
+        if (active_mol is not None
+                and hasattr(active_mol, 'name')
+                and active_mol.name == molecule_name):
+            if current_selection is not None:
+                xmin, xmax = current_selection
+                self.on_selection(xmin, xmax)
+            else:
+                self._render_population_diagram_base()
+                self._canvas.draw_idle()
+
+    def on_molecule_deleted(self, molecule_name: str) -> None:
+        """A molecule was removed — clear and rebuild everything."""
+        self._renderer.clear_model_lines()
+
+        active_mol = getattr(self._islat, 'active_molecule', None)
+        if (active_mol is not None
+                and hasattr(active_mol, 'name')
+                and active_mol.name == molecule_name):
+            self.clear_active_lines()
+
+        self._do_update_model_plot()
+
+    # ------------------------------------------------------------------
+    # Private helpers — line inspection rendering
+    # ------------------------------------------------------------------
+    def _get_molecule_line_data(
+        self, molecule: "Molecule", xmin: float, xmax: float,
+    ) -> List[Tuple["MoleculeLine", float, Optional[float]]]:
+        """Get molecule lines in a wavelength range (pure data-access)."""
+        return self._pm.get_molecule_line_data(molecule, xmin, xmax)
+
+    def _render_line_inspection(
+        self,
+        xmin: float,
+        xmax: float,
+        line_data: List[Tuple["MoleculeLine", float, Any]],
+    ) -> None:
+        """Render the line-inspection panel (ax2) with vertical markers."""
+        # Render the base line inspection plot (observed + molecule model)
+        fit_result = getattr(self._pm, 'fit_result', None)
+        self._renderer.render_complete_line_inspection_plot(
+            wave_data=self._islat.wave_data,
+            flux_data=self._islat.flux_data,
+            xmin=xmin, xmax=xmax,
+            active_molecule=self._islat.active_molecule,
+            fit_result=fit_result,
+        )
+
+        # Compute max_y for line-height scaling
+        data_mask = (self._islat.wave_data >= xmin) & (self._islat.wave_data <= xmax)
+        data_region_y = self._islat.flux_data[data_mask]
+        max_y = (
+            float(np.nanmax(data_region_y))
+            if len(data_region_y) > 0
+            else (self.ax2.get_ylim()[1] / 1.1)
+        )
+
+        # Add active-line vertical markers via MainPlotGrid
+        grid = self._ensure_grid()
+        grid.render_active_line_markers(line_data, self.active_lines, max_y)
+
+    def _render_population_diagram_base(self) -> None:
+        """Render the base population diagram for the active molecule."""
+        self._renderer.render_population_diagram(self._islat.active_molecule)
+
+    def _render_population_diagram_with_lines(
+        self, line_data: List[Tuple["MoleculeLine", float, Any]],
+    ) -> None:
+        """Render pop-diagram base + scatter points for *line_data*."""
+        self._render_population_diagram_base()
+        if line_data:
+            grid = self._ensure_grid()
+            active_mol = self._islat.active_molecule
+            sc = grid.render_active_line_scatter(
+                line_data, self.active_lines, active_mol,
+            )
+            # Store scatter collection on the renderer for pick-event handling
+            if sc is not None:
+                self._renderer._active_scatter_collection = sc
+                self._renderer._active_scatter_count = len(
+                    [e for e in self.active_lines if e[2] is not None]
+                )
+
+    # ------------------------------------------------------------------
+    # Private helpers — pick / highlight interaction
+    # ------------------------------------------------------------------
+    def _on_pick_line(self, event: Any) -> None:
+        """Handle line pick events — interaction logic."""
+        picked_value = self._pm._handle_line_pick_event(event, self.active_lines)
+        if picked_value:
+            self.selected_line = picked_value
+            self._pm._display_line_info(picked_value)
+        self._canvas.draw_idle()
+
+    def _highlight_strongest_line(self) -> None:
+        """Highlight the strongest line in active_lines."""
+        strongest = self._pm._highlight_strongest_line(self.active_lines)
+        if strongest is not None:
+            line, text, scatter, value = strongest
+            self.selected_line = value
+            if value:
+                self._pm._display_line_info(value)
+
+    # ------------------------------------------------------------------
     # ToggleMixin hooks
     # ------------------------------------------------------------------
     def _toggle_ready(self) -> bool:
@@ -408,7 +628,7 @@ class ThreePanelView(ToggleMixin, PlotView):
                     except Exception:
                         pass
             # Re-run the line inspection / population diagram
-            self._pm.onselect(xmin, xmax)
+            self.on_selection(xmin, xmax)
         self._canvas.draw_idle()
 
     # ------------------------------------------------------------------

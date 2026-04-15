@@ -664,6 +664,45 @@ class FullSpectrumView(ToggleMixin, PlotView):
         self.draw()
 
     # ------------------------------------------------------------------
+    # Selection & line-inspection (no-ops — FSV doesn't own these panels)
+    # ------------------------------------------------------------------
+    def on_selection(self, xmin: float, xmax: float) -> None:
+        """No-op — FullSpectrumView uses its own span-selector flow."""
+        pass
+
+    def clear_selection(self) -> None:
+        """No-op — FullSpectrumView has no line-inspection panel."""
+        pass
+
+    def clear_active_lines(self) -> None:
+        """No-op — FullSpectrumView has no active-line artists."""
+        pass
+
+    # ------------------------------------------------------------------
+    # Molecule lifecycle callbacks
+    # ------------------------------------------------------------------
+    def on_active_molecule_changed(
+        self,
+        new_molecule: Optional["Molecule"] = None,
+        current_selection: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        """Mark stale — FSV doesn't have per-molecule panels to update."""
+        self._needs_refresh = True
+
+    def on_molecule_parameter_changed(
+        self,
+        molecule_name: str,
+        parameter_name: str,
+        current_selection: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        """Mark stale so the next activate() does a full rebuild."""
+        self._needs_refresh = True
+
+    def on_molecule_deleted(self, molecule_name: str) -> None:
+        """Mark stale so the next activate() does a full rebuild."""
+        self._needs_refresh = True
+
+    # ------------------------------------------------------------------
     def on_molecule_visibility_changed(
         self,
         molecule_name: str,

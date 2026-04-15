@@ -531,9 +531,8 @@ class TestMainPlotGrid:
         assert mpg.ax_spectrum is not ax1
         mpg.close()
 
-
 # ======================================================================
-# MainPlotGrid — borrowed-axes mode (Step 1)
+# MainPlotGrid — borrowed-axes mode
 # ======================================================================
 
 class TestMainPlotGridBorrowedAxes:
@@ -935,9 +934,8 @@ class TestThreePanelView:
         except Exception:
             pass  # Agg backend doesn't support Tk pack
 
-
 class TestThreePanelViewGrid:
-    """ThreePanelView composing a MainPlotGrid in borrowed-axes mode (Step 2).
+    """ThreePanelView composing a MainPlotGrid in borrowed-axes mode.
 
     These tests exercise the _ensure_grid / _do_update_model_plot /
     on_molecule_visibility_changed pathways that now route through a

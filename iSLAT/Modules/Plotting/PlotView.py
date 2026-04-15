@@ -99,6 +99,68 @@ class PlotView(ABC):
         ...
 
     # ------------------------------------------------------------------
+    # Selection & line-inspection
+    # ------------------------------------------------------------------
+    @abstractmethod
+    def on_selection(self, xmin: float, xmax: float) -> None:
+        """Handle a wavelength-range selection (span selector drag).
+
+        The view should render the line inspection panel, populate the
+        population diagram scatter points, and highlight the strongest
+        line.  Views that do not support interactive selection (e.g.
+        :class:`FullSpectrumView`) should implement this as a no-op or
+        as a deferred switch back to the three-panel view.
+        """
+        ...
+
+    @abstractmethod
+    def clear_selection(self) -> None:
+        """Clear the current line-inspection selection and reset panels."""
+        ...
+
+    @abstractmethod
+    def clear_active_lines(self) -> None:
+        """Remove all active-line artists (vlines, text, scatter) from the view."""
+        ...
+
+    # ------------------------------------------------------------------
+    # Molecule lifecycle callbacks
+    # ------------------------------------------------------------------
+    @abstractmethod
+    def on_active_molecule_changed(
+        self,
+        new_molecule: Optional["Molecule"] = None,
+        current_selection: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        """The user selected a different active molecule.
+
+        If a selection is active the view should re-run the line
+        inspection / population diagram for the new molecule.  Otherwise
+        only the population-diagram title and base diagram need updating.
+        """
+        ...
+
+    @abstractmethod
+    def on_molecule_parameter_changed(
+        self,
+        molecule_name: str,
+        parameter_name: str,
+        current_selection: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        """A single molecule's parameter changed (not visibility).
+
+        The view should update the spectrum if the molecule is visible,
+        and refresh the line-inspection / population diagram if the
+        molecule is the active one.
+        """
+        ...
+
+    @abstractmethod
+    def on_molecule_deleted(self, molecule_name: str) -> None:
+        """A molecule was removed from the dict — update all panels."""
+        ...
+
+    # ------------------------------------------------------------------
     # Theme
     # ------------------------------------------------------------------
     @abstractmethod
