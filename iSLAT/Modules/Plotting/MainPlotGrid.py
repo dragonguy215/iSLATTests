@@ -78,6 +78,17 @@ class MainPlotGrid(BasePlot):
         Figure size.  Defaults to ``(15, 8.5)``.
     fig : Figure, optional
         Existing figure for GUI embedding.
+    ax_spectrum : Axes, optional
+        Pre-existing axes for the top spectrum panel.  When provided
+        together with *ax_inspection* and *ax_popdiagram* the grid
+        operates in **borrowed-axes mode**: :meth:`generate_plot` will
+        *not* call ``fig.clf()`` or create new axes — it renders
+        directly onto the supplied axes.  This is the mode used by
+        ``ThreePanelView`` for GUI embedding.
+    ax_inspection : Axes, optional
+        Pre-existing axes for the line-inspection panel.
+    ax_popdiagram : Axes, optional
+        Pre-existing axes for the population-diagram panel.
     """
 
     def __init__(
@@ -95,8 +106,23 @@ class MainPlotGrid(BasePlot):
         atomic_lines: Optional[pd.DataFrame] = None,
         figsize: Optional[Tuple[float, float]] = None,
         wave_data_obs: Optional[np.ndarray] = None,
+        ax_spectrum: Optional[Axes] = None,
+        ax_inspection: Optional[Axes] = None,
+        ax_popdiagram: Optional[Axes] = None,
         **kwargs,
     ):
+        # When all three axes are supplied we are in "borrowed-axes" mode:
+        # the caller owns the figure and axes — we just render onto them.
+        # Pass the figure extracted from the first supplied axes so
+        # BasePlot.fig is set correctly even in borrowed mode.
+        borrowed = (
+            ax_spectrum is not None
+            and ax_inspection is not None
+            and ax_popdiagram is not None
+        )
+        if borrowed:
+            kwargs.setdefault("fig", ax_spectrum.figure)
+
         super().__init__(figsize=figsize or (15, 8.5), **kwargs)
         self.wave_data = np.asarray(wave_data)
         self.flux_data = np.asarray(flux_data)
@@ -115,32 +141,49 @@ class MainPlotGrid(BasePlot):
                               if wave_data_obs is not None
                               else self.wave_data)
 
-        # Panel axes (created in generate_plot)
-        self.ax_spectrum: Optional[Axes] = None
-        self.ax_inspection: Optional[Axes] = None
-        self.ax_popdiagram: Optional[Axes] = None
+        # Borrowed-axes mode flag
+        self._borrowed_axes: bool = borrowed
+
+        # Panel axes — either injected (borrowed) or created in generate_plot
+        self.ax_spectrum: Optional[Axes] = ax_spectrum
+        self.ax_inspection: Optional[Axes] = ax_inspection
+        self.ax_popdiagram: Optional[Axes] = ax_popdiagram
 
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
-        """Build the three-panel layout."""
+        """Build the three-panel layout.
+
+        In **standalone mode** (no pre-existing axes were injected) the
+        figure is cleared, three new axes are created via
+        :meth:`create_three_panel_axes`, and the full theme is applied.
+
+        In **borrowed-axes mode** (axes were supplied to ``__init__``)
+        the existing axes are simply cleared and re-rendered — the
+        figure layout and axes identities are *not* touched, so cached
+        references held by ``InteractionHandler`` or ``PlotRenderer``
+        remain valid.
+        """
+        if self._borrowed_axes:
+            # Borrowed mode — render onto the pre-existing axes.
+            # Do NOT call fig.clf() or create_three_panel_axes().
+            self._render_spectrum_panel()
+            self._render_inspection_panel()
+            self._render_population_panel()
+            # Apply theme only to the axes (figure chrome is owned by caller)
+            self.apply_theme_to_figure()
+            return
+
+        # Standalone mode — full figure rebuild.
         self._ensure_figure()
-        # Clear previous axes so regeneration doesn't stack on top
         self.fig.clf()
 
         (self.ax_spectrum,
          self.ax_inspection,
          self.ax_popdiagram) = self.create_three_panel_axes(self.fig)
 
-        # --- Top panel: full spectrum -----------------------------------
         self._render_spectrum_panel()
-
-        # --- Bottom-left: line inspection --------------------------------
         self._render_inspection_panel()
-
-        # --- Bottom-right: population diagram ----------------------------
         self._render_population_panel()
-
-        # Apply full theme (backgrounds, spines, etc.) to the figure
         self.apply_theme_to_figure()
 
     # ------------------------------------------------------------------
@@ -148,6 +191,17 @@ class MainPlotGrid(BasePlot):
     # ------------------------------------------------------------------
     def _render_spectrum_panel(self) -> None:
         ax = self.ax_spectrum
+
+        # In borrowed-axes mode, preserve user zoom / pan limits across
+        # re-renders so the display doesn't jump.  The sentinel (0, 1)
+        # means "axes have never been rendered into yet" — skip restore.
+        _restore_lims = False
+        if self._borrowed_axes:
+            _prev_xlim = ax.get_xlim()
+            _prev_ylim = ax.get_ylim()
+            if _prev_xlim != (0.0, 1.0) and _prev_ylim != (0.0, 1.0):
+                _restore_lims = True
+
         ax.clear()
 
         if self.wave_data is None or len(self.wave_data) == 0:
@@ -191,6 +245,11 @@ class MainPlotGrid(BasePlot):
         ax.set_ylabel("Flux density (Jy)")
         ax.set_title("Full Spectrum with Line Inspection")
         self._update_legend(ax)
+
+        # Restore user zoom / pan limits in borrowed-axes mode
+        if _restore_lims:
+            ax.set_xlim(_prev_xlim)
+            ax.set_ylim(_prev_ylim)
 
     # ------------------------------------------------------------------
     def _render_inspection_panel(self) -> None:

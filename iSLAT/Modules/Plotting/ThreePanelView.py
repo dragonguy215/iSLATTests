@@ -6,9 +6,12 @@ Panels:
     2. Line inspection zoom    (ax2)
     3. Population diagram      (ax3)
 
-This view simply delegates to the *existing* axes and :class:`PlotRenderer`
-that already live on the :class:`iSLATPlot` controller.  It adds no new
-figures or canvases — it packs / unpacks the original ``self.canvas``.
+This view **composes** a :class:`MainPlotGrid` in *borrowed-axes* mode
+for all spectrum-panel rendering, mirroring how :class:`FullSpectrumView`
+composes a :class:`FullSpectrumPlot`.  The axes and canvas are still
+owned by the :class:`iSLATPlot` controller — :class:`MainPlotGrid`
+renders onto them without calling ``fig.clf()`` so that cached
+references in ``InteractionHandler`` and ``PlotRenderer`` stay valid.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import numpy as np
 from .PlotView import PlotView
 from .BasePlot import BasePlot
 from .ToggleMixin import ToggleMixin
+from .MainPlotGrid import MainPlotGrid
 
 if TYPE_CHECKING:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -45,14 +49,12 @@ except ImportError:
 
 class ThreePanelView(ToggleMixin, PlotView):
     """
-    Standard 3-panel GUI view backed by the existing PlotRenderer.
+    Standard 3-panel GUI view backed by a :class:`MainPlotGrid`.
 
-    This is a *thin adapter*: it owns nothing new.  The axes, canvas, and
-    PlotRenderer are still held by the iSLATPlot controller.  The view
-    just provides the :class:`PlotView` API on top.
-
-    Toggle-state management (atomic lines, saved lines, summed spectrum,
-    legend) is provided by :class:`ToggleMixin`.
+    The grid is created lazily in *borrowed-axes* mode on first render:
+    it receives the controller's ``ax1``/``ax2``/``ax3`` and renders
+    directly onto them.  Toggle-state management (atomic lines, saved
+    lines, summed spectrum, legend) is provided by :class:`ToggleMixin`.
     """
 
     def __init__(self, plot_manager: Any) -> None:
@@ -65,6 +67,11 @@ class ThreePanelView(ToggleMixin, PlotView):
         self._pm = plot_manager  # short alias for the controller
         self._needs_refresh: bool = True  # Set True when data changes; cleared after re-render
 
+        # MainPlotGrid in borrowed-axes mode — created lazily in
+        # _ensure_grid() because wave_data/flux_data are not available
+        # until the first render call.
+        self._grid: MainPlotGrid | None = None
+
     # ------------------------------------------------------------------
     # Helpers (private, short-hand access to controller state)
     # ------------------------------------------------------------------
@@ -74,6 +81,36 @@ class ThreePanelView(ToggleMixin, PlotView):
             if hasattr(artist, tag):
                 return True
         return False
+
+    def _ensure_grid(self) -> MainPlotGrid:
+        """Return the composed :class:`MainPlotGrid`, creating it lazily.
+
+        The grid is constructed in *borrowed-axes* mode using the
+        controller's ``ax1``/``ax2``/``ax3``.  Because it never calls
+        ``fig.clf()``, all external references to these axes stay valid.
+        """
+        if self._grid is not None:
+            return self._grid
+
+        islat = self._islat
+        wave = getattr(islat, 'wave_data', np.array([]))
+        flux = getattr(islat, 'flux_data', np.array([]))
+        err = getattr(islat, 'err_data', None)
+        mol_dict = getattr(islat, 'molecules_dict', None)
+        active_mol = getattr(islat, 'active_molecule', None)
+
+        self._grid = MainPlotGrid(
+            wave_data=wave,
+            flux_data=flux,
+            error_data=err,
+            molecules=mol_dict,
+            active_molecule=active_mol,
+            theme=self._pm.theme,
+            ax_spectrum=self._pm.ax1,
+            ax_inspection=self._pm.ax2,
+            ax_popdiagram=self._pm.ax3,
+        )
+        return self._grid
     @property
     def _renderer(self) -> "PlotRenderer":
         return self._pm.plot_renderer
@@ -172,10 +209,17 @@ class ThreePanelView(ToggleMixin, PlotView):
         self._needs_refresh = False
 
     def _do_update_model_plot(self) -> None:
-        """Internal full re-render mirroring the old ``iSLATPlot.update_model_plot`` logic."""
+        """Internal full re-render via the composed :class:`MainPlotGrid`.
+
+        Data is fetched from the ``iSLAT`` controller, pushed into the
+        grid's ``update_data()`` method (which clears and re-renders the
+        spectrum panel on the borrowed axes), and then toggle states are
+        reconciled on top.
+        """
         islat = self._islat
 
         if not hasattr(islat, 'molecules_dict') or len(islat.molecules_dict) == 0:
+            # No molecules — fall back to the renderer for a quick clear
             self._renderer.clear_model_lines()
             self._canvas.draw_idle()
             return
@@ -183,37 +227,29 @@ class ThreePanelView(ToggleMixin, PlotView):
         mol_dict = islat.molecules_dict
 
         # Always work from the original observer-frame wavelengths.
-        # MoleculeDict.get_summed_flux handles stellar RV and pixel
-        # matching internally; it returns rest-frame wavelengths.
         wave_data_obs = islat.wave_data_original
-
-        # Compute summed flux.  get_summed_flux expects observer-frame
-        # wavelengths and returns (rest_frame_wavelengths, summed_flux).
-        summed_wavelengths = summed_flux = None
-        try:
-            if hasattr(mol_dict, 'get_summed_flux'):
-                summed_wavelengths, summed_flux = mol_dict.get_summed_flux(
-                    wave_data_obs, visible_only=True
-                )
-        except Exception as e:
-            debug_config.warning("three_panel", f"Could not get summed flux: {e}")
 
         # RV-corrected (rest-frame) wavelengths for the display x-axis.
         wave_data = mol_dict.apply_stellar_rv(wave_data_obs)
         islat.wave_data = wave_data
 
-        self._renderer.render_main_spectrum_plot(
+        # Push data into the grid and re-render all three panels.
+        grid = self._ensure_grid()
+        grid.update_data(
             wave_data=wave_data,
             flux_data=islat.flux_data,
-            molecules=islat.molecules_dict,
-            summed_wavelengths=summed_wavelengths,
-            summed_flux=summed_flux,
+            molecules=mol_dict,
+            active_molecule=getattr(islat, 'active_molecule', None),
             error_data=getattr(islat, 'err_data', None),
+            wave_data_obs=wave_data_obs,
         )
 
-        # Respect summed_toggle
+        # Respect summed_toggle — hide the summed fill if the user
+        # toggled it off.
         if not self._pm.summed_toggle:
-            self._renderer.set_summed_spectrum_visibility(False)
+            BasePlot._clear_tagged_artists(
+                grid.ax_spectrum, "_islat_summed", lines=False,
+            )
 
         # Overlay saved / atomic lines if their toggles are on
         if self._pm.atomic_toggle:
@@ -247,17 +283,18 @@ class ThreePanelView(ToggleMixin, PlotView):
         """
         Fast incremental update — toggle one molecule's artists on ax1.
 
-        Delegates all heavy-lifting to ``PlotRenderer.handle_molecule_visibility_change``
-        which already handles line removal, summed-spectrum update, and legend rebuild.
+        Delegates to :meth:`MainPlotGrid.handle_molecule_visibility_change`
+        which handles artist toggling, summed-spectrum update, and legend
+        rebuild on the borrowed spectrum axes.
         """
-        self._renderer.handle_molecule_visibility_change(
+        grid = self._ensure_grid()
+        # Keep the grid's molecules reference in sync
+        grid.molecules = molecules_dict
+        grid.wave_data_obs = getattr(self._islat, 'wave_data_original', wave_data)
+
+        grid.handle_molecule_visibility_change(
             molecule_name=molecule_name,
             is_visible=is_visible,
-            molecules_dict=molecules_dict,
-            wave_data=wave_data,
-            active_molecule=active_molecule,
-            current_selection=current_selection,
-            is_full_spectrum=False,  # We are the three-panel view
             force_rerender=force_rerender,
         )
         self._canvas.draw_idle()

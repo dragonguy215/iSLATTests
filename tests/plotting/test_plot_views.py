@@ -533,8 +533,164 @@ class TestMainPlotGrid:
 
 
 # ======================================================================
-# MainPlotGrid — interactive / GUI helper methods
+# MainPlotGrid — borrowed-axes mode (Step 1)
 # ======================================================================
+
+class TestMainPlotGridBorrowedAxes:
+    """Tests for borrowed-axes mode where MainPlotGrid renders onto
+    pre-existing axes without calling fig.clf() or creating new axes."""
+
+    @pytest.fixture
+    def borrowed_setup(self):
+        """Create a figure with 3 pre-existing axes and a MainPlotGrid in borrowed mode."""
+        fig = plt.figure(figsize=(12, 8))
+        from iSLAT.Modules.Plotting.BasePlot import BasePlot
+        ax1, ax2, ax3 = BasePlot.create_three_panel_axes(fig)
+        wave, flux, err = make_wave_flux(n=200)
+        yield fig, ax1, ax2, ax3, wave, flux, err
+        plt.close(fig)
+
+    def test_borrowed_flag_is_set(self, borrowed_setup):
+        fig, ax1, ax2, ax3, wave, flux, err = borrowed_setup
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err,
+            ax_spectrum=ax1, ax_inspection=ax2, ax_popdiagram=ax3,
+        )
+        assert mpg._borrowed_axes is True
+        assert mpg.ax_spectrum is ax1
+        assert mpg.ax_inspection is ax2
+        assert mpg.ax_popdiagram is ax3
+
+    def test_standalone_flag_is_false(self):
+        """Without injected axes the flag should be False."""
+        wave, flux, err = make_wave_flux(n=200)
+        mpg = MainPlotGrid(wave, flux, error_data=err)
+        assert mpg._borrowed_axes is False
+        assert mpg.ax_spectrum is None  # not yet created
+
+    def test_generate_plot_preserves_axes_identity(self, borrowed_setup):
+        """In borrowed mode, generate_plot must NOT replace the axes objects."""
+        fig, ax1, ax2, ax3, wave, flux, err = borrowed_setup
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err,
+            ax_spectrum=ax1, ax_inspection=ax2, ax_popdiagram=ax3,
+        )
+        mpg.generate_plot()
+        # Axes should be the same objects — not new ones
+        assert mpg.ax_spectrum is ax1
+        assert mpg.ax_inspection is ax2
+        assert mpg.ax_popdiagram is ax3
+
+    def test_generate_plot_does_not_clf(self, borrowed_setup):
+        """In borrowed mode, other axes on the figure should survive."""
+        fig, ax1, ax2, ax3, wave, flux, err = borrowed_setup
+        # Add a 4th axes to the figure to prove fig.clf() is not called
+        extra_ax = fig.add_axes([0.1, 0.1, 0.2, 0.2])
+        assert extra_ax in fig.get_axes()
+
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err,
+            ax_spectrum=ax1, ax_inspection=ax2, ax_popdiagram=ax3,
+        )
+        mpg.generate_plot()
+        # The extra axes should still exist
+        assert extra_ax in fig.get_axes()
+
+    def test_renders_spectrum_on_borrowed_axes(self, borrowed_setup):
+        """Borrowed mode should actually render observed spectrum lines."""
+        fig, ax1, ax2, ax3, wave, flux, err = borrowed_setup
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err,
+            ax_spectrum=ax1, ax_inspection=ax2, ax_popdiagram=ax3,
+        )
+        mpg.generate_plot()
+        # ax1 should have at least one Line2D (the observed spectrum)
+        assert len(ax1.lines) > 0
+
+    def test_renders_with_molecules(self, borrowed_setup):
+        """Borrowed mode should render molecule overlays."""
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        fig, ax1, ax2, ax3, wave, flux, err = borrowed_setup
+        mol = _make_test_molecule()
+        md = MoleculeDict()
+        md[mol.name] = mol
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err,
+            molecules=md, active_molecule=mol,
+            ax_spectrum=ax1, ax_inspection=ax2, ax_popdiagram=ax3,
+        )
+        mpg.generate_plot()
+        # Should have molecule-tagged lines
+        tagged = [l for l in ax1.lines if getattr(l, "_molecule_name", None) == mol.name]
+        assert len(tagged) > 0
+
+    def test_fig_property_points_to_injected_figure(self, borrowed_setup):
+        """In borrowed mode, mpg.fig should be the original figure."""
+        fig, ax1, ax2, ax3, wave, flux, err = borrowed_setup
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err,
+            ax_spectrum=ax1, ax_inspection=ax2, ax_popdiagram=ax3,
+        )
+        assert mpg.fig is fig
+
+    def test_regenerate_preserves_axes(self, borrowed_setup):
+        """Calling generate_plot twice in borrowed mode keeps the same axes."""
+        fig, ax1, ax2, ax3, wave, flux, err = borrowed_setup
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err,
+            ax_spectrum=ax1, ax_inspection=ax2, ax_popdiagram=ax3,
+        )
+        mpg.generate_plot()
+        mpg.generate_plot()
+        assert mpg.ax_spectrum is ax1
+        assert mpg.ax_inspection is ax2
+        assert mpg.ax_popdiagram is ax3
+
+    def test_update_data_works_in_borrowed_mode(self, borrowed_setup):
+        """update_data should refresh panels on borrowed axes."""
+        fig, ax1, ax2, ax3, wave, flux, err = borrowed_setup
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err,
+            ax_spectrum=ax1, ax_inspection=ax2, ax_popdiagram=ax3,
+        )
+        mpg.generate_plot()
+        new_flux = flux * 2
+        mpg.update_data(flux_data=new_flux)
+        assert np.array_equal(mpg.flux_data, new_flux)
+
+    def test_set_inspection_range_in_borrowed_mode(self, borrowed_setup):
+        """set_inspection_range should render the inspection panel on borrowed ax2."""
+        fig, ax1, ax2, ax3, wave, flux, err = borrowed_setup
+        mol = _make_test_molecule()
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err, active_molecule=mol,
+            ax_spectrum=ax1, ax_inspection=ax2, ax_popdiagram=ax3,
+        )
+        mpg.generate_plot()
+        mpg.set_inspection_range(12.0, 15.0)
+        assert mpg.inspection_range == (12.0, 15.0)
+        # ax2 should have been rendered (has lines from the LIP)
+        assert len(ax2.lines) > 0
+
+    def test_molecule_visibility_in_borrowed_mode(self, borrowed_setup):
+        """set_molecule_visibility should toggle artists on borrowed axes."""
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        fig, ax1, ax2, ax3, wave, flux, err = borrowed_setup
+        mol = _make_test_molecule()
+        md = MoleculeDict()
+        md[mol.name] = mol
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err, molecules=md,
+            ax_spectrum=ax1, ax_inspection=ax2, ax_popdiagram=ax3,
+        )
+        mpg.generate_plot()
+        tagged = [l for l in ax1.lines if getattr(l, "_molecule_name", None) == mol.name]
+        assert len(tagged) > 0
+        # Toggle off
+        found = mpg.set_molecule_visibility(mol.name, False)
+        assert found is True
+        for l in tagged:
+            assert not l.get_visible()
 
 class TestMainPlotGridUpdateData:
     """Tests for the update_data / molecule-visibility helpers."""
@@ -778,6 +934,189 @@ class TestThreePanelView:
             view.deactivate()
         except Exception:
             pass  # Agg backend doesn't support Tk pack
+
+
+class TestThreePanelViewGrid:
+    """ThreePanelView composing a MainPlotGrid in borrowed-axes mode (Step 2).
+
+    These tests exercise the _ensure_grid / _do_update_model_plot /
+    on_molecule_visibility_changed pathways that now route through a
+    MainPlotGrid instead of PlotRenderer.
+    """
+
+    @pytest.fixture
+    def rich_controller(self):
+        """A mock controller with real axes AND realistic islat data."""
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        from iSLAT.Modules.Plotting.BasePlot import BasePlot
+
+        fig = plt.figure(figsize=(12, 8))
+        ax1, ax2, ax3 = BasePlot.create_three_panel_axes(fig)
+
+        wave, flux, err = make_wave_flux(n=200)
+        mol = _make_test_molecule()
+        md = MoleculeDict()
+        md[mol.name] = mol
+
+        islat = MagicMock()
+        islat.wave_data = wave
+        islat.wave_data_original = wave.copy()
+        islat.flux_data = flux
+        islat.err_data = err
+        islat.molecules_dict = md
+        islat.active_molecule = mol
+        # apply_stellar_rv should be a pass-through in tests
+        md.apply_stellar_rv = MagicMock(side_effect=lambda w: w)
+
+        pm = MagicMock()
+        pm.fig = fig
+        pm.ax1 = ax1
+        pm.ax2 = ax2
+        pm.ax3 = ax3
+        pm.canvas = MagicMock()
+        pm.canvas.draw_idle = MagicMock()
+        pm.theme = {"background": "#181A1B", "foreground": "#e8e6e3"}
+        pm.toggle_state = {
+            "atomic_lines": False,
+            "saved_lines": False,
+            "summed": True,
+            "legend": True,
+        }
+        pm.islat = islat
+        pm.plot_renderer = MagicMock()
+        pm.summed_toggle = True
+        pm.atomic_toggle = False
+        pm.line_toggle = False
+        pm.legend_toggle = True
+        pm.make_span_selector = MagicMock()
+
+        yield pm, mol, md
+        plt.close(fig)
+
+    def test_grid_is_none_before_render(self, rich_controller):
+        pm, mol, md = rich_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        assert view._grid is None
+
+    def test_ensure_grid_creates_borrowed_grid(self, rich_controller):
+        pm, mol, md = rich_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        grid = view._ensure_grid()
+        assert grid is not None
+        assert grid._borrowed_axes is True
+        assert grid.ax_spectrum is pm.ax1
+        assert grid.ax_inspection is pm.ax2
+        assert grid.ax_popdiagram is pm.ax3
+
+    def test_ensure_grid_is_idempotent(self, rich_controller):
+        pm, mol, md = rich_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        g1 = view._ensure_grid()
+        g2 = view._ensure_grid()
+        assert g1 is g2
+
+    def test_do_update_model_plot_renders_onto_ax1(self, rich_controller):
+        pm, mol, md = rich_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        view._do_update_model_plot()
+        # ax1 should now have observed spectrum + molecule lines
+        assert len(pm.ax1.lines) > 0
+        # The grid should have been created
+        assert view._grid is not None
+
+    def test_do_update_model_plot_does_not_use_renderer_for_spectrum(self, rich_controller):
+        """After Step 2, _do_update_model_plot should NOT call
+        renderer.render_main_spectrum_plot — that is now handled by the grid."""
+        pm, mol, md = rich_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        view._do_update_model_plot()
+        pm.plot_renderer.render_main_spectrum_plot.assert_not_called()
+
+    def test_do_update_model_plot_calls_make_span_selector(self, rich_controller):
+        pm, mol, md = rich_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        view._do_update_model_plot()
+        pm.make_span_selector.assert_called_once()
+
+    def test_do_update_model_plot_calls_draw_idle(self, rich_controller):
+        pm, mol, md = rich_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        view._do_update_model_plot()
+        pm.canvas.draw_idle.assert_called()
+
+    def test_molecule_visibility_routes_through_grid(self, rich_controller):
+        pm, mol, md = rich_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        # First render to establish molecule artists
+        view._do_update_model_plot()
+        # Verify molecule lines exist
+        tagged = [l for l in pm.ax1.lines if getattr(l, "_molecule_name", None) == mol.name]
+        assert len(tagged) > 0
+        # Toggle off via the view
+        view.on_molecule_visibility_changed(
+            molecule_name=mol.name,
+            is_visible=False,
+            molecules_dict=md,
+            wave_data=pm.islat.wave_data,
+        )
+        # Artists should be invisible
+        tagged_after = [l for l in pm.ax1.lines if getattr(l, "_molecule_name", None) == mol.name]
+        for l in tagged_after:
+            assert not l.get_visible()
+
+    def test_molecule_visibility_does_not_use_renderer(self, rich_controller):
+        """After Step 2, on_molecule_visibility_changed should NOT call
+        renderer.handle_molecule_visibility_change."""
+        pm, mol, md = rich_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        view._do_update_model_plot()
+        pm.plot_renderer.handle_molecule_visibility_change.reset_mock()
+        view.on_molecule_visibility_changed(
+            molecule_name=mol.name,
+            is_visible=False,
+            molecules_dict=md,
+            wave_data=pm.islat.wave_data,
+        )
+        pm.plot_renderer.handle_molecule_visibility_change.assert_not_called()
+
+    def test_grid_axes_are_controller_axes(self, rich_controller):
+        """The grid's borrowed axes must be the exact same objects as the controller's."""
+        pm, mol, md = rich_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        grid = view._ensure_grid()
+        assert grid.ax_spectrum is pm.ax1
+        assert grid.ax_inspection is pm.ax2
+        assert grid.ax_popdiagram is pm.ax3
+
+    def test_update_model_plot_public_api(self, rich_controller):
+        """The public update_model_plot() should delegate and clear _needs_refresh."""
+        pm, mol, md = rich_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        assert view._needs_refresh is True
+        view.update_model_plot()
+        assert view._needs_refresh is False
+        assert len(pm.ax1.lines) > 0
+
+    def test_empty_molecules_clears_model(self, rich_controller):
+        """When molecules_dict is empty, _do_update_model_plot should clear."""
+        pm, mol, md = rich_controller
+        pm.islat.molecules_dict = MagicMock()
+        pm.islat.molecules_dict.__len__ = MagicMock(return_value=0)
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        view._do_update_model_plot()
+        pm.plot_renderer.clear_model_lines.assert_called_once()
 
 
 class TestFullSpectrumViewInit:
