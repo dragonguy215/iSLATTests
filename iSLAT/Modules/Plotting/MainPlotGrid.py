@@ -17,10 +17,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 
 from .BasePlot import BasePlot
 from .LineInspectionPlot import LineInspectionPlot
 from .PopulationDiagramPlot import PopulationDiagramPlot
+
+try:
+    import iSLAT.Constants as c
+except ImportError:  # pragma: no cover
+    c = None  # constants only needed for population diagram scatter
 
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
@@ -343,3 +349,361 @@ class MainPlotGrid(BasePlot):
             self._render_inspection_panel()
         if self.ax_popdiagram is not None:
             self._render_population_panel()
+
+    # ==================================================================
+    # Data update helpers (for GUI embedding)
+    # ==================================================================
+    def update_data(
+        self,
+        wave_data: Optional[np.ndarray] = None,
+        flux_data: Optional[np.ndarray] = None,
+        molecules: Optional["MoleculeDict"] = None,
+        active_molecule: Optional["Molecule"] = None,
+        error_data: Optional[np.ndarray] = None,
+        wave_data_obs: Optional[np.ndarray] = None,
+    ) -> None:
+        """Replace data arrays in-place and refresh all panels.
+
+        Only non-*None* arguments are updated; the rest keep their
+        current values.  After updating, all three panels are
+        re-rendered via :meth:`refresh`.
+
+        Parameters
+        ----------
+        wave_data, flux_data, molecules, active_molecule, error_data,
+        wave_data_obs :
+            Same meaning as the constructor arguments.
+        """
+        if wave_data is not None:
+            self.wave_data = np.asarray(wave_data)
+        if flux_data is not None:
+            self.flux_data = np.asarray(flux_data)
+        if molecules is not None:
+            self.molecules = molecules
+        if active_molecule is not None:
+            self.active_molecule = active_molecule
+        if error_data is not None:
+            self.error_data = np.asarray(error_data)
+        if wave_data_obs is not None:
+            self.wave_data_obs = np.asarray(wave_data_obs)
+        elif wave_data is not None:
+            # Keep observer-frame wavelengths in sync when only
+            # wave_data was updated (caller did not pass wave_data_obs).
+            self.wave_data_obs = self.wave_data
+
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    # Fast molecule visibility helpers (no full rebuild)
+    # ------------------------------------------------------------------
+    def set_molecule_visibility(
+        self,
+        molecule_name: str,
+        visible: bool,
+        ax: Optional[Axes] = None,
+    ) -> bool:
+        """Toggle visibility of an already-plotted molecule on *ax*.
+
+        Searches for ``Line2D`` artists tagged with ``_molecule_name``
+        and sets their visibility.  Returns *True* if any artists were
+        found (i.e. the fast-path succeeded).
+
+        Parameters
+        ----------
+        molecule_name : str
+            Internal molecule name (``molecule.name``).
+        visible : bool
+            Target visibility state.
+        ax : Axes, optional
+            Axes to search.  Defaults to ``ax_spectrum``.
+        """
+        target = ax if ax is not None else self.ax_spectrum
+        if target is None:
+            return False
+        found = False
+        for line in target.lines:
+            if getattr(line, "_molecule_name", None) == molecule_name:
+                line.set_visible(visible)
+                found = True
+        return found
+
+    def remove_molecule_lines(
+        self,
+        molecule_name: str,
+        ax: Optional[Axes] = None,
+    ) -> None:
+        """Remove all ``Line2D`` artists for *molecule_name* from *ax*.
+
+        Parameters
+        ----------
+        molecule_name : str
+            Internal molecule name.
+        ax : Axes, optional
+            Defaults to ``ax_spectrum``.
+        """
+        target = ax if ax is not None else self.ax_spectrum
+        if target is None:
+            return
+        for line in target.lines[:]:
+            if getattr(line, "_molecule_name", None) == molecule_name:
+                line.remove()
+
+    def handle_molecule_visibility_change(
+        self,
+        molecule_name: str,
+        is_visible: bool,
+        *,
+        force_rerender: bool = False,
+    ) -> None:
+        """Handle a single molecule's visibility toggle on the spectrum panel.
+
+        1. Fast-toggle existing artists (or create from scratch).
+        2. Recompute the summed spectrum fill.
+        3. Rebuild the legend.
+
+        This is the standalone equivalent of
+        :meth:`PlotRenderer.handle_molecule_visibility_change`.
+
+        Parameters
+        ----------
+        molecule_name : str
+            The molecule whose visibility changed.
+        is_visible : bool
+            New visibility state.
+        force_rerender : bool
+            When *True*, stale artists are destroyed and recreated from
+            current parameters (e.g. after a parameter change while the
+            molecule was hidden).
+        """
+        if self.ax_spectrum is None or self.molecules is None:
+            return
+        if molecule_name not in self.molecules:
+            return
+
+        molecule = self.molecules[molecule_name]
+        ax = self.ax_spectrum
+
+        # Destroy stale artists when forcing a re-render
+        if force_rerender and is_visible:
+            self.remove_molecule_lines(molecule_name, ax)
+
+        # Try fast visibility toggle
+        toggled = self.set_molecule_visibility(molecule_name, is_visible, ax)
+
+        # If turning ON but no artists exist, plot from scratch
+        if is_visible and not toggled:
+            self._plot_molecule_spectrum(
+                ax, molecule,
+                wave_data=self.wave_data,
+                interpolate_to_input=False,
+            )
+
+        # Recompute summed spectrum
+        self._update_summed_spectrum()
+
+        # Remove lines for molecules that are no longer visible
+        if self.molecules is not None:
+            visible_names = {
+                getattr(m, "name", None)
+                for m in self.molecules.get_visible_molecules(return_objects=True)
+            }
+            for line in ax.lines[:]:
+                name = getattr(line, "_molecule_name", None)
+                if name is not None and name not in visible_names:
+                    line.remove()
+
+        # Rebuild legend
+        self._update_legend(ax)
+
+    def _update_summed_spectrum(self) -> None:
+        """Recompute and redraw the summed-spectrum fill on ``ax_spectrum``.
+
+        Removes existing ``_islat_summed`` collections, recomputes the
+        visible-molecule sum, and re-plots if any visible molecules exist.
+        """
+        ax = self.ax_spectrum
+        if ax is None:
+            return
+        # Remove old summed fill
+        self._clear_tagged_artists(ax, "_islat_summed", lines=False)
+
+        if self.molecules is None:
+            return
+        try:
+            s_wave, s_flux = self.molecules.get_summed_flux(
+                self.wave_data_obs, visible_only=True,
+            )
+            if s_wave is not None and len(s_flux) > 0 and np.any(s_flux > 0):
+                self._plot_summed_spectrum(ax, s_wave, s_flux, deduplicate=True)
+        except Exception:
+            pass
+
+    # ==================================================================
+    # Active-line marker rendering (for GUI interaction layer)
+    # ==================================================================
+    def render_active_line_markers(
+        self,
+        line_data: List[Tuple["MoleculeLine", float, Any]],
+        active_lines: List[Any],
+        max_y: float,
+        *,
+        threshold: float = 0.0,
+        color: str = "green",
+    ) -> None:
+        """Plot vertical line markers in the inspection panel.
+
+        Creates ``vlines`` + text labels on ``ax_inspection`` for each
+        molecular line in *line_data* that exceeds the intensity
+        *threshold* (as a fraction of the strongest line).
+
+        Each entry is appended to *active_lines* as
+        ``[vline_artist, text_artist, None, info_dict]``.
+
+        Parameters
+        ----------
+        line_data : list[tuple]
+            ``(MoleculeLine, intensity, tau)`` triples.
+        active_lines : list
+            Mutable list that receives ``[line, text, scatter, info]``
+            entries.
+        max_y : float
+            Scaling height for the strongest line.
+        threshold : float
+            Fraction (0-1) of max intensity below which lines are hidden.
+        color : str
+            Colour for the markers and labels.
+        """
+        if not line_data or self.ax_inspection is None:
+            return
+
+        intensities = [i for _, i, _ in line_data]
+        max_intensity = max(intensities) if intensities else 1.0
+        if max_intensity <= 0:
+            return
+
+        ax = self.ax_inspection
+        for idx, (line, intensity, tau_val) in enumerate(line_data):
+            frac = intensity / max_intensity
+            if frac < threshold:
+                continue
+            lineheight = frac * max_y
+            if lineheight <= 0:
+                continue
+
+            vline = ax.vlines(
+                line.lam, 0, lineheight,
+                color=color, linestyle="dashed", linewidth=1, picker=True,
+            )
+            text = ax.text(
+                line.lam, lineheight,
+                f"{line.e_up:.0f},{line.a_stein:.3f}",
+                fontsize="x-small", color=color, rotation=45,
+            )
+            info = LineInspectionPlot.get_line_info(line, intensity, tau_val)
+            info["lineheight"] = lineheight
+            info["intensity_percent"] = frac * 100
+
+            if idx < len(active_lines):
+                active_lines[idx][0] = vline
+                active_lines[idx][1] = text
+                active_lines[idx][3].update(info)
+            else:
+                active_lines.append([vline, text, None, info])
+
+    def render_active_line_scatter(
+        self,
+        line_data: List[Tuple["MoleculeLine", float, Any]],
+        active_lines: List[Any],
+        molecule: "Molecule",
+        *,
+        threshold: float = 0.0,
+        color: str = "green",
+    ) -> Any:
+        """Plot scatter points for active lines on the population diagram.
+
+        Returns the :class:`PathCollection` (scatter artist) so the GUI
+        can enable pick-events on it.
+
+        Parameters
+        ----------
+        line_data : list[tuple]
+            ``(MoleculeLine, intensity, tau)`` triples.
+        active_lines : list
+            Mutable list — existing entries are updated in-place, new
+            entries appended.
+        molecule : Molecule
+            Active molecule (used for ``radius``, ``distance``).
+        threshold : float
+            Fraction (0-1) of max intensity below which lines are hidden.
+        color : str
+            Scatter point colour.
+
+        Returns
+        -------
+        PathCollection or None
+            The scatter artist, or *None* if nothing was plotted.
+        """
+        if (
+            not line_data
+            or self.ax_popdiagram is None
+            or molecule is None
+            or c is None
+        ):
+            return None
+
+        intensities = [i for _, i, _ in line_data]
+        max_intensity = max(intensities) if intensities else 1.0
+        if max_intensity <= 0:
+            return None
+
+        radius = getattr(molecule, "radius", 1.0)
+        distance = getattr(molecule, "distance", 140.0)
+        area = np.pi * (radius * c.ASTRONOMICAL_UNIT_M * 1e2) ** 2
+        dist = distance * c.PARSEC_CM
+        beam_s = area / dist ** 2
+
+        e_ups: List[float] = []
+        rd_yaxs: List[float] = []
+        value_data_list: List[Dict[str, Any]] = []
+
+        for line, intensity, tau_val in line_data:
+            frac = intensity / max_intensity
+            if frac < threshold:
+                continue
+            if any(
+                x is None
+                for x in [intensity, line.a_stein, line.g_up, line.lam]
+            ):
+                continue
+
+            F = intensity * beam_s
+            freq = c.SPEED_OF_LIGHT_MICRONS / line.lam
+            rd_yax = np.log(
+                4 * np.pi * F / (line.a_stein * c.PLANCK_CONSTANT * freq * line.g_up)
+            )
+            e_ups.append(line.e_up)
+            rd_yaxs.append(rd_yax)
+
+            info = LineInspectionPlot.get_line_info(line, intensity, tau_val)
+            info["rd_yax"] = rd_yax
+            info["intensity_percent"] = frac * 100
+            value_data_list.append(info)
+
+        if not e_ups:
+            return None
+
+        ax = self.ax_popdiagram
+        sc = ax.scatter(
+            e_ups, rd_yaxs, s=30,
+            color=color, edgecolors="black", picker=True,
+        )
+
+        for idx, info in enumerate(value_data_list):
+            info["_scatter_point_index"] = idx
+            if idx < len(active_lines):
+                active_lines[idx][2] = sc
+                active_lines[idx][3].update(info)
+            else:
+                active_lines.append([None, None, sc, info])
+
+        return sc

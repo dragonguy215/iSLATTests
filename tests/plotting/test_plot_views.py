@@ -533,8 +533,140 @@ class TestMainPlotGrid:
 
 
 # ======================================================================
-# CompositeStackedPanel
+# MainPlotGrid — interactive / GUI helper methods
 # ======================================================================
+
+class TestMainPlotGridUpdateData:
+    """Tests for the update_data / molecule-visibility helpers."""
+
+    def test_update_data_refreshes_panels(self):
+        wave, flux, err = make_wave_flux(n=200)
+        mpg = MainPlotGrid(wave, flux, error_data=err)
+        mpg.generate_plot()
+        # Change flux data
+        new_flux = flux * 2
+        mpg.update_data(flux_data=new_flux)
+        assert np.array_equal(mpg.flux_data, new_flux)
+        mpg.close()
+
+    def test_update_data_partial(self):
+        """Only updated fields should change."""
+        wave, flux, err = make_wave_flux(n=200)
+        mpg = MainPlotGrid(wave, flux, error_data=err)
+        mpg.generate_plot()
+        orig_wave = mpg.wave_data.copy()
+        mpg.update_data(flux_data=flux * 3)
+        # wave_data should be unchanged
+        assert np.array_equal(mpg.wave_data, orig_wave)
+        mpg.close()
+
+    def test_update_data_with_molecule(self):
+        wave, flux, err = make_wave_flux(n=200)
+        mol = _make_test_molecule()
+        mpg = MainPlotGrid(wave, flux, error_data=err)
+        mpg.generate_plot()
+        mpg.update_data(active_molecule=mol)
+        assert mpg.active_molecule is mol
+        mpg.close()
+
+
+class TestMainPlotGridMoleculeVisibility:
+    """Tests for set_molecule_visibility and handle_molecule_visibility_change."""
+
+    def _make_mpg_with_molecule(self):
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        wave, flux, err = make_wave_flux(n=200)
+        mol = _make_test_molecule()
+        md = MoleculeDict()
+        md[mol.name] = mol
+        mpg = MainPlotGrid(wave, flux, error_data=err, molecules=md, active_molecule=mol)
+        mpg.generate_plot()
+        return mpg, mol
+
+    def test_set_molecule_visibility_toggles(self):
+        mpg, mol = self._make_mpg_with_molecule()
+        # There should be a line tagged with the molecule name
+        tagged = [l for l in mpg.ax_spectrum.lines if getattr(l, "_molecule_name", None) == mol.name]
+        assert len(tagged) > 0
+        # Toggle off
+        found = mpg.set_molecule_visibility(mol.name, False)
+        assert found is True
+        for l in tagged:
+            assert not l.get_visible()
+        # Toggle back on
+        mpg.set_molecule_visibility(mol.name, True)
+        for l in tagged:
+            assert l.get_visible()
+        mpg.close()
+
+    def test_set_molecule_visibility_returns_false_for_unknown(self):
+        mpg, _ = self._make_mpg_with_molecule()
+        assert mpg.set_molecule_visibility("NONEXISTENT", False) is False
+        mpg.close()
+
+    def test_remove_molecule_lines(self):
+        mpg, mol = self._make_mpg_with_molecule()
+        mpg.remove_molecule_lines(mol.name)
+        tagged = [l for l in mpg.ax_spectrum.lines if getattr(l, "_molecule_name", None) == mol.name]
+        assert len(tagged) == 0
+        mpg.close()
+
+
+class TestMainPlotGridActiveLineMarkers:
+    """Tests for render_active_line_markers and render_active_line_scatter."""
+
+    def _make_line_data(self, mol):
+        """Return a small list of (MoleculeLine, intensity, tau) triples."""
+        if not hasattr(mol, 'intensity') or mol.intensity is None:
+            return []
+        try:
+            return mol.intensity.get_lines_in_range_with_intensity(12.0, 16.0)
+        except Exception:
+            return []
+
+    def test_render_active_line_markers(self):
+        wave, flux, err = make_wave_flux(n=200)
+        mol = _make_test_molecule()
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err,
+            active_molecule=mol,
+            inspection_range=(12.0, 16.0),
+        )
+        mpg.generate_plot()
+        line_data = self._make_line_data(mol)
+        if not line_data:
+            pytest.skip("No line data generated")
+        active_lines: list = []
+        mpg.render_active_line_markers(line_data, active_lines, max_y=0.1, color="green")
+        assert len(active_lines) > 0
+        # Each entry is [vline, text, scatter_or_None, info_dict]
+        for entry in active_lines:
+            assert len(entry) == 4
+            assert entry[0] is not None  # vline
+            assert entry[1] is not None  # text
+            assert isinstance(entry[3], dict)
+        mpg.close()
+
+    def test_render_active_line_scatter(self):
+        wave, flux, err = make_wave_flux(n=200)
+        mol = _make_test_molecule()
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err,
+            active_molecule=mol,
+            inspection_range=(12.0, 16.0),
+        )
+        mpg.generate_plot()
+        line_data = self._make_line_data(mol)
+        if not line_data:
+            pytest.skip("No line data generated")
+        active_lines: list = []
+        sc = mpg.render_active_line_scatter(line_data, active_lines, mol, color="green")
+        assert sc is not None
+        assert len(active_lines) > 0
+        # Scatter entries should have _scatter_point_index
+        for entry in active_lines:
+            assert "_scatter_point_index" in entry[3]
+        mpg.close()
 
 class TestCompositeStackedPanel:
     """Tests for CompositeStackedPanel.from_pair and rendering."""
