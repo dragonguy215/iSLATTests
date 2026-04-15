@@ -257,16 +257,28 @@ class MainPlotGrid(BasePlot):
         ax = self.ax_popdiagram
         ax.clear()
 
-        if self.active_molecule is None:
+        if self.active_molecule is None and self.molecules is None:
             ax.set_title("Population Diagram -- no molecule selected")
             return
 
-        pdp = PopulationDiagramPlot(
-            molecule=self.active_molecule,
-            highlight_lines=self.line_data,
-            ax=ax,
-            theme=self.theme,
-        )
+        # Multi-molecule mode: show all visible molecules
+        if self.molecules is not None and len(self.molecules) > 0:
+            pdp = PopulationDiagramPlot(
+                molecules=self.molecules,
+                highlight_lines=self.line_data,
+                ax=ax,
+                theme=self.theme,
+            )
+        elif self.active_molecule is not None:
+            pdp = PopulationDiagramPlot(
+                molecule=self.active_molecule,
+                highlight_lines=self.line_data,
+                ax=ax,
+                theme=self.theme,
+            )
+        else:
+            ax.set_title("Population Diagram -- no molecule selected")
+            return
         pdp.generate_plot()
 
     # ------------------------------------------------------------------

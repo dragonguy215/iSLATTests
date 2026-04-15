@@ -157,7 +157,7 @@ class TestPopulationDiagramPlot:
     def test_mutual_exclusion(self):
         mol = _make_test_molecule()
         inten = _make_test_intensity()
-        with pytest.raises(ValueError, match="not both"):
+        with pytest.raises(ValueError, match="not more than one"):
             PopulationDiagramPlot(molecule=mol, intensity=inten)
 
     def test_no_data_shows_message(self):
@@ -192,6 +192,187 @@ class TestPopulationDiagramPlot:
         inten = _make_test_intensity(t_kin=300.0)
         pdp.set_intensity(inten, name="Bare", radius=2.0, distance=100.0)
         assert "Bare" in pdp.ax.get_title()
+        pdp.close()
+
+    # --- Multi-molecule tests ---
+
+    def test_multiple_molecules_list(self):
+        """Passing a list of molecules renders all with distinct colours."""
+        mol1 = _make_test_molecule(name='H2O', temp=500.0)
+        mol2 = _make_test_molecule(name='CO', temp=300.0, lam_start=14.0)
+        pdp = PopulationDiagramPlot(molecules=[mol1, mol2])
+        pdp.generate_plot()
+        assert pdp.fig is not None
+        assert pdp.ax is not None
+        assert "Population diagram" in pdp.ax.get_title()
+        # Should have 2 component data entries
+        assert len(pdp.component_data) == 2
+        assert pdp.component_data[0]["name"] == "H2O"
+        assert pdp.component_data[1]["name"] == "CO"
+        # Colours should be distinct
+        assert pdp.component_data[0]["color"] != pdp.component_data[1]["color"]
+        pdp.close()
+
+    def test_multiple_molecules_molecule_dict(self):
+        """Passing a MoleculeDict renders visible molecules."""
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        mol1 = _make_test_molecule(name='H2O', temp=500.0)
+        mol2 = _make_test_molecule(name='CO', temp=300.0, lam_start=14.0)
+        md = MoleculeDict()
+        md['H2O'] = mol1
+        md['CO'] = mol2
+        pdp = PopulationDiagramPlot(molecules=md)
+        pdp.generate_plot()
+        assert pdp.fig is not None
+        assert len(pdp.component_data) >= 1
+        pdp.close()
+
+    def test_mutual_exclusion_molecules_and_molecule(self):
+        mol = _make_test_molecule()
+        with pytest.raises(ValueError, match="not more than one"):
+            PopulationDiagramPlot(molecule=mol, molecules=[mol])
+
+    def test_mutual_exclusion_molecules_and_intensity(self):
+        mol = _make_test_molecule()
+        inten = _make_test_intensity()
+        with pytest.raises(ValueError, match="not more than one"):
+            PopulationDiagramPlot(molecules=[mol], intensity=inten)
+
+    def test_set_molecules_regenerates(self):
+        mol1 = _make_test_molecule(name='H2O')
+        mol2 = _make_test_molecule(name='CO', temp=300.0, lam_start=14.0)
+        pdp = PopulationDiagramPlot(molecule=mol1)
+        pdp.generate_plot()
+        assert "H2O" in pdp.ax.get_title()
+        pdp.set_molecules([mol1, mol2])
+        assert "Population diagram" in pdp.ax.get_title()
+        assert len(pdp.component_data) == 2
+        pdp.close()
+
+    def test_add_molecule(self):
+        mol1 = _make_test_molecule(name='H2O')
+        mol2 = _make_test_molecule(name='CO', temp=300.0, lam_start=14.0)
+        pdp = PopulationDiagramPlot(molecule=mol1)
+        pdp.generate_plot()
+        assert len(pdp.component_data) == 1
+        pdp.add_molecule(mol2)
+        assert len(pdp.component_data) == 2
+        pdp.close()
+
+    def test_remove_molecule(self):
+        mol1 = _make_test_molecule(name='H2O')
+        mol2 = _make_test_molecule(name='CO', temp=300.0, lam_start=14.0)
+        pdp = PopulationDiagramPlot(molecules=[mol1, mol2])
+        pdp.generate_plot()
+        assert len(pdp.component_data) == 2
+        pdp.remove_molecule('CO')
+        # Should be back to single-molecule mode
+        assert len(pdp.component_data) == 1
+        assert pdp.component_data[0]["name"] == "H2O"
+        pdp.close()
+
+    # --- Color mapping tests ---
+
+    def test_color_by_e_up(self):
+        """Color mapping by upper-level energy produces a colorbar."""
+        mol = _make_test_molecule()
+        pdp = PopulationDiagramPlot(molecule=mol)
+        pdp.generate_plot()
+        pdp.color_by('e_up', cmap='plasma')
+        # Should have a colorbar (extra axes)
+        assert len(pdp.fig.axes) > 1
+        pdp.close()
+
+    def test_color_by_a_stein(self):
+        mol = _make_test_molecule()
+        pdp = PopulationDiagramPlot(molecule=mol)
+        pdp.color_by('a_stein')
+        assert pdp.fig is not None
+        pdp.close()
+
+    def test_color_by_wavelength(self):
+        mol = _make_test_molecule()
+        pdp = PopulationDiagramPlot(molecule=mol)
+        pdp.color_by('wavelength')
+        assert pdp.fig is not None
+        pdp.close()
+
+    def test_color_by_lam_alias(self):
+        mol = _make_test_molecule()
+        pdp = PopulationDiagramPlot(molecule=mol)
+        pdp.color_by('lam')
+        assert pdp.fig is not None
+        pdp.close()
+
+    def test_color_by_lev_up_categorical(self):
+        """Categorical color mapping by transition label."""
+        mol = _make_test_molecule()
+        pdp = PopulationDiagramPlot(molecule=mol)
+        pdp.color_by('lev_up', cmap='tab10')
+        assert pdp.fig is not None
+        # Should have a legend
+        legend = pdp.ax.get_legend()
+        assert legend is not None
+        pdp.close()
+
+    def test_color_by_component_categorical(self):
+        """Categorical color mapping by component name."""
+        mol1 = _make_test_molecule(name='H2O')
+        mol2 = _make_test_molecule(name='CO', temp=300.0, lam_start=14.0)
+        pdp = PopulationDiagramPlot(molecules=[mol1, mol2])
+        pdp.color_by('component', cmap='Set1')
+        assert pdp.fig is not None
+        legend = pdp.ax.get_legend()
+        assert legend is not None
+        pdp.close()
+
+    def test_color_by_with_vmin_vmax(self):
+        mol = _make_test_molecule()
+        pdp = PopulationDiagramPlot(molecule=mol)
+        pdp.color_by('e_up', vmin=500, vmax=3000)
+        assert pdp.fig is not None
+        pdp.close()
+
+    def test_clear_color_mapping(self):
+        mol = _make_test_molecule()
+        pdp = PopulationDiagramPlot(molecule=mol)
+        pdp.color_by('e_up')
+        pdp.clear_color_mapping()
+        assert pdp._color_mapping is None
+        pdp.close()
+
+    def test_color_by_multi_molecule(self):
+        """Color mapping works across multiple molecules."""
+        mol1 = _make_test_molecule(name='H2O', temp=500.0)
+        mol2 = _make_test_molecule(name='CO', temp=300.0, lam_start=14.0)
+        pdp = PopulationDiagramPlot(molecules=[mol1, mol2])
+        pdp.color_by('e_up', cmap='coolwarm')
+        assert pdp.fig is not None
+        assert len(pdp.component_data) == 2
+        pdp.close()
+
+    def test_component_data_has_expected_keys(self):
+        """Verify component_data contains all expected molecular properties."""
+        mol = _make_test_molecule()
+        pdp = PopulationDiagramPlot(molecule=mol)
+        pdp.generate_plot()
+        assert len(pdp.component_data) == 1
+        cd = pdp.component_data[0]
+        for key in ('name', 'color', 'eu', 'rd_yax', 'wavelength',
+                     'intens', 'a_stein', 'g_up', 'lev_up', 'lev_low',
+                     'e_low', 'valid_mask', 'beam_s'):
+            assert key in cd, f"Missing key: {key}"
+        pdp.close()
+
+    def test_color_by_no_regenerate(self):
+        """color_by with regenerate=False does not call generate_plot."""
+        mol = _make_test_molecule()
+        pdp = PopulationDiagramPlot(molecule=mol)
+        pdp.generate_plot()
+        n_axes_before = len(pdp.fig.axes)
+        pdp.color_by('e_up', regenerate=False)
+        # Figure should not have changed since regenerate=False
+        assert len(pdp.fig.axes) == n_axes_before
         pdp.close()
 
 
