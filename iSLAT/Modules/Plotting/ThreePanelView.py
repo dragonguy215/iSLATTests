@@ -369,7 +369,8 @@ class ThreePanelView(ToggleMixin, PlotView):
 
     def clear_active_lines(self) -> None:
         """Remove all active-line artists (vlines, text, scatter)."""
-        self._renderer.clear_active_lines(self.active_lines)
+        grid = self._ensure_grid()
+        grid.clear_active_lines(self.active_lines)
 
     # ------------------------------------------------------------------
     # Molecule lifecycle callbacks
@@ -465,7 +466,8 @@ class ThreePanelView(ToggleMixin, PlotView):
         """Render the line-inspection panel (ax2) with vertical markers."""
         # Render the base line inspection plot (observed + molecule model)
         fit_result = getattr(self._pm, 'fit_result', None)
-        self._renderer.render_complete_line_inspection_plot(
+        grid = self._ensure_grid()
+        grid.render_line_inspection_plot(
             wave_data=self._islat.wave_data,
             flux_data=self._islat.flux_data,
             xmin=xmin, xmax=xmax,
@@ -491,7 +493,8 @@ class ThreePanelView(ToggleMixin, PlotView):
 
     def _render_population_diagram_base(self) -> None:
         """Render the base population diagram for the active molecule."""
-        self._renderer.render_population_diagram(self._islat.active_molecule)
+        grid = self._ensure_grid()
+        grid.render_population_diagram_for_molecule(self._islat.active_molecule)
 
     def _render_population_diagram_with_lines(
         self, line_data: List[Tuple["MoleculeLine", float, Any]],
@@ -505,10 +508,10 @@ class ThreePanelView(ToggleMixin, PlotView):
                 line_data, self.active_lines, active_mol,
                 threshold=self._get_line_threshold(),
             )
-            # Store scatter collection on the renderer for pick-event handling
+            # Store scatter collection for pick-event handling
             if sc is not None:
-                self._renderer._active_scatter_collection = sc
-                self._renderer._active_scatter_count = len(
+                self._active_scatter_collection = sc
+                self._active_scatter_count = len(
                     [e for e in self.active_lines if e[2] is not None]
                 )
 
@@ -532,9 +535,10 @@ class ThreePanelView(ToggleMixin, PlotView):
         picked_scatter_idx = None
         picked_artist = event.artist
 
-        scatter_collection = getattr(self._renderer, '_active_scatter_collection', None)
-        scatter_count = getattr(self._renderer, '_active_scatter_count', 0)
-        active_color = self._renderer._get_theme_value("active_scatter_line_color", 'green')
+        scatter_collection = getattr(self, '_active_scatter_collection', None)
+        scatter_count = getattr(self, '_active_scatter_count', 0)
+        grid = self._ensure_grid()
+        active_color = grid._get_theme_value("active_scatter_line_color", 'green')
 
         scatter_point_clicked = None
         if picked_artist is scatter_collection and hasattr(event, 'ind') and len(event.ind) > 0:
@@ -573,9 +577,10 @@ class ThreePanelView(ToggleMixin, PlotView):
         if not self.active_lines:
             return
 
-        scatter_collection = getattr(self._renderer, '_active_scatter_collection', None)
-        scatter_count = getattr(self._renderer, '_active_scatter_count', 0)
-        active_color = self._renderer._get_theme_value("active_scatter_line_color", 'green')
+        scatter_collection = getattr(self, '_active_scatter_collection', None)
+        scatter_count = getattr(self, '_active_scatter_count', 0)
+        grid = self._ensure_grid()
+        active_color = grid._get_theme_value("active_scatter_line_color", 'green')
 
         # Reset all to active colour
         for line, text_obj, scatter, value in self.active_lines:

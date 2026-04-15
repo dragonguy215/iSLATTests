@@ -40,7 +40,6 @@ _DEFAULT_COLORS: List[str] = [
     "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
 ]
 
-
 class PopulationDiagramPlot(BasePlot):
     """
     Boltzmann / rotation diagram for one or more molecules.

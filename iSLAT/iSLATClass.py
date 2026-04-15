@@ -797,11 +797,7 @@ class iSLAT:
                 # GUI already exists, just update the spectrum display
                 print("Updating existing GUI with new spectrum...")
                 if hasattr(self.GUI, "plot") and self.GUI.plot is not None:
-                    self.GUI.plot.update_model_plot()
-                    # Refresh line inspection + population diagram for the new spectrum
-                    if hasattr(self.GUI.plot, 'current_selection') and self.GUI.plot.current_selection:
-                        xmin, xmax = self.GUI.plot.current_selection
-                        self.GUI.plot.plot_spectrum_around_line(xmin, xmax, highlight_strongest=True)
+                    self.GUI.plot.update_all_plots()
                     self.GUI.plot.match_display_range(match_y=True)
                     if hasattr(self.GUI.plot, 'canvas'):
                         self.GUI.plot.canvas.draw()

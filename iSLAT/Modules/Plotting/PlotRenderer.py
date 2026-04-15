@@ -884,18 +884,6 @@ class PlotRenderer(BasePlot):
         # Rebuild legend to reflect current visibility state
         # (self._update_legend already respects the legend toggle)
         self._update_legend(self.ax1)
-
-        # Handle active molecule line inspection update if needed
-        if (active_molecule and 
-            hasattr(active_molecule, 'name') and 
-            active_molecule.name == molecule_name and 
-            current_selection):
-            
-            # Delegate line inspection update to plot manager
-            # This is the only callback needed to MainPlot
-            if hasattr(self.plot_manager, 'plot_spectrum_around_line'):
-                xmin, xmax = current_selection
-                self.plot_manager.plot_spectrum_around_line(xmin, xmax, highlight_strongest=True)
     
     def update_summed_spectrum_only(self, wave_data: np.ndarray, summed_flux: np.ndarray) -> None:
         """Update only the summed spectrum without affecting individual molecule plots.

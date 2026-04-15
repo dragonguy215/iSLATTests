@@ -767,3 +767,290 @@ class MainPlotGrid(BasePlot):
                 active_lines.append([None, None, sc, info])
 
         return sc
+
+    # ==================================================================
+    # GUI line-inspection & population-diagram rendering
+    # ==================================================================
+    # These methods were previously on PlotRenderer but are pure
+    # rendering with no controller state, so they belong on the grid.
+    # ------------------------------------------------------------------
+
+    def render_line_inspection_plot(
+        self,
+        wave_data: np.ndarray,
+        flux_data: np.ndarray,
+        xmin: float,
+        xmax: float,
+        active_molecule: Optional["Molecule"] = None,
+        fit_result: Optional[Any] = None,
+        molecules: Optional["MoleculeDict"] = None,
+        wave_data_obs: Optional[np.ndarray] = None,
+        legend_visible: bool = True,
+    ) -> None:
+        """Render the line-inspection panel (ax_inspection) with observed
+        data and the active molecule model.
+
+        Reuses an internal :class:`LineInspectionPlot` instance and
+        optionally overlays fit results.
+
+        Parameters
+        ----------
+        wave_data, flux_data : np.ndarray
+            Full observed spectrum arrays.
+        xmin, xmax : float
+            Wavelength bounds for the zoomed inspection region.
+        active_molecule : Molecule, optional
+            Active molecule to show in the panel.
+        fit_result : tuple, optional
+            ``(gauss_fit, fitted_wave, fitted_flux)`` to overlay.
+        molecules : MoleculeDict, optional
+            For matched-spectral-sampling look-ups.
+        wave_data_obs : np.ndarray, optional
+            Observer-frame wavelengths.
+        legend_visible : bool
+            Whether the legend should be shown.
+        """
+        ax = self.ax_inspection
+        if ax is None:
+            return
+        ax.clear()
+
+        if xmin is None or xmax is None or (xmax - xmin) < 0.0001:
+            return
+
+        if molecules is None:
+            molecules = self.molecules
+        if wave_data_obs is None:
+            wave_data_obs = self.wave_data_obs
+
+        # Reuse / create a LineInspectionPlot delegate
+        if not hasattr(self, '_lip') or self._lip is None:
+            self._lip = LineInspectionPlot(
+                wave_data=wave_data,
+                flux_data=flux_data,
+                xmin=xmin,
+                xmax=xmax,
+                molecule=active_molecule,
+                molecules=molecules,
+                wave_data_obs=wave_data_obs,
+                ax=ax,
+                fig=self.fig,
+                theme=self.theme,
+                render_all_visible=False,
+            )
+        else:
+            self._lip.wave_data = wave_data
+            self._lip.flux_data = flux_data
+            self._lip.xmin = xmin
+            self._lip.xmax = xmax
+            self._lip.molecule = active_molecule
+            self._lip.molecules = molecules
+            self._lip.wave_data_obs = (
+                np.asarray(wave_data_obs) if wave_data_obs is not None
+                else wave_data
+            )
+            self._lip.render_all_visible = False
+            self._lip.theme = self.theme
+        self._lip.generate_plot()
+
+        # Overlay fit results if present
+        if fit_result is not None:
+            current_ylim = ax.get_ylim()
+            max_y = current_ylim[1] / 1.1 if current_ylim[1] > 0 else 0.15
+            self.render_fit_results(fit_result, xmin, xmax, max_y,
+                                    legend_visible=legend_visible)
+
+    def render_population_diagram_for_molecule(
+        self,
+        molecule: "Molecule",
+        force_redraw: bool = False,
+    ) -> None:
+        """Render the base population diagram on ``ax_popdiagram``.
+
+        Includes a simple cache so repeated calls with the same molecule
+        and unchanged parameters are skipped.
+
+        Parameters
+        ----------
+        molecule : Molecule
+            The molecule to visualise.
+        force_redraw : bool
+            When *True* the cache is bypassed.
+        """
+        ax = self.ax_popdiagram
+        if ax is None:
+            return
+
+        # Cache check
+        current_hash = None
+        if molecule is not None and hasattr(molecule, '_compute_intensity_hash'):
+            current_hash = (molecule.name, molecule._compute_intensity_hash())
+
+        if not hasattr(self, '_pdp'):
+            self._pdp = None
+            self._pdp_molecule = None
+            self._pdp_cache_key = None
+
+        if (not force_redraw
+                and self._pdp_molecule is molecule
+                and current_hash is not None
+                and self._pdp_cache_key == current_hash):
+            return
+
+        self._pdp_molecule = molecule
+        self._pdp_cache_key = current_hash
+
+        try:
+            if self._pdp is None:
+                self._pdp = PopulationDiagramPlot(
+                    molecule=molecule,
+                    ax=ax,
+                    fig=self.fig,
+                    theme=self.theme,
+                )
+            else:
+                self._pdp.molecule = molecule
+                self._pdp.theme = self.theme
+            self._pdp.generate_plot()
+        except Exception as e:
+            ax.clear()
+            mol_label = (
+                BasePlot.get_molecule_display_name(molecule) if molecule
+                else "Unknown"
+            )
+            fg = self._get_theme_value("foreground", "black")
+            ax.set_title(f"{mol_label} - Error in calculation", color=fg)
+
+    def render_fit_results(
+        self,
+        fit_result: Any,
+        xmin: float,
+        xmax: float,
+        max_y: float,
+        *,
+        user_settings: Optional[Dict[str, Any]] = None,
+        legend_visible: bool = True,
+    ) -> None:
+        """Overlay Gaussian-fit results on the line-inspection panel.
+
+        Parameters
+        ----------
+        fit_result : tuple
+            ``(gauss_fit, fitted_wave, fitted_flux)``.
+        xmin, xmax : float
+            Wavelength range of the current selection.
+        max_y : float
+            Maximum y value for scaling (unused but kept for API compat).
+        user_settings : dict, optional
+            iSLAT user settings — used for ``clear_old_fits`` and
+            ``fit_line_uncertainty``.  Falls back to safe defaults.
+        legend_visible : bool
+            Whether the legend should be visible after rendering.
+        """
+        ax = self.ax_inspection
+        if ax is None:
+            return
+
+        if user_settings is None:
+            user_settings = {}
+
+        # Clear old fit results if requested
+        if user_settings.get('clear_old_fits', True):
+            self._clear_old_fit_results(ax, xmin, xmax)
+
+        try:
+            gauss_fit, fitted_wave, fitted_flux = fit_result
+            if gauss_fit is None or fitted_wave is None or fitted_flux is None:
+                return
+
+            fit_mask = (fitted_wave >= xmin) & (fitted_wave <= xmax)
+            if not np.any(fit_mask):
+                return
+
+            fit_line = ax.plot(
+                fitted_wave[fit_mask], fitted_flux[fit_mask],
+                color='red', linewidth=1, label='Total Fit', linestyle='--',
+            )[0]
+            fit_line._islat_fit_result = True
+
+            # Multi-component handling
+            if hasattr(gauss_fit, 'params') and gauss_fit.params:
+                prefixes = set()
+                for pname in gauss_fit.params:
+                    if '_' in pname:
+                        pfx = pname.split('_')[0] + '_'
+                        if pfx.startswith('g') and pfx[1:-1].isdigit():
+                            prefixes.add(pfx)
+
+                if len(prefixes) > 1:
+                    try:
+                        components = gauss_fit.eval_components(x=fitted_wave[fit_mask])
+                        for i, pfx in enumerate(sorted(prefixes)):
+                            if pfx in components:
+                                comp_line = ax.plot(
+                                    fitted_wave[fit_mask], components[pfx],
+                                    linestyle='--', linewidth=1,
+                                    label=f"Component {i+1}",
+                                )[0]
+                                comp_line._islat_fit_result = True
+                    except Exception:
+                        pass
+                else:
+                    sigma = user_settings.get('fit_line_uncertainty', 1.0)
+                    dely = gauss_fit.eval_uncertainty(sigma=sigma)
+                    fill = ax.fill_between(
+                        fitted_wave, fitted_flux - dely, fitted_flux + dely,
+                        color='gray', alpha=0.3,
+                        label=r'3-$\sigma$ uncertainty band',
+                    )
+                    fill._islat_fit_result = True
+
+        except Exception:
+            pass
+
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend()
+            leg = ax.get_legend()
+            if leg is not None:
+                leg.set_visible(legend_visible)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _clear_old_fit_results(ax: Axes, xmin: float, xmax: float) -> None:
+        """Remove existing fit-result artists that overlap ``[xmin, xmax]``."""
+        for line in ax.lines[:]:
+            if hasattr(line, '_islat_fit_result'):
+                xdata = line.get_xdata()
+                if len(xdata) > 0:
+                    if np.min(xdata) <= xmax and np.max(xdata) >= xmin:
+                        line.remove()
+
+        for coll in ax.collections[:]:
+            if hasattr(coll, '_islat_fit_result'):
+                try:
+                    paths = coll.get_paths()
+                    if paths:
+                        bounds = paths[0].get_extents()
+                        if bounds.xmin <= xmax and bounds.xmax >= xmin:
+                            coll.remove()
+                except Exception:
+                    coll.remove()
+
+    def clear_active_lines(self, active_lines_list: List[Any]) -> None:
+        """Remove all active-line artists (vlines, text, scatter) and clear the list.
+
+        Parameters
+        ----------
+        active_lines_list : list
+            Mutable list of ``[line_artist, text_artist, scatter_artist, info_dict]``
+            entries.  The list is cleared in-place.
+        """
+        for entry in active_lines_list:
+            for artist in entry[:3]:  # line, text, scatter
+                if artist is not None and getattr(artist, 'axes', None) is not None:
+                    try:
+                        artist.remove()
+                    except (ValueError, AttributeError):
+                        pass
+        active_lines_list.clear()
