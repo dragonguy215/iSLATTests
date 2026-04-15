@@ -19,6 +19,7 @@ import numpy as np
 
 from .PlotView import PlotView
 from .BasePlot import BasePlot
+from .ToggleMixin import ToggleMixin
 
 if TYPE_CHECKING:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -42,13 +43,16 @@ except ImportError:
         def trace(self, *a, **k): pass
     debug_config = _Fallback()
 
-class ThreePanelView(PlotView):
+class ThreePanelView(ToggleMixin, PlotView):
     """
     Standard 3-panel GUI view backed by the existing PlotRenderer.
 
     This is a *thin adapter*: it owns nothing new.  The axes, canvas, and
     PlotRenderer are still held by the iSLATPlot controller.  The view
     just provides the :class:`PlotView` API on top.
+
+    Toggle-state management (atomic lines, saved lines, summed spectrum,
+    legend) is provided by :class:`ToggleMixin`.
     """
 
     def __init__(self, plot_manager: Any) -> None:
@@ -259,107 +263,38 @@ class ThreePanelView(PlotView):
         self._canvas.draw_idle()
 
     # ------------------------------------------------------------------
-    # Toggle helpers
+    # ToggleMixin hooks
     # ------------------------------------------------------------------
-    def sync_toggle_state(self, toggle_state: dict) -> None:
-        """
-        Reconcile visual state with the controller's toggle_state dict.
+    def _toggle_ready(self) -> bool:
+        """ThreePanelView is always ready (it delegates to pre-existing axes)."""
+        return True
 
-        Ensures overlays match the canonical state without a full re-render.
-        """
-        # Atomic lines
-        if toggle_state.get("atomic_lines", False):
-            if not self._has_tagged_artists("_islat_atomic_line"):
-                self._plot_atomic_lines()
-        else:
-            if self._has_tagged_artists("_islat_atomic_line"):
-                self._remove_atomic_lines()
+    def _iter_toggle_axes(self):
+        """Yield the three fixed axes."""
+        yield self.ax1
+        yield self.ax2
+        yield self.ax3
 
-        # Saved lines
-        if toggle_state.get("saved_lines", False):
-            if not self._has_tagged_artists("_islat_saved_line"):
-                self._plot_saved_lines()
-        else:
-            if self._has_tagged_artists("_islat_saved_line"):
-                self._remove_saved_lines()
-
-        # Summed spectrum
-        self._renderer.set_summed_spectrum_visibility(
-            toggle_state.get("summed", True)
-        )
-
-        # Legend
-        legend_on = toggle_state.get("legend", True)
-        for ax in (self.ax1, self.ax2, self.ax3):
-            leg = ax.get_legend()
-            if leg is not None:
-                leg.set_visible(legend_on)
-
-        self._canvas.draw_idle()
-
-    def toggle_summed_spectrum(self, visible: bool) -> None:
-        self._renderer.set_summed_spectrum_visibility(visible)
-        self._canvas.draw_idle()
-
-    def toggle_legend(self, visible: Optional[bool] = None) -> None:
-        for ax in (self.ax1, self.ax2, self.ax3):
-            leg = ax.get_legend()
-            if leg is not None:
-                if visible is not None:
-                    leg.set_visible(visible)
-                else:
-                    leg.set_visible(not leg.get_visible())
-        self._canvas.draw_idle()
-
-    def toggle_saved_lines(self, show: bool, loaded_lines: Any = None) -> None:
-        if show:
-            self._plot_saved_lines(loaded_lines=loaded_lines)
-        else:
-            self._remove_saved_lines()
-        self._canvas.draw_idle()
-
-    def toggle_atomic_lines(self, show: bool) -> None:
-        if show:
-            self._plot_atomic_lines()
-        else:
-            self._remove_atomic_lines()
-        self._canvas.draw_idle()
-
-    # ------------------------------------------------------------------
-    # Atomic / saved line helpers (self-contained via BasePlot)
-    # ------------------------------------------------------------------
-    def _plot_atomic_lines(self) -> None:
-        """Render atomic lines on ax1 using BasePlot helpers.
-
-        Note: does **not** call ``draw_idle()`` — the caller is responsible
-        for batching a single draw after all artist mutations are done.
-        """
+    def _add_atomic_line_artists(self) -> None:
+        """Render atomic lines on ax1 using BasePlot helpers."""
         atomic_data = load_atomic_lines()
         if atomic_data.empty:
             return
         BasePlot._plot_atomic_lines(self.ax1, atomic_data, tag="_islat_atomic_line")
 
-    def _remove_atomic_lines(self) -> None:
-        """Remove previously plotted atomic line artists from ax1.
-
-        Note: does **not** call ``draw_idle()`` — the caller is responsible
-        for batching a single draw after all artist mutations are done.
-        """
+    def _remove_atomic_line_artists(self) -> None:
+        """Remove previously plotted atomic line artists from ax1."""
         BasePlot._clear_tagged_artists(
             self.ax1, "_islat_atomic_line", lines=True, collections=False, texts=True,
         )
 
-    def _plot_saved_lines(self, loaded_lines: Any = None) -> None:
-        """Render saved lines on ax1 using BasePlot helpers.
-
-        Note: does **not** call ``draw_idle()`` — the caller is responsible
-        for batching a single draw after all artist mutations are done.
-        """
-        import iSLAT.Modules.FileHandling.iSLATFileHandling as ifh
+    def _add_saved_line_artists(self) -> None:
+        """Render saved lines on ax1 using BasePlot helpers."""
+        loaded_lines = getattr(self, 'line_data', None)
         if loaded_lines is None:
-            loaded_lines = ifh.read_line_saves(file_name=self._islat.input_line_list)
-            if loaded_lines.empty:
-                return
+            loaded_lines = self._load_saved_line_data()
+        if loaded_lines is None or (hasattr(loaded_lines, 'empty') and loaded_lines.empty):
+            return
         theme = self._pm.theme
         BasePlot._plot_saved_line_markers(
             self.ax1,
@@ -369,15 +304,51 @@ class ThreePanelView(PlotView):
             range_color=theme.get("saved_line_color_two", "orange"),
         )
 
-    def _remove_saved_lines(self) -> None:
-        """Remove previously plotted saved line artists from ax1.
-
-        Note: does **not** call ``draw_idle()`` — the caller is responsible
-        for batching a single draw after all artist mutations are done.
-        """
+    def _remove_saved_line_artists(self) -> None:
+        """Remove previously plotted saved line artists from ax1."""
         BasePlot._clear_tagged_artists(
             self.ax1, "_islat_saved_line", lines=True, collections=False, texts=False,
         )
+
+    def _load_saved_line_data(self):
+        """Load saved-line data from disk."""
+        import iSLAT.Modules.FileHandling.iSLATFileHandling as ifh
+        return ifh.read_line_saves(file_name=self._islat.input_line_list)
+
+    # ------------------------------------------------------------------
+    # Override sync_toggle_state for idempotent behaviour
+    # ------------------------------------------------------------------
+    def sync_toggle_state(self, toggle_state: dict) -> None:
+        """Reconcile visual state, skipping redundant add/remove operations.
+
+        The base :class:`ToggleMixin` always removes-then-adds; here we
+        check ``_has_tagged_artists`` first for a lighter touch when the
+        view is merely being re-activated.
+        """
+        # Atomic lines
+        if toggle_state.get("atomic_lines", False):
+            if not self._has_tagged_artists("_islat_atomic_line"):
+                self._add_atomic_line_artists()
+        else:
+            if self._has_tagged_artists("_islat_atomic_line"):
+                self._remove_atomic_line_artists()
+
+        # Saved lines
+        if toggle_state.get("saved_lines", False):
+            if not self._has_tagged_artists("_islat_saved_line"):
+                self._set_saved_line_data(self._load_saved_line_data())
+                self._add_saved_line_artists()
+        else:
+            if self._has_tagged_artists("_islat_saved_line"):
+                self._remove_saved_line_artists()
+
+        # Summed spectrum
+        self._set_summed_visibility(toggle_state.get("summed", True))
+
+        # Legend
+        self._set_legend_visibility(toggle_state.get("legend", True))
+
+        self.draw()
 
     # ------------------------------------------------------------------
     # Selection restoration

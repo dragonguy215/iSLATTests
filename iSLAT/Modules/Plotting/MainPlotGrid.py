@@ -15,7 +15,6 @@ import numpy as np
 import pandas as pd
 
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
@@ -122,15 +121,9 @@ class MainPlotGrid(BasePlot):
         # Clear previous axes so regeneration doesn't stack on top
         self.fig.clf()
 
-        gs = GridSpec(
-            2, 2,
-            width_ratios=[1, 1],
-            height_ratios=[1, 1.5],
-            figure=self.fig,
-        )
-        self.ax_spectrum = self.fig.add_subplot(gs[0, :])
-        self.ax_inspection = self.fig.add_subplot(gs[1, 0])
-        self.ax_popdiagram = self.fig.add_subplot(gs[1, 1])
+        (self.ax_spectrum,
+         self.ax_inspection,
+         self.ax_popdiagram) = self.create_three_panel_axes(self.fig)
 
         # --- Top panel: full spectrum -----------------------------------
         self._render_spectrum_panel()

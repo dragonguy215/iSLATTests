@@ -3,7 +3,6 @@ matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
 
 import numpy as np
 
@@ -88,12 +87,11 @@ class iSLATPlot:
 
         #self.fig = plt.Figure(figsize=(15, 8.5))
         self.fig = plt.Figure(constrained_layout=True)
-        # Adjust subplot parameters to minimize margins and maximize plot area
-        #self.fig.subplots_adjust(left=0.06, bottom=0.06, right=0.98, top=0.96, hspace=0.15, wspace=0.15)
-        gs = GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1.5], figure=self.fig)
-        self.ax1 = self.full_spectrum = self.fig.add_subplot(gs[0, :])
-        self.ax2 = self.line_inspection = self.fig.add_subplot(gs[1, 0])
-        self.ax3 = self.population_diagram = self.fig.add_subplot(gs[1, 1])
+        # Use shared 3-panel layout helper from BasePlot
+        self.ax1, self.ax2, self.ax3 = BasePlot.create_three_panel_axes(self.fig)
+        self.full_spectrum = self.ax1
+        self.line_inspection = self.ax2
+        self.population_diagram = self.ax3
 
         self.ax1.set_title("Full Spectrum with Line Inspection")
         self.ax1.set_ylabel('Flux density (Jy)')
@@ -226,51 +224,52 @@ class iSLATPlot:
         return self.toolbar
 
     def _apply_plot_theming(self):
-        """Apply theme colors to matplotlib figure and toolbar"""
-        try:
-            # Set figure background color
-            self.fig.patch.set_facecolor(self.theme.get("background", "#181A1B"))
-            
-            # Set axes background colors and text colors
-            for ax in [self.ax1, self.ax2, self.ax3]:
-                ax.set_facecolor(self.theme.get("graph_fill_color", "#282C34"))
-                ax.tick_params(colors=self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")), which='both')
-                ax.xaxis.label.set_color(self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")))
-                ax.yaxis.label.set_color(self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")))
-                ax.title.set_color(self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")))
-                
-                # Set spine colors
-                for spine in ax.spines.values():
-                    spine.set_color(self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")))   
+        """Apply theme colors to matplotlib figure, axes, data artists, and toolbar.
 
+        Delegates figure/axes background and data-artist re-colouring to
+        :meth:`PlotRenderer.apply_theme_to_figure` (inherited from
+        :class:`BasePlot`) and adds GUI-specific extras on top:
+        canvas widget background, toolbar, legend frame colouring, grid
+        lines, and ``axis_text_label_color`` support.
+        """
+        try:
+            # --- Common figure/axes/artist theming via BasePlot ----------
+            # PlotRenderer now inherits BasePlot, so it has
+            # apply_theme_to_figure().  We temporarily ensure its theme
+            # reference is in sync, then call the inherited method.
+            self.plot_renderer.theme = self.theme
+            self.plot_renderer.apply_theme_to_figure(self.fig)
+
+            # --- GUI-specific extras ------------------------------------
+            # Some GUI themes define 'axis_text_label_color' which is
+            # more specific than BasePlot's generic 'foreground'.
+            fg = self.theme.get("foreground", "#F0F0F0")
+            label_color = self.theme.get("axis_text_label_color", fg)
+
+            if label_color != fg:
+                # Re-apply the GUI-specific label colour on top
+                for ax in [self.ax1, self.ax2, self.ax3]:
+                    ax.tick_params(colors=label_color, which='both')
+                    ax.xaxis.label.set_color(label_color)
+                    ax.yaxis.label.set_color(label_color)
+                    ax.title.set_color(label_color)
+                    for spine in ax.spines.values():
+                        spine.set_color(label_color)
+
+            # Grid lines (GUI-only feature)
+            for ax in [self.ax1, self.ax2, self.ax3]:
                 if self.theme.get(f'ax{ax.get_gid()}_grid', False):
-                    ax.grid(True, color=self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")), alpha=0.3, linestyle='-', linewidth=0.5)
-                    
-            # Apply theme to canvas widget
+                    ax.grid(True, color=label_color, alpha=0.3, linestyle='-', linewidth=0.5)
+
+            # Canvas widget background
             if hasattr(self.canvas.get_tk_widget(), 'configure'):
                 try:
                     self.canvas.get_tk_widget().configure(bg=self.theme.get("background", "#181A1B"))
                 except Exception:
                     pass
 
-            # Recolour data artists in-place so they match the new theme
-            fg = self.theme.get("foreground", "#F0F0F0")
-            label_color = self.theme.get("axis_text_label_color", fg)
-            summed_color = self.theme.get("summed_spectra_color", "lightgray")
-            scatter_color = self.theme.get("scatter_main_color", "#838B8B")
-
+            # Legend frame / text colouring
             for ax in [self.ax1, self.ax2, self.ax3]:
-                for artist in ax.lines:
-                    # Observed-spectrum lines are tagged at creation
-                    if getattr(artist, '_islat_observed', False):
-                        artist.set_color(fg)
-                for artist in ax.collections:
-                    # Summed-spectrum fills are tagged at creation
-                    if getattr(artist, '_islat_summed', False):
-                        artist.set_facecolor(summed_color)
-                        artist.set_edgecolor(summed_color)
-
-                # Legend frame / text
                 legend = ax.get_legend()
                 if legend is not None:
                     frame = legend.get_frame()

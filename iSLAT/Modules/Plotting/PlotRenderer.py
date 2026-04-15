@@ -59,9 +59,15 @@ if TYPE_CHECKING:
     #from iSLAT.Modules.DataTypes.Intensity import Intensity
     #from iSLAT.Modules.DataTypes.Spectrum import Spectrum
 
-class PlotRenderer:
+class PlotRenderer(BasePlot):
     """
     Handles all plot rendering and visual updates for the iSLAT spectroscopy tool.
+    
+    Inherits from :class:`BasePlot` so that all shared helpers
+    (``_plot_observed_spectrum``, ``_plot_summed_spectrum``,
+    ``_get_theme_value``, ``get_molecule_spectrum_data``, etc.) are
+    available as regular instance / inherited methods instead of
+    being called through error-prone duck-typing.
     
     This class provides comprehensive rendering of:
     - Observed spectrum data with error bars
@@ -80,11 +86,14 @@ class PlotRenderer:
     """
     
     def __init__(self, plot_manager: Any) -> None:
+        # Initialise BasePlot with the pre-existing GUI figure and theme.
+        # ``generate_plot`` is not meaningful for PlotRenderer (it renders
+        # on demand), so we provide a no-op implementation.
+        super().__init__(fig=plot_manager.fig, theme=plot_manager.theme)
+
         self.plot_manager = plot_manager
         self.islat = plot_manager.islat
-        self.theme: Dict[str, Any] = plot_manager.theme
         
-        self.fig: plt.Figure = plot_manager.fig
         self.ax1: Axes = plot_manager.ax1
         self.ax2: Axes = plot_manager.ax2
         self.ax3: Axes = plot_manager.ax3
@@ -109,6 +118,14 @@ class PlotRenderer:
             'molecules_rendered': 0
         }
     
+    # ------------------------------------------------------------------
+    # BasePlot abstract method — PlotRenderer renders on demand, not via
+    # a single ``generate_plot`` call, so this is intentionally a no-op.
+    # ------------------------------------------------------------------
+    def generate_plot(self, **kwargs) -> None:  # pragma: no cover
+        """No-op.  PlotRenderer renders incrementally via dedicated methods."""
+        pass
+
     # Helper methods for common operations — delegate to BasePlot where possible
     @staticmethod
     def _get_molecule_display_name(molecule: 'Molecule') -> str:
@@ -120,12 +137,15 @@ class PlotRenderer:
         """Get unique identifier for a molecule"""
         return getattr(molecule, 'name', getattr(molecule, 'displaylabel', None)) if molecule else None
     
-    def _get_theme_value(self, key: str, default: Any = None) -> Any:
-        """Get theme value with fallback"""
-        return self.theme.get(key, default)
-    
+    # _get_theme_value is inherited from BasePlot
+
     def _get_molecule_color(self, molecule: 'Molecule') -> str:
-        """Get color for molecule from theme or molecule properties"""
+        """Get color for molecule from theme or molecule properties.
+
+        Extends the static :meth:`BasePlot.get_molecule_color` with
+        theme-based colour assignment so that the GUI can assign
+        per-molecule colours from the theme palette.
+        """
         mol_name = self._get_molecule_display_name(molecule)
         
         # Check molecule's own color first
@@ -152,14 +172,15 @@ class PlotRenderer:
         self._update_legend(self.ax1)
     
     def _update_legend(self, ax: "Axes" = None) -> None:
-        """Rebuild the legend, excluding invisible artists.  Delegates to :class:`BasePlot`.
+        """Rebuild the legend, excluding invisible artists.
 
-        After rebuilding, the legend visibility is set to match the
-        controller's ``legend_toggle`` state so that a legend that was
-        toggled off does not reappear after a plot update.
+        Delegates to :meth:`BasePlot._update_legend` (inherited static
+        method) and then applies the controller's legend-toggle state so
+        that a legend toggled off does not reappear after a plot update.
         """
         if ax is None:
             ax = self.ax1
+        # Use the inherited static method from BasePlot
         BasePlot._update_legend(ax)
 
         # Respect the legend toggle state from the controller
@@ -333,7 +354,7 @@ class PlotRenderer:
         obs_wave_for_plotting = wave_data
         
         # Plot observed spectrum using appropriate wavelength grid
-        BasePlot._plot_observed_spectrum(self, axes, obs_wave_for_plotting, flux_data, error_data, deduplicate=True)
+        self._plot_observed_spectrum(axes, obs_wave_for_plotting, flux_data, error_data, deduplicate=True)
 
         # Plot individual molecule spectra
         if molecules:
@@ -341,7 +362,7 @@ class PlotRenderer:
             
         # Plot summed spectrum
         if summed_flux is not None and len(summed_flux) > 0:
-            BasePlot._plot_summed_spectrum(self, axes, summed_wavelengths, summed_flux, deduplicate=True)
+            self._plot_summed_spectrum(axes, summed_wavelengths, summed_flux, deduplicate=True)
         
         # Configure plot appearance
         self._configure_main_plot_appearance()
@@ -352,27 +373,27 @@ class PlotRenderer:
                 axes.set_xlim(current_xlim)
                 axes.set_ylim(current_ylim)
         
-    def _plot_observed_spectrum(self, wave_data: np.ndarray, flux_data: np.ndarray, 
+    def _plot_observed_spectrum_on_ax(self, wave_data: np.ndarray, flux_data: np.ndarray, 
                                error_data: Optional[np.ndarray] = None, subplot: Optional[Axes] = None) -> None:
         """Plot the observed spectrum data.
 
-        Delegates to :meth:`BasePlot._plot_observed_spectrum` with
+        Delegates to the inherited :meth:`BasePlot._plot_observed_spectrum` with
         ``deduplicate=True`` so that previously tagged ``_islat_observed``
         artists are removed before new ones are drawn.
         """
         plot = subplot if subplot else self.ax1
-        BasePlot._plot_observed_spectrum(self, plot, wave_data, flux_data, error_data, deduplicate=True)
+        self._plot_observed_spectrum(plot, wave_data, flux_data, error_data, deduplicate=True)
     
-    def _plot_summed_spectrum(self, wave_data: np.ndarray, summed_flux: np.ndarray, subplot: Optional[Axes] = None) -> None:
+    def _plot_summed_spectrum_on_ax(self, wave_data: np.ndarray, summed_flux: np.ndarray, subplot: Optional[Axes] = None) -> None:
         """Plot the summed model spectrum.
 
-        Delegates to :meth:`BasePlot._plot_summed_spectrum` with
+        Delegates to the inherited :meth:`BasePlot._plot_summed_spectrum` with
         ``deduplicate=True`` so that previously tagged ``_islat_summed``
         collections are removed before the new fill is drawn.
         """
         if subplot is None:
             subplot = self.ax1
-        BasePlot._plot_summed_spectrum(self, subplot, wave_data, summed_flux, deduplicate=True)
+        self._plot_summed_spectrum(subplot, wave_data, summed_flux, deduplicate=True)
     
     def _configure_main_plot_appearance(self) -> None:
         """Configure the appearance of the main plot"""
@@ -879,10 +900,10 @@ class PlotRenderer:
     def update_summed_spectrum_only(self, wave_data: np.ndarray, summed_flux: np.ndarray) -> None:
         """Update only the summed spectrum without affecting individual molecule plots.
 
-        Delegates to :meth:`BasePlot._plot_summed_spectrum` with
+        Delegates to the inherited :meth:`_plot_summed_spectrum` with
         ``deduplicate=True`` to handle removal of the previous fill.
         """
-        BasePlot._plot_summed_spectrum(self, self.ax1, wave_data, summed_flux, deduplicate=True)
+        self._plot_summed_spectrum(self.ax1, wave_data, summed_flux, deduplicate=True)
 
     def _update_summed_spectrum_with_molecules(self, molecules_dict: Union['MoleculeDict', Dict], 
                                              wave_data: np.ndarray) -> None:
@@ -895,13 +916,13 @@ class PlotRenderer:
         ``self.islat`` when available.
         """
         if not molecules_dict or len(molecules_dict) == 0:
-            BasePlot._clear_tagged_artists(self.ax1, "_islat_summed", lines=False)
+            self._clear_tagged_artists(self.ax1, "_islat_summed", lines=False)
             return
 
         visible = (molecules_dict.get_visible_molecules()
                    if hasattr(molecules_dict, 'get_visible_molecules') else [])
         if not visible:
-            BasePlot._clear_tagged_artists(self.ax1, "_islat_summed", lines=False)
+            self._clear_tagged_artists(self.ax1, "_islat_summed", lines=False)
             return
 
         # Prefer observer-frame wavelengths for get_summed_flux.
@@ -1131,25 +1152,8 @@ class PlotRenderer:
         """
         Get spectrum data from molecule's caching system.
         
-        Delegates to :meth:`BasePlot.get_molecule_spectrum_data` with
-        additional debug logging for the GUI context.
-        
-        Parameters
-        ----------
-        molecule : Molecule
-            Molecule with internal flux caching
-        wave_data : np.ndarray
-            Wavelength array (passed through to molecule's get_flux)
-        interpolate_to_input : bool, default False
-            When True, resample the model flux onto *target_wavelengths*.
-        target_wavelengths : np.ndarray, optional
-            Rest-frame wavelength grid to resample to (stellar-RV corrected
-            data grid).  Returned wavelengths will be *wave_data*.
-            
-        Returns
-        -------
-        Tuple[Optional[np.ndarray], Optional[np.ndarray]]
-            (wavelength, flux) arrays or (None, None) if unavailable
+        Thin override that adds debug logging around the inherited
+        :meth:`BasePlot.get_molecule_spectrum_data` static method.
         """
         if molecule is None or wave_data is None:
             return None, None
@@ -1310,21 +1314,8 @@ class PlotRenderer:
         """
         Get intensity table from molecule's caching system.
         
-        Delegates to :meth:`BasePlot.get_intensity_data` with additional
-        debug logging for the GUI context.
-        
-        Parameters
-        ----------
-        molecule : Molecule
-            Molecule object with internal caching
-        full_range : bool, optional
-            If ``True``, include all lines regardless of the active
-            wavelength range.  Defaults to ``False``.
-            
-        Returns
-        -------
-        Optional[pd.DataFrame]
-            Intensity table with columns: lam, intens, a_stein, g_up, e_up, etc.
+        Thin override adding debug logging around the inherited
+        :meth:`BasePlot.get_intensity_data` static method.
         """
         table = BasePlot.get_intensity_data(molecule, full_range=full_range)
         if table is not None:

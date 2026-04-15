@@ -38,6 +38,7 @@ from .StackedSpectralPanel import StackedSpectralPanel
 from .FullSpectrumPlot import FullSpectrumPlot
 from .ResidualSpectrumPlot import ResidualSpectrumPlot
 from .BasePlot import BasePlot
+from .ToggleMixin import ToggleMixin
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -71,7 +72,7 @@ except ImportError:
         def trace(self, *a, **k): pass
     debug_config = _Fallback()
 
-class FullSpectrumView(PlotView):
+class FullSpectrumView(ToggleMixin, PlotView):
     """
     Multi-panel full spectrum view backed by a :class:`StackedSpectralPanel`.
 
@@ -83,6 +84,9 @@ class FullSpectrumView(PlotView):
     - Span selectors for click-to-inspect
     - Interactive overlay toggles (atomic lines, saved lines, summed)
     - PDF export (creates a fresh standalone plot)
+
+    Toggle-state management (atomic lines, saved lines, summed spectrum,
+    legend) is provided by :class:`ToggleMixin`.
 
     The view is **generic**: override :meth:`_create_plot` and
     :meth:`_create_standalone_plot` to back it with any
@@ -217,6 +221,18 @@ class FullSpectrumView(PlotView):
             else:
                 axes.append(val)
         return axes
+
+    # ------------------------------------------------------------------
+    # ToggleMixin hooks
+    # ------------------------------------------------------------------
+    def _toggle_ready(self) -> bool:
+        return self._initialised
+
+    def _iter_toggle_axes(self):
+        return self._iter_all_axes()
+
+    def _load_saved_line_data(self):
+        return self._load_line_data()
 
     # ==================================================================
     # Data loading
@@ -748,10 +764,17 @@ class FullSpectrumView(PlotView):
         self.draw()
 
     # ==================================================================
-    # Toggle helpers
+    # Toggle helpers — overrides and specializations of ToggleMixin
     # ==================================================================
+    def _set_legend_visibility(self, visible: bool) -> None:
+        """Override ToggleMixin hook to use the composed plot's legend strategy."""
+        legend_ax = self.subplots.get(0)
+        if legend_ax is not None and self._plot is not None:
+            self._plot.legend_strategy.update_visibility(legend_ax, visible)
+
     def sync_toggle_state(self, toggle_state: dict) -> None:
-        if not self._initialised:
+        """Override to refresh saved-line data from disk before adding artists."""
+        if not self._toggle_ready():
             return
 
         # Atomic lines
@@ -759,39 +782,23 @@ class FullSpectrumView(PlotView):
         if toggle_state.get("atomic_lines", False):
             self._add_atomic_line_artists()
 
-        # Saved lines
+        # Saved lines — always refresh from disk
         self._remove_saved_line_artists()
         if toggle_state.get("saved_lines", False):
-            # Refresh line data from disk so we always reflect the latest file
-            self.line_data = self._load_line_data()
+            self._set_saved_line_data(self._load_saved_line_data())
             self._add_saved_line_artists()
 
-        # Summed spectrum -- toggle across all axes (primary + secondary)
-        summed_on = toggle_state.get("summed", True)
-        for ax in self._iter_all_axes():
-            for coll in ax.collections[:]:
-                if hasattr(coll, "_islat_summed"):
-                    coll.set_visible(summed_on)
+        # Summed spectrum
+        self._set_summed_visibility(toggle_state.get("summed", True))
 
         # Legend
-        legend_on = toggle_state.get("legend", True)
-        legend_ax = self.subplots.get(0)
-        if legend_ax is not None:
-            self._plot.legend_strategy.update_visibility(legend_ax, legend_on)
+        self._set_legend_visibility(toggle_state.get("legend", True))
 
-        self.draw()
-
-    def toggle_summed_spectrum(self, visible: bool) -> None:
-        if not self._initialised:
-            return
-        for ax in self._iter_all_axes():
-            for coll in ax.collections[:]:
-                if hasattr(coll, "_islat_summed"):
-                    coll.set_visible(visible)
         self.draw()
 
     def toggle_legend(self, visible: Optional[bool] = None) -> None:
-        if not self._initialised:
+        """Override to use the composed plot's legend strategy."""
+        if not self._toggle_ready():
             return
         legend_ax = self.subplots.get(0)
         if legend_ax is None:
@@ -806,28 +813,8 @@ class FullSpectrumView(PlotView):
                 )
         self.draw()
 
-    def toggle_saved_lines(self, show: bool, loaded_lines: Any = None) -> None:
-        if not self._initialised:
-            return
-        if show:
-            # Accept caller-provided data or refresh from disk
-            if loaded_lines is not None:
-                self.line_data = loaded_lines
-            else:
-                self.line_data = self._load_line_data()
-            self._add_saved_line_artists()
-        else:
-            self._remove_saved_line_artists()
-        self.draw()
-
-    def toggle_atomic_lines(self, show: bool) -> None:
-        if not self._initialised:
-            return
-        if show:
-            self._add_atomic_line_artists()
-        else:
-            self._remove_atomic_line_artists()
-        self.draw()
+    # toggle_summed_spectrum, toggle_saved_lines, toggle_atomic_lines
+    # are inherited from ToggleMixin — no override needed.
 
     def toggle_residuals(self, show: bool) -> None:
         """Switch between :class:`FullSpectrumPlot` and :class:`ResidualSpectrumPlot`.

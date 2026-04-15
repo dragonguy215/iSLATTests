@@ -62,6 +62,7 @@ from .OpticalDepthSpectrumPlot import OpticalDepthSpectrumPlot
 from .MainPlotGrid import MainPlotGrid
 from .FitLinesPlotGrid import FitLinesPlotGrid
 from .PlotView import PlotView
+from .ToggleMixin import ToggleMixin
 from .ThreePanelView import ThreePanelView
 from .FullSpectrumView import FullSpectrumView
 
@@ -85,6 +86,7 @@ __all__ = [
     "MainPlotGrid",
     "FitLinesPlotGrid",
     "PlotView",
+    "ToggleMixin",
     "ThreePanelView",
     "FullSpectrumView",
     "ResidualSpectrumPlot",
