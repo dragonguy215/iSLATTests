@@ -339,13 +339,16 @@ class iSLATPlot:
 
         # If there's an active line inspection selection, refresh it
         # with the new parameters instead of clearing it.
-        if hasattr(self, 'current_selection') and self.current_selection:
-            xmin, xmax = self.current_selection
-            self.plot_spectrum_around_line(xmin, xmax, highlight_strongest=True)
+        current_selection = getattr(self, 'current_selection', None)
+        if current_selection is not None:
+            xmin, xmax = current_selection
+            self.active_view.on_selection(xmin, xmax)
         else:
-            # No selection — just refresh the population diagram
-            self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-            self.canvas.draw_idle()
+            # No selection — let the active view refresh its panels
+            self.active_view.on_active_molecule_changed(
+                new_molecule=getattr(self.islat, 'active_molecule', None),
+                current_selection=None,
+            )
 
     def match_display_range(self, match_y=False):
         # Sync plot xlim to islat.display_range if set, else update islat.display_range from plot
@@ -437,11 +440,14 @@ class iSLATPlot:
     def update_all_plots(self):
         """
         Updates all plots in the GUI.
-        This method leverages the molecular data model for updates and avoids redundant rendering.
-        """    
+        Delegates to the active view for rendering.
+        """
         self.update_model_plot()
-        self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-        self.plot_spectrum_around_line()
+        current_selection = getattr(self, 'current_selection', None)
+        self.active_view.on_active_molecule_changed(
+            new_molecule=getattr(self.islat, 'active_molecule', None),
+            current_selection=current_selection,
+        )
 
     def update_model_plot(self):
         """
@@ -469,10 +475,8 @@ class iSLATPlot:
         self.selected_wave = self.islat.wave_data[mask]
         self.selected_flux = self.islat.flux_data[mask]
 
-        self.plot_spectrum_around_line(
-            xmin=xmin,
-            xmax=xmax
-        )
+        # Delegate rendering to the active view
+        self.active_view.on_selection(xmin, xmax)
 
     def plot_spectrum_around_line(self, xmin=None, xmax=None, highlight_strongest=True):
         """
@@ -828,12 +832,8 @@ class iSLATPlot:
     def clear_selection(self):
         self.current_selection = None
         self.toggle_state["current_selection"] = None
-        self.clear_active_lines()
-        self.ax2.clear()
-        # Refresh population diagram without active line dots
-        if hasattr(self.islat, 'active_molecule') and self.islat.active_molecule:
-            self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-        self.canvas.draw_idle()
+        # Delegate rendering cleanup to the active view
+        self.active_view.clear_selection()
         return
 
     def plot_line_inspection(self, xmin=None, xmax=None, line_data=None, highlight_strongest=True):
@@ -1035,6 +1035,21 @@ class iSLATPlot:
         self.plot_renderer.plot_vertical_lines(wavelengths, heights, colors, labels)
         self.canvas.draw_idle()
 
+    def plot_fitted_saved_lines(self, fit_results_data, ax=None):
+        """Plot fitted saved lines on the main spectrum axes.
+
+        Parameters
+        ----------
+        fit_results_data : tuple
+            (gauss_fits, fitted_waves, fitted_fluxes) as returned by the
+            batch-fitting pipeline.
+        ax : Axes, optional
+            Target axes.  Defaults to ``self.ax1``.
+        """
+        if ax is None:
+            ax = self.ax1
+        self.plot_renderer.plot_fitted_saved_lines(fit_results_data, ax)
+
     def on_click(self, event):
         """Handle mouse click events on the plot."""
         self.interaction_handler.handle_click_event(event)
@@ -1042,35 +1057,33 @@ class iSLATPlot:
     def on_active_molecule_changed(self):
         """
         Called when the active molecule changes.
-        Updates plot titles and refreshes displays with current selection if available.
+        Delegates rendering to the active view.
         """
         debug_config.info("active_molecule", "on_active_molecule_changed() called")
-        
-        # Update the population diagram title
-        if hasattr(self.islat, 'active_molecule') and self.islat.active_molecule:
-            self.ax3.set_title(f'{self.islat.active_molecule.displaylabel} Population diagram')
-            debug_config.verbose("active_molecule", f"Set title for molecule: {self.islat.active_molecule.displaylabel}")
-        
-        # Clear active lines since they belong to the previous molecule
-        debug_config.verbose("active_molecule", "Clearing active lines")
-        self.clear_active_lines()
-        
-        # If we have a current selection, refresh the line inspection and population diagram
-        if hasattr(self, 'current_selection') and self.current_selection:
-            xmin, xmax = self.current_selection
-            debug_config.verbose("active_molecule", f"Refreshing line inspection for selection: {xmin:.3f} - {xmax:.3f}")
-            self.plot_spectrum_around_line(xmin, xmax, highlight_strongest=True)
+
+        new_molecule = getattr(self.islat, 'active_molecule', None)
+        current_selection = getattr(self, 'current_selection', None)
+
+        # Delegate to the active view — it handles title, active-line
+        # clearing, and re-running the selection chain if needed.
+        self.active_view.on_active_molecule_changed(
+            new_molecule=new_molecule,
+            current_selection=current_selection,
+        )
+
+        # Mark the other view as stale so it picks up the change on
+        # next activate().
+        if self.is_full_spectrum:
+            self._three_panel_view._needs_refresh = True
         else:
-            # Just update the population diagram without active lines
-            debug_config.verbose("active_molecule", "Updating population diagram only")
-            self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-            self.canvas.draw_idle()
-        
+            self._full_spectrum_view._needs_refresh = True
+
         debug_config.info("active_molecule", "on_active_molecule_changed() completed")
 
     def on_molecule_parameter_changed(self, molecule_name, parameter_name, old_value, new_value):
         """
         Called when any molecule parameter changes.
+        Manages stale-molecule bookkeeping, then delegates rendering to the active view.
         """
         debug_config.info("main_plot", f"Parameter change: {molecule_name}.{parameter_name}: {old_value} → {new_value}")
 
@@ -1079,60 +1092,46 @@ class iSLATPlot:
         # double-rendering.
         if parameter_name == 'is_visible':
             return
-        
-        # Check if this molecule is visible - if so, we need to update plots
-        if (hasattr(self.islat, 'molecules_dict') and 
+
+        # Check if this molecule is visible — if hidden, mark stale
+        if (hasattr(self.islat, 'molecules_dict') and
             molecule_name in self.islat.molecules_dict):
-            
+
             molecule = self.islat.molecules_dict[molecule_name]
-            
+
             if molecule.is_visible:
                 # Delegate to update_model_plot so the inactive view is
                 # also marked stale and refreshes on next activate().
                 self.update_model_plot()
             else:
-                # Molecule is hidden — record it as stale so that when it
-                # is next made visible we re-render from fresh data rather
-                # than just toggling the old (now outdated) artists.
                 self._stale_molecules.add(molecule_name)
                 debug_config.trace("main_plot", f"{molecule_name} parameter changed while hidden — marked stale")
-        
-        # Check if the changed molecule is the active one for additional updates
-        if (hasattr(self.islat, 'active_molecule') and 
-            self.islat.active_molecule and 
-            hasattr(self.islat.active_molecule, 'name') and
-            self.islat.active_molecule.name == molecule_name):
-            
-            # If we have a current selection, refresh the line inspection and population diagram
-            if hasattr(self, 'current_selection') and self.current_selection:
-                xmin, xmax = self.current_selection
-                self.plot_spectrum_around_line(xmin, xmax, highlight_strongest=True)
-            else:
-                # Just update the population diagram without active lines
-                self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-                self.canvas.draw_idle()
+
+        # Delegate line-inspection / pop-diagram updates to the active view
+        current_selection = getattr(self, 'current_selection', None)
+        self.active_view.on_molecule_parameter_changed(
+            molecule_name=molecule_name,
+            parameter_name=parameter_name,
+            current_selection=current_selection,
+        )
 
     def on_molecule_deleted(self, molecule_name):
         """
-        Handle molecule deletion by clearing relevant plot elements and updating displays.
-        
+        Handle molecule deletion by delegating to the active view.
+
         Parameters
         ----------
         molecule_name : str
             Name of the deleted molecule
         """
-        # Clear model lines first
-        self.clear_model_lines()
-        
-        # Clear active lines if they belong to the deleted molecule
-        if (hasattr(self.islat, 'active_molecule') and 
-            self.islat.active_molecule and 
-            hasattr(self.islat.active_molecule, 'name') and
-            self.islat.active_molecule.name == molecule_name):
-            self.clear_active_lines()
-        
-        # Update all plots to reflect the change
-        self.update_all_plots()
+        # Delegate to the active view which handles clearing + rebuild
+        self.active_view.on_molecule_deleted(molecule_name)
+
+        # Mark the other view as stale
+        if self.is_full_spectrum:
+            self._three_panel_view._needs_refresh = True
+        else:
+            self._full_spectrum_view._needs_refresh = True
     
     def on_molecule_visibility_changed(self, molecule_name, is_visible):
         """

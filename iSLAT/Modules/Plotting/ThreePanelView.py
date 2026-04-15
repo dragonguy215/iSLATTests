@@ -503,21 +503,187 @@ class ThreePanelView(ToggleMixin, PlotView):
     # Private helpers — pick / highlight interaction
     # ------------------------------------------------------------------
     def _on_pick_line(self, event: Any) -> None:
-        """Handle line pick events — interaction logic."""
-        picked_value = self._pm._handle_line_pick_event(event, self.active_lines)
+        """Handle line pick events — self-contained interaction logic."""
+        picked_value = self._handle_line_pick_event(event)
         if picked_value:
             self.selected_line = picked_value
-            self._pm._display_line_info(picked_value)
+            self._display_line_info(picked_value)
         self._canvas.draw_idle()
 
+    def _handle_line_pick_event(self, event: Any) -> Any:
+        """Handle line pick events and highlight the selected line.
+
+        Returns the value data dict of the picked line, or *None*.
+        """
+        picked_value = None
+        picked_scatter_idx = None
+        picked_artist = event.artist
+
+        scatter_collection = getattr(self._renderer, '_active_scatter_collection', None)
+        scatter_count = getattr(self._renderer, '_active_scatter_count', 0)
+        active_color = self._renderer._get_theme_value("active_scatter_line_color", 'green')
+
+        scatter_point_clicked = None
+        if picked_artist is scatter_collection and hasattr(event, 'ind') and len(event.ind) > 0:
+            scatter_point_clicked = event.ind[0]
+
+        for line, text_obj, scatter, value in self.active_lines:
+            is_line_picked = (picked_artist is line)
+            point_idx = value.get('_scatter_point_index', None) if value else None
+            is_scatter_picked = (scatter_point_clicked is not None and point_idx == scatter_point_clicked)
+            is_picked = is_line_picked or is_scatter_picked
+
+            if line is not None:
+                line.set_color(active_color)
+            if text_obj is not None:
+                text_obj.set_color(active_color)
+
+            if is_picked:
+                picked_value = value
+                picked_scatter_idx = point_idx
+                if line is not None:
+                    line.set_color('orange')
+                if text_obj is not None:
+                    text_obj.set_color('orange')
+
+        if scatter_collection is not None and scatter_count > 0:
+            import matplotlib.colors as mcolors
+            colors = [mcolors.to_rgba(active_color)] * scatter_count
+            if picked_scatter_idx is not None and picked_scatter_idx < scatter_count:
+                colors[picked_scatter_idx] = mcolors.to_rgba('orange')
+            scatter_collection.set_facecolors(colors)
+
+        return picked_value
+
     def _highlight_strongest_line(self) -> None:
-        """Highlight the strongest line in active_lines."""
-        strongest = self._pm._highlight_strongest_line(self.active_lines)
+        """Find and highlight the strongest line in active_lines."""
+        if not self.active_lines:
+            return
+
+        scatter_collection = getattr(self._renderer, '_active_scatter_collection', None)
+        scatter_count = getattr(self._renderer, '_active_scatter_count', 0)
+        active_color = self._renderer._get_theme_value("active_scatter_line_color", 'green')
+
+        # Reset all to active colour
+        for line, text_obj, scatter, value in self.active_lines:
+            if line is not None:
+                line.set_color(active_color)
+            if text_obj is not None:
+                text_obj.set_color(active_color)
+
+        # Find strongest
+        highest_intensity = -float('inf')
+        strongest = None
+        strongest_scatter_idx = None
+
+        for line, text_obj, scatter, value in self.active_lines:
+            intensity = value.get('intensity', 0) if value else 0
+            if intensity > highest_intensity:
+                highest_intensity = intensity
+                strongest = (line, text_obj, scatter, value)
+                strongest_scatter_idx = value.get('_scatter_point_index', None) if value else None
+
+        if scatter_collection is not None and scatter_count > 0:
+            import matplotlib.colors as mcolors
+            colors = [mcolors.to_rgba(active_color)] * scatter_count
+            if strongest_scatter_idx is not None and strongest_scatter_idx < scatter_count:
+                colors[strongest_scatter_idx] = mcolors.to_rgba('orange')
+            scatter_collection.set_facecolors(colors)
+            scatter_collection.set_zorder(1)
+
         if strongest is not None:
-            line, text, scatter, value = strongest
+            line, text_obj, scatter, value = strongest
+            if line is not None:
+                line.set_color('orange')
+            if text_obj is not None:
+                text_obj.set_color('orange')
             self.selected_line = value
             if value:
-                self._pm._display_line_info(value)
+                self._display_line_info(value)
+
+    def _display_line_info(self, value: Dict[str, Any], clear_data_field: bool = True) -> None:
+        """Display line information in the GUI data field.
+
+        Formats line properties via :meth:`LineInspectionPlot.get_line_info`
+        and enriches with observed / model flux integrals when a selection
+        range is active.
+        """
+        islat = self._islat
+
+        # --- flux integrals in the selected range ----------------------
+        data_flux = None
+        model_flux = None
+        current_selection = self._pm.toggle_state.get("current_selection")
+        if current_selection is not None:
+            xmin, xmax = current_selection
+            err_data = getattr(islat, 'err_data', None)
+            line_flux, _ = self._line_analyzer.flux_integral(
+                lam=islat.wave_data,
+                flux=islat.flux_data,
+                lam_min=xmin, lam_max=xmax,
+                err=err_data,
+            )
+            data_flux = line_flux[0] if isinstance(line_flux, (list, tuple)) else line_flux
+            active_mol = getattr(islat, 'active_molecule', None)
+            if active_mol is not None:
+                molecule_wave, molecule_flux_arr = active_mol.get_flux(return_wavelengths=True)
+                model_flux, _ = self._line_analyzer.flux_integral(
+                    lam=molecule_wave,
+                    flux=molecule_flux_arr,
+                    lam_min=xmin, lam_max=xmax,
+                    err=None,
+                )
+
+        # --- build line info dict + formatted string -------------------
+        if 'formatted_text' in value:
+            class _Line2:
+                pass
+            _l2 = _Line2()
+            _l2.lam = value.get('lam')
+            _l2.e_up = value.get('e_up')
+            _l2.e_low = value.get('e_low')
+            _l2.a_stein = value.get('a_stein')
+            _l2.g_up = value.get('g_up')
+            _l2.g_low = value.get('g_low')
+            _l2.lev_up = value.get('up_lev')
+            _l2.lev_low = value.get('low_lev')
+            info = LineInspectionPlot.get_line_info(
+                _l2,
+                intensity=value.get('intensity', 0),
+                tau=value.get('tau'),
+                data_flux_in_range=data_flux,
+                model_flux_in_range=model_flux,
+            )
+        else:
+            class _Line:
+                pass
+            _l = _Line()
+            _l.lam = value.get('lam')
+            _l.e_up = value.get('e_up', value.get('e'))
+            _l.e_low = value.get('e_low')
+            _l.a_stein = value.get('a_stein', value.get('a'))
+            _l.g_up = value.get('g_up', value.get('g'))
+            _l.g_low = value.get('g_low')
+            _l.lev_up = value.get('up_lev')
+            _l.lev_low = value.get('low_lev')
+            info = LineInspectionPlot.get_line_info(
+                _l,
+                intensity=value.get('intensity', value.get('inten', 0)),
+                tau=value.get('tau'),
+                data_flux_in_range=data_flux,
+                model_flux_in_range=model_flux,
+            )
+
+        info_str = LineInspectionPlot.format_line_info(info)
+
+        # --- push to GUI data-field ------------------------------------
+        if (hasattr(islat, 'GUI') and hasattr(islat.GUI, 'data_field') and
+                islat.GUI.data_field is not None):
+            try:
+                if hasattr(islat.GUI.data_field, 'text') and islat.GUI.data_field.text.winfo_exists():
+                    islat.GUI.data_field.insert_text(info_str, clear_after=clear_data_field)
+            except Exception as e:
+                debug_config.warning("three_panel_view", f"Could not update data field: {e}")
 
     # ------------------------------------------------------------------
     # ToggleMixin hooks
