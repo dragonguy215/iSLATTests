@@ -441,6 +441,15 @@ class ThreePanelView(ToggleMixin, PlotView):
     # ------------------------------------------------------------------
     # Private helpers — line inspection rendering
     # ------------------------------------------------------------------
+    def _get_line_threshold(self) -> float:
+        """Return the line-intensity threshold (0-1) from user settings.
+
+        Falls back to 0.3 (30%) when ``user_settings`` is unavailable.
+        """
+        return getattr(self._islat, 'user_settings', {}).get(
+            'line_threshold', 0.3,
+        )
+
     def _get_molecule_line_data(
         self, molecule: "Molecule", xmin: float, xmax: float,
     ) -> List[Tuple["MoleculeLine", float, Optional[float]]]:
@@ -475,7 +484,10 @@ class ThreePanelView(ToggleMixin, PlotView):
 
         # Add active-line vertical markers via MainPlotGrid
         grid = self._ensure_grid()
-        grid.render_active_line_markers(line_data, self.active_lines, max_y)
+        grid.render_active_line_markers(
+            line_data, self.active_lines, max_y,
+            threshold=self._get_line_threshold(),
+        )
 
     def _render_population_diagram_base(self) -> None:
         """Render the base population diagram for the active molecule."""
@@ -491,6 +503,7 @@ class ThreePanelView(ToggleMixin, PlotView):
             active_mol = self._islat.active_molecule
             sc = grid.render_active_line_scatter(
                 line_data, self.active_lines, active_mol,
+                threshold=self._get_line_threshold(),
             )
             # Store scatter collection on the renderer for pick-event handling
             if sc is not None:

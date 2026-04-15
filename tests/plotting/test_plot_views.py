@@ -1117,6 +1117,363 @@ class TestThreePanelViewGrid:
         pm.plot_renderer.clear_model_lines.assert_called_once()
 
 
+class TestThreePanelViewThreshold:
+    """Verify that ThreePanelView applies the line-intensity threshold
+    from ``user_settings['line_threshold']`` when rendering active lines
+    in the line-inspection and population-diagram panels.
+    """
+
+    @pytest.fixture
+    def threshold_controller(self):
+        """Controller with real axes, molecule data, and configurable
+        ``user_settings`` so we can set/change the threshold."""
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        from iSLAT.Modules.Plotting.BasePlot import BasePlot
+
+        fig = plt.figure(figsize=(12, 8))
+        ax1, ax2, ax3 = BasePlot.create_three_panel_axes(fig)
+
+        wave, flux, err = make_wave_flux(n=200)
+        mol = _make_test_molecule()
+        md = MoleculeDict()
+        md[mol.name] = mol
+
+        islat = MagicMock()
+        islat.wave_data = wave
+        islat.wave_data_original = wave.copy()
+        islat.flux_data = flux
+        islat.err_data = err
+        islat.molecules_dict = md
+        islat.active_molecule = mol
+        islat.user_settings = {"line_threshold": 0.3}  # 30% default
+        md.apply_stellar_rv = MagicMock(side_effect=lambda w: w)
+
+        pm = MagicMock()
+        pm.fig = fig
+        pm.ax1 = ax1
+        pm.ax2 = ax2
+        pm.ax3 = ax3
+        pm.canvas = MagicMock()
+        pm.canvas.draw_idle = MagicMock()
+        pm.theme = {"background": "#181A1B", "foreground": "#e8e6e3"}
+        pm.toggle_state = {
+            "atomic_lines": False,
+            "saved_lines": False,
+            "summed": True,
+            "legend": True,
+        }
+        pm.islat = islat
+        pm.plot_renderer = MagicMock()
+        pm.summed_toggle = True
+        pm.atomic_toggle = False
+        pm.line_toggle = False
+        pm.legend_toggle = True
+        pm.make_span_selector = MagicMock()
+
+        yield pm, mol, md
+        plt.close(fig)
+
+    def _make_line_data(self, mol, lam_min=12.0, lam_max=16.0):
+        """Get real line data from the molecule's computed intensity."""
+        if mol.intensity is None:
+            return []
+        try:
+            return mol.intensity.get_lines_in_range_with_intensity(lam_min, lam_max)
+        except Exception:
+            return []
+
+    # ------------------------------------------------------------------
+    # _get_line_threshold
+    # ------------------------------------------------------------------
+    def test_get_line_threshold_reads_user_settings(self, threshold_controller):
+        """_get_line_threshold should return the value from user_settings."""
+        pm, mol, md = threshold_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        assert view._get_line_threshold() == 0.3
+
+    def test_get_line_threshold_custom_value(self, threshold_controller):
+        """Changing user_settings should be reflected immediately."""
+        pm, mol, md = threshold_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        pm.islat.user_settings["line_threshold"] = 0.5
+        assert view._get_line_threshold() == 0.5
+
+    def test_get_line_threshold_default_when_missing(self, threshold_controller):
+        """If 'line_threshold' key is absent, default to 0.3."""
+        pm, mol, md = threshold_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        pm.islat.user_settings = {}  # no key
+        view = ThreePanelView(pm)
+        assert view._get_line_threshold() == 0.3
+
+    def test_get_line_threshold_default_when_no_user_settings(self, threshold_controller):
+        """If islat has no user_settings attribute, default to 0.3."""
+        pm, mol, md = threshold_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        del pm.islat.user_settings
+        view = ThreePanelView(pm)
+        assert view._get_line_threshold() == 0.3
+
+    # ------------------------------------------------------------------
+    # Line-inspection threshold filtering
+    # ------------------------------------------------------------------
+    def test_render_line_inspection_passes_threshold(self, threshold_controller):
+        """_render_line_inspection must forward the threshold to the grid."""
+        pm, mol, md = threshold_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        grid = view._ensure_grid()
+        grid.render_active_line_markers = MagicMock()
+
+        line_data = self._make_line_data(mol)
+        if not line_data:
+            pytest.skip("No line data generated")
+
+        view._render_line_inspection(12.0, 16.0, line_data)
+
+        grid.render_active_line_markers.assert_called_once()
+        _, kwargs = grid.render_active_line_markers.call_args
+        assert "threshold" in kwargs
+        assert kwargs["threshold"] == 0.3
+
+    def test_render_line_inspection_threshold_filters_weak_lines(self, threshold_controller):
+        """With a high threshold, weak lines should be excluded from active_lines."""
+        pm, mol, md = threshold_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+
+        line_data = self._make_line_data(mol)
+        if len(line_data) < 2:
+            pytest.skip("Need at least 2 lines for threshold test")
+
+        # Render with threshold=0 (all lines visible)
+        pm.islat.user_settings["line_threshold"] = 0.0
+        view_all = ThreePanelView(pm)
+        view_all._do_update_model_plot()
+        view_all._render_line_inspection(12.0, 16.0, line_data)
+        n_all = len(view_all.active_lines)
+
+        # Clean up axes for next render
+        pm.ax2.clear()
+
+        # Render with a high threshold (only strongest lines visible)
+        pm.islat.user_settings["line_threshold"] = 0.99
+        view_strict = ThreePanelView(pm)
+        view_strict._do_update_model_plot()
+        view_strict._render_line_inspection(12.0, 16.0, line_data)
+        n_strict = len(view_strict.active_lines)
+
+        # Strict threshold should show fewer (or equal) lines
+        assert n_strict <= n_all
+        # With threshold=0.99, most lines should be filtered
+        if n_all > 1:
+            assert n_strict < n_all
+
+    def test_render_line_inspection_zero_threshold_shows_all(self, threshold_controller):
+        """Threshold=0.0 should include every line with positive intensity."""
+        pm, mol, md = threshold_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+
+        line_data = self._make_line_data(mol)
+        if not line_data:
+            pytest.skip("No line data generated")
+
+        pm.islat.user_settings["line_threshold"] = 0.0
+        view = ThreePanelView(pm)
+        view._do_update_model_plot()
+        view._render_line_inspection(12.0, 16.0, line_data)
+
+        # Every line with positive intensity should be present
+        positive_lines = [
+            (l, i, t) for l, i, t in line_data if i > 0
+        ]
+        assert len(view.active_lines) == len(positive_lines)
+
+    # ------------------------------------------------------------------
+    # Population-diagram threshold filtering
+    # ------------------------------------------------------------------
+    def test_render_population_diagram_passes_threshold(self, threshold_controller):
+        """_render_population_diagram_with_lines must forward the threshold."""
+        pm, mol, md = threshold_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        grid = view._ensure_grid()
+        grid.render_active_line_scatter = MagicMock(return_value=None)
+
+        line_data = self._make_line_data(mol)
+        if not line_data:
+            pytest.skip("No line data generated")
+
+        view._render_population_diagram_with_lines(line_data)
+
+        grid.render_active_line_scatter.assert_called_once()
+        _, kwargs = grid.render_active_line_scatter.call_args
+        assert "threshold" in kwargs
+        assert kwargs["threshold"] == 0.3
+
+    def test_render_population_diagram_threshold_filters_weak_lines(self, threshold_controller):
+        """With a high threshold, weak lines should not appear in scatter."""
+        pm, mol, md = threshold_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+
+        line_data = self._make_line_data(mol)
+        if len(line_data) < 2:
+            pytest.skip("Need at least 2 lines for threshold test")
+
+        # All lines with threshold=0
+        pm.islat.user_settings["line_threshold"] = 0.0
+        view_all = ThreePanelView(pm)
+        view_all._do_update_model_plot()
+        view_all._render_population_diagram_with_lines(line_data)
+        n_all = len(view_all.active_lines)
+
+        pm.ax3.clear()
+
+        # Strict threshold
+        pm.islat.user_settings["line_threshold"] = 0.99
+        view_strict = ThreePanelView(pm)
+        view_strict._do_update_model_plot()
+        view_strict._render_population_diagram_with_lines(line_data)
+        n_strict = len(view_strict.active_lines)
+
+        assert n_strict <= n_all
+        if n_all > 1:
+            assert n_strict < n_all
+
+    def test_threshold_change_takes_effect_on_next_render(self, threshold_controller):
+        """Changing the threshold between renders should change the output."""
+        pm, mol, md = threshold_controller
+        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
+        view = ThreePanelView(pm)
+        grid = view._ensure_grid()
+        grid.render_active_line_markers = MagicMock()
+
+        line_data = self._make_line_data(mol)
+        if not line_data:
+            pytest.skip("No line data generated")
+
+        # First render with 0.3
+        pm.islat.user_settings["line_threshold"] = 0.3
+        view._render_line_inspection(12.0, 16.0, line_data)
+        first_threshold = grid.render_active_line_markers.call_args[1]["threshold"]
+        assert first_threshold == 0.3
+
+        # Change threshold and render again
+        pm.islat.user_settings["line_threshold"] = 0.7
+        grid.render_active_line_markers.reset_mock()
+        view._render_line_inspection(12.0, 16.0, line_data)
+        second_threshold = grid.render_active_line_markers.call_args[1]["threshold"]
+        assert second_threshold == 0.7
+
+
+class TestMainPlotGridThresholdFiltering:
+    """Validate that MainPlotGrid.render_active_line_markers and
+    render_active_line_scatter actually filter lines by threshold.
+
+    These are lower-level tests that ensure the filtering machinery
+    itself works correctly, independent of ThreePanelView.
+    """
+
+    @pytest.fixture
+    def grid_with_data(self):
+        wave, flux, err = make_wave_flux(n=200)
+        mol = _make_test_molecule()
+        mpg = MainPlotGrid(
+            wave, flux, error_data=err,
+            active_molecule=mol,
+            inspection_range=(12.0, 16.0),
+        )
+        mpg.generate_plot()
+        yield mpg, mol
+        mpg.close()
+
+    def _make_line_data(self, mol, lam_min=12.0, lam_max=16.0):
+        if mol.intensity is None:
+            return []
+        try:
+            return mol.intensity.get_lines_in_range_with_intensity(lam_min, lam_max)
+        except Exception:
+            return []
+
+    def test_markers_threshold_zero_includes_all(self, grid_with_data):
+        """threshold=0.0 should include all lines with positive intensity."""
+        mpg, mol = grid_with_data
+        line_data = self._make_line_data(mol)
+        if not line_data:
+            pytest.skip("No line data")
+        active: list = []
+        mpg.render_active_line_markers(line_data, active, max_y=0.1, threshold=0.0)
+        positive = [(l, i, t) for l, i, t in line_data if i > 0]
+        assert len(active) == len(positive)
+
+    def test_markers_threshold_one_includes_only_strongest(self, grid_with_data):
+        """threshold=1.0 should only include lines at exactly max intensity."""
+        mpg, mol = grid_with_data
+        line_data = self._make_line_data(mol)
+        if len(line_data) < 2:
+            pytest.skip("Need multiple lines")
+        active: list = []
+        mpg.render_active_line_markers(line_data, active, max_y=0.1, threshold=1.0)
+        # Only the single strongest line should pass (frac == 1.0)
+        assert len(active) == 1
+
+    def test_markers_higher_threshold_fewer_lines(self, grid_with_data):
+        """Increasing threshold should never increase the number of lines."""
+        mpg, mol = grid_with_data
+        line_data = self._make_line_data(mol)
+        if len(line_data) < 2:
+            pytest.skip("Need multiple lines")
+
+        counts = []
+        for thresh in [0.0, 0.3, 0.5, 0.8, 1.0]:
+            active: list = []
+            mpg.ax_inspection.clear()
+            mpg.render_active_line_markers(line_data, active, max_y=0.1, threshold=thresh)
+            counts.append(len(active))
+
+        # Counts should be monotonically non-increasing
+        for i in range(1, len(counts)):
+            assert counts[i] <= counts[i - 1], (
+                f"threshold={[0.0, 0.3, 0.5, 0.8, 1.0][i]} gave "
+                f"{counts[i]} lines but previous gave {counts[i - 1]}"
+            )
+
+    def test_scatter_threshold_zero_includes_all(self, grid_with_data):
+        """threshold=0.0 for scatter should include all valid lines."""
+        mpg, mol = grid_with_data
+        line_data = self._make_line_data(mol)
+        if not line_data:
+            pytest.skip("No line data")
+        active: list = []
+        sc = mpg.render_active_line_scatter(
+            line_data, active, mol, threshold=0.0,
+        )
+        # All lines with valid data should be present
+        assert len(active) > 0
+        if sc is not None:
+            assert len(active) == len(line_data)
+
+    def test_scatter_higher_threshold_fewer_points(self, grid_with_data):
+        """Increasing threshold should never increase scatter point count."""
+        mpg, mol = grid_with_data
+        line_data = self._make_line_data(mol)
+        if len(line_data) < 2:
+            pytest.skip("Need multiple lines")
+
+        counts = []
+        for thresh in [0.0, 0.3, 0.5, 0.8, 1.0]:
+            active: list = []
+            mpg.ax_popdiagram.clear()
+            mpg.render_active_line_scatter(
+                line_data, active, mol, threshold=thresh,
+            )
+            counts.append(len(active))
+
+        for i in range(1, len(counts)):
+            assert counts[i] <= counts[i - 1]
+
+
 class TestFullSpectrumViewInit:
     """FullSpectrumView initialization tests with mocks."""
 
