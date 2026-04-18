@@ -29,6 +29,8 @@ Example Usage:
 """
 
 import os
+import json
+from pathlib import Path
 import numpy as np
 from scipy.optimize import fmin
 #from iSLAT.Modules.DataProcessing.Chi2Spectrum import Chi2Spectrum
@@ -52,8 +54,9 @@ class SlabModel:
         
         Parameters:
         -----------
-        output_folder : str
-            Directory containing the target file for chi-squared evaluation
+        output_folder : str or Path
+            Directory containing the target file for chi-squared evaluation.
+            Accepts a string path or a ``pathlib.Path`` object.
             Default: line_saves_file_path from FileHandling module
         mol_object : Molecule
             Molecule object containing molecular data and parameters
@@ -75,17 +78,17 @@ class SlabModel:
         self.data_field = data_field
 
         try:
-            #self.output_folder = output_folder if output_folder else line_saves_file_path
             if output_folder:
-                self.output_folder = output_folder
+                # Accept str or Path; always store as str for os.path compat
+                self.output_folder = str(output_folder)
             else:
-                self.output_folder = line_saves_file_path
+                self.output_folder = str(line_saves_file_path)
                 self.data_field.insert_text(f"Using default output folder: {line_saves_file_path}", clear_after=False)
         except Exception as e:
             if self.data_field:
                 self.data_field.insert_text(f"Error setting output folder: {e}", clear_after=False)
             self.data_field.insert_text(f"Using default folder: {line_saves_file_path}", clear_after=False)
-            self.output_folder = line_saves_file_path
+            self.output_folder = str(line_saves_file_path)
             
         self.mol_object = mol_object
         
@@ -109,6 +112,10 @@ class SlabModel:
         
         # Cache for configurations to avoid repeated parameter extraction
         self._config_cache = {}
+        
+        # Reusable objects -- created lazily on first evaluate_model call
+        self._intensity = None
+        self._spectrum = None
         
         # Load data if file exists
         if os.path.exists(self.input_file):
@@ -160,9 +167,35 @@ class SlabModel:
         self._config_cache['fitting_params'] = params
         return params
     
+    def _ensure_reusable_objects(self):
+        """Lazily create the reusable Intensity and Spectrum objects.
+        
+        These are created once and reused across all evaluate_model calls.
+        The Intensity object shares the same MoleculeLineList (line data never
+        changes during fitting), and the Spectrum object preserves its
+        wavelength grid and convolution kernel caches between iterations.
+        """
+        if self._intensity is None:
+            self._intensity = Intensity(self.mol_object.lines)
+        
+        if self._spectrum is None:
+            params = self._get_fitting_parameters()
+            self._spectrum = Spectrum(
+                lam_min=params['min_wavelength'],
+                lam_max=params['max_wavelength'],
+                dlambda=params['model_pixel_res'],
+                R=params['model_line_width'],
+                distance=params['distance']
+            )
+
     def evaluate_model(self, t_kin, n_mol, radius):
         """
         Evaluate the chi-squared for given physical parameters.
+        
+        Reuses the Intensity and Spectrum objects across calls to avoid
+        redundant object creation, line-list parsing, and kernel computation.
+        Only the physical parameters (t_kin, n_mol, radius) change between
+        optimizer iterations.
         
         Parameters:
         -----------
@@ -180,33 +213,30 @@ class SlabModel:
         """
         params = self._get_fitting_parameters()
         
-        # Create intensity calculator using existing molecular line data
-        intensity = Intensity(self.mol_object.lines)
-        intensity.calc_intensity(
+        # Create objects on first call, reuse thereafter
+        self._ensure_reusable_objects()
+        
+        # Recalculate intensity (Intensity handles its own caching;
+        # if t_kin/n_mol/dv haven't changed, this is a no-op)
+        self._intensity.calc_intensity(
             t_kin=t_kin, 
             n_mol=n_mol, 
             dv=params['intrinsic_line_width']
         )
         
-        # Create test spectrum
-        test_spectrum = Spectrum(
-            lam_min=params['min_wavelength'],
-            lam_max=params['max_wavelength'],
-            dlambda=params['model_pixel_res'],
-            R=params['model_line_width'],
-            distance=params['distance']
-        )
+        # Clear previous iteration's data, keeping grid and kernel caches
+        self._spectrum.reset()
         
         # Add intensity with area scaling
-        test_spectrum.add_intensity(intensity, radius**2 * np.pi)
+        self._spectrum.add_intensity(self._intensity, radius**2 * np.pi)
         
         # Evaluate chi-squared
-        self.chi2_evaluator.evaluate_spectrum(test_spectrum)
+        self.chi2_evaluator.evaluate_spectrum(self._spectrum)
         
         chi2_total = self.chi2_evaluator.chi2_total
         
         # Print progress if verbose
-        print(f"t_kin={t_kin:.1f}K, n_mol={n_mol:.2e}cm⁻², radius={radius:.2f}au → χ²={chi2_total:.3e}")
+        print(f"t_kin={t_kin:.1f}K, n_mol={n_mol:.2e}cm-2, radius={radius:.2f}au -> chi2={chi2_total:.3e}")
         
         return chi2_total
     
@@ -302,7 +332,7 @@ class SlabModel:
         
         print(f"Updated molecule '{self.mol_object.name}' with fitted parameters")
     
-    def save_results(self, fitted_params, filename=None):
+    def save_results(self, fitted_params, filename=None, format="json"):
         """
         Save fitting results to a file in the output folder.
         
@@ -310,14 +340,65 @@ class SlabModel:
         -----------
         fitted_params : dict
             Dictionary containing fitted parameters
-        filename : str, optional
-            Name of output file (default: 'slab_fit_results.txt')
+        filename : str or Path, optional
+            Name of output file.  When *None*, auto-generated from the
+            molecule name and the chosen *format*
+            (e.g. ``slab_fit_results_H2O.json``).
+        format : str, optional
+            Output format: ``"json"`` (default) or ``"txt"`` for
+            backwards-compatible plain-text output.
+        
+        Returns:
+        --------
+        str
+            Full path to the saved file.
         """
+        format = format.lower()
+        if format not in ("json", "txt"):
+            raise ValueError(f"Unsupported format '{format}'. Use 'json' or 'txt'.")
+
         if filename is None:
-            filename = f"slab_fit_results_{self.mol_object.name}.txt"
-        
-        output_path = os.path.join(self.output_folder, filename)
-        
+            ext = "json" if format == "json" else "txt"
+            filename = f"slab_fit_results_{self.mol_object.name}.{ext}"
+
+        output_path = os.path.join(self.output_folder, str(filename))
+        os.makedirs(self.output_folder, exist_ok=True)
+
+        if format == "json":
+            self._save_results_json(fitted_params, output_path)
+        else:
+            self._save_results_txt(fitted_params, output_path)
+
+        print(f"Results saved to {output_path}")
+        return output_path
+
+    # ------------------------------------------------------------------
+    #  Private writers
+    # ------------------------------------------------------------------
+
+    def _save_results_json(self, fitted_params, output_path):
+        """Write fitting results as a machine-readable JSON file."""
+        payload = {
+            "molecule": self.mol_object.name,
+            "input_file": self.input_file,
+            "fitted_parameters": {
+                "temperature_K": fitted_params["temperature"],
+                "log_n_mol": fitted_params.get("log_n_mol"),
+                "n_mol_cm2": fitted_params["n_mol"],
+                "radius_au": fitted_params["radius"],
+            },
+            "fitting_statistics": {
+                "chi2_final": fitted_params["chi2_final"],
+                "iterations": fitted_params["iterations"],
+                "function_calls": fitted_params["function_calls"],
+                "convergence_flag": fitted_params["convergence_flag"],
+            },
+        }
+        with open(output_path, "w") as f:
+            json.dump(payload, f, indent=2)
+
+    def _save_results_txt(self, fitted_params, output_path):
+        """Write fitting results as human-readable plain text (legacy format)."""
         with open(output_path, 'w') as f:
             f.write(f"Slab Model Fitting Results\n")
             f.write(f"==========================\n\n")
@@ -332,9 +413,6 @@ class SlabModel:
             f.write(f"  Iterations: {fitted_params['iterations']}\n")
             f.write(f"  Function calls: {fitted_params['function_calls']}\n")
             f.write(f"  Convergence flag: {fitted_params['convergence_flag']}\n")
-        
-        print(f"Results saved to {output_path}")
-        return output_path
 
 # Backward compatibility alias
 SlabFit = SlabModel

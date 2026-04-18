@@ -9,14 +9,16 @@ from typing import TYPE_CHECKING, Any, Dict
 import iSLAT.Modules.FileHandling.iSLATFileHandling as ifh
 import iSLAT.Constants as c
 from ..GUIFunctions import create_button, create_menu_btn
+from ..Tooltips import CreateToolTip
 from .ResizableFrame import ResizableFrame
 from iSLAT.Modules.GUI.Widgets.ChartWindow import MoleculeSelector
 from iSLAT.Modules.GUI.PlotGridWindow import PlotGridWindow
 from iSLAT.Modules.GUI.FullSpectrumWindow import FullSpectrumWindow
 from iSLAT.Modules.FileHandling.iSLATFileHandling import (
     write_molecules_to_csv, generate_csv, line_saves_file_path,
-    line_saves_file_name, example_data_folder_path
+    line_saves_file_name, example_data_folder_path, read_from_user_csv
 )
+from iSLAT.Modules.FileHandling import save_folder_path
 from iSLAT.Modules.Plotting.FullSpectrumView import output_full_spectrum
 from iSLAT.Modules.DataProcessing.Slabfit import SlabFit as SlabModel
 from iSLAT.Modules.DataProcessing.BatchFittingService import BatchFittingService
@@ -95,6 +97,7 @@ class TopBar(ResizableFrame):
         )
         spectrum_menu.add_command(label="Save Parameters (Ctrl+S)", command=self.save_parameters)
         spectrum_menu.add_command(label="Load Parameters (Ctrl+L)", command=self.load_parameters)
+        spectrum_menu.add_command(label="Load Parameters From File (Ctrl+Shift+L)", command=self.load_parameters_from_file)
         spectrum_menu.add_command(label="Output Full Spectrum (Ctrl+Shift+F)", command=lambda: output_full_spectrum(self.islat))
         spectrum_menu.add_command(label="Display Full Spectrum (Ctrl+F)", command=lambda: FullSpectrumWindow(self.master, self.islat))
         spectrum_drpdwn.config(menu=spectrum_menu)
@@ -125,11 +128,25 @@ class TopBar(ResizableFrame):
         toggle_legend_tip = "Turn legend on/off\nKeybind: L"
         toggle_full_spectrum_tip = "Toggle full spectrum view on/off\nKeybind: F\n\nOpen in new window: Ctrl+F"
         toggle_summed_tip = "Toggle summed model flux on/off\n(gray fill in plot)\nKeybind: M"
+        toggle_residuals_tip = "Toggle residual sub-panels on/off\nin full spectrum mode\nKeybind: R"
         create_button(self.button_frame, self.theme, "Toggle Saved Lines", self.toggle_saved_lines, 0, 3, tip_text=saved_lines_tip)
         create_button(self.button_frame, self.theme, "Toggle Atomic Lines", self.toggle_atomic_lines, 0, 4, tip_text=atomic_lines_tip)
         create_button(self.button_frame, self.theme, "Toggle Full Spectrum", self.toggle_full_spectrum, 0, 5, tip_text=toggle_full_spectrum_tip)
         create_button(self.button_frame, self.theme, "Toggle Total Model", self.toggle_summed_spectrum, 0, 6, tip_text=toggle_summed_tip)
         create_button(self.button_frame, self.theme, "Toggle Legend", self.main_plot.toggle_legend, 0, 7, tip_text=toggle_legend_tip)
+        create_button(self.button_frame, self.theme, "Toggle Residuals", self.toggle_residuals, 0, 8, tip_text=toggle_residuals_tip)
+        
+        # Navigate buttons - compact with minimal padding
+        retreat_tip = "Retreat the plot start\nby the current range value\nShortcut: Shift+N"
+        advance_tip = "Advance the plot start\nby the current range value\nShortcut: N"
+        
+        self._retreat_btn = ttk.Button(self.button_frame, text="<", command=self.retreat_plot_start, width=2)
+        self._retreat_btn.grid(row=0, column=9, padx=(4, 0), pady=2, sticky="nsew")
+        CreateToolTip(self._retreat_btn, retreat_tip)
+        
+        self._advance_btn = ttk.Button(self.button_frame, text=">", command=self.advance_plot_start, width=2)
+        self._advance_btn.grid(row=0, column=10, padx=(0, 1), pady=2, sticky="nsew")
+        CreateToolTip(self._advance_btn, advance_tip)
 
     def save_line(self, save_type="selected"):
         """Save the currently selected line to the line saves file."""
@@ -433,7 +450,7 @@ class TopBar(ResizableFrame):
                 return plot
             
             if plot_results:
-                self.main_plot.plot_renderer.plot_fitted_saved_lines(fit_results_data, self.main_plot.ax1)
+                self.main_plot.plot_fitted_saved_lines(fit_results_data)
                 self.main_plot.canvas.draw_idle()
         else:
             self.data_field.insert_text("No lines found or no fits completed successfully.\n", clear_after=False)
@@ -613,9 +630,62 @@ class TopBar(ResizableFrame):
             self.data_field.insert_text(f"Error during model subtraction: {e}\n", clear_after=False)
     
     def single_slab_fit(self):
-        """Run single slab fit analysis."""        
+        """Run single slab fit analysis.
+        
+        When no saved line list is loaded, prompts the user to select one,
+        runs the fit-saved-lines workflow first, and then uses the resulting
+        fitted-line measurements as input for the slab fit.
+        """
+        ran_saved_lines_fit = False
+
+        if not self.islat.input_line_list:
+            # Prompt user to load a line list
+            self.data_field.insert_text("No line list loaded. Please select a line list file.\n")
+            from iSLAT.Modules.FileHandling.iSLATFileHandling import load_input_line_list
+            result = load_input_line_list()
+
+            if result is None:
+                self.data_field.insert_text("No line list selected. Slab fit cancelled.\n")
+                return
+
+            file_path, file_name = result
+            self.islat.input_line_list = file_path
+            self.data_field.insert_text(f"Loaded line list: {file_name}\n")
+
+            # Update the FileInteractionPane label if available
+            if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'file_interaction_pane'):
+                self.islat.GUI.file_interaction_pane.refresh()
+
+            # Run fit saved lines to produce measurements with flux/error columns
+            self.data_field.insert_text("Fitting saved lines before slab fit...\n", clear_after=False)
+            self._perform_saved_lines_fit(plot_results=True)
+            ran_saved_lines_fit = True
+
+            # Determine the actual output file that fit saved lines wrote so the
+            # slab fit can read the fitted flux/error columns from it.
+            if self.islat.output_line_measurements:
+                self.islat.input_line_list = self.islat.output_line_measurements
+            else:
+                # No explicit output was configured — reconstruct the default
+                # path that save_fit_results used.
+                from iSLAT.Modules.FileHandling import fit_save_lines_file_name
+                spectrum_name = getattr(self.islat, 'loaded_spectrum_name', None)
+                if spectrum_name is not None:
+                    spectrum_base = os.path.splitext(spectrum_name)[0]
+                    out_name = f"{spectrum_base}-{os.path.basename(file_path)}"
+                else:
+                    out_name = fit_save_lines_file_name
+                output_path = self.batch_fitting_service._current_output_folder if hasattr(self.batch_fitting_service, '_current_output_folder') and self.batch_fitting_service._current_output_folder else str(line_saves_file_path)
+                default_output = os.path.join(output_path, out_name)
+                if os.path.exists(default_output):
+                    self.islat.input_line_list = default_output
+                    self.data_field.insert_text(f"Using fit results for slab fit: {out_name}\n", clear_after=False)
+                else:
+                    self.data_field.insert_text("Fit saved lines did not produce an output file. Cannot proceed with slab fit.\n")
+                    return
+
         if self.islat.input_line_list is None:
-            self.data_field.insert_text("No input line list specified. Cannot perform slab fit.\n", clear_after=True)
+            self.data_field.insert_text("No input line list available. Cannot perform slab fit.\n", clear_after=True)
             return
 
         self.data_field.insert_text("Running single slab fit analysis...\n", clear_after=False)
@@ -722,6 +792,19 @@ class TopBar(ResizableFrame):
             self.data_field.insert_text(f"Error toggling full spectrum: {e}\n")
             traceback.print_exc()
 
+    def toggle_residuals(self):
+        """Toggle residual sub-panels in the full spectrum view.
+
+        If the user is not currently in full-spectrum mode the toggle is
+        stored and will take effect the next time the full-spectrum view
+        is activated.
+        """
+        try:
+            self.main_plot.toggle_residuals()
+        except Exception as e:
+            self.data_field.insert_text(f"Error toggling residuals: {e}\n")
+            traceback.print_exc()
+
     def hitran_query(self):
         """
         Open the HITRAN molecule selector window.
@@ -821,6 +904,95 @@ class TopBar(ResizableFrame):
             if hasattr(self.islat.GUI, 'control_panel'):
                 self.islat.GUI.control_panel.refresh_from_molecules_dict()
 
+    def load_parameters_from_file(self):
+        """
+        Load molecule parameters from a user-selected CSV file in the SAVES folder.
+        Opens a file dialog to let the user pick any save file.
+        """
+        # Open file dialog starting in the SAVES folder
+        selected_file = filedialog.askopenfilename(
+            title="Select a save file to load",
+            initialdir=str(save_folder_path),
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        
+        if not selected_file:
+            return  # User cancelled
+        
+        # Display confirmation dialog
+        confirmed = messagebox.askquestion(
+            "Confirmation",
+            f"Are you sure you want to load parameters from:\n{os.path.basename(selected_file)}?\n\nMake sure to save any unsaved changes!"
+        )
+        if confirmed == "no":
+            return
+        
+        # Show loading message
+        if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+            self.islat.GUI.data_field.insert_text(
+                'Loading saved parameters, this may take a moment...',
+                clear_after=True
+            )
+        
+        try:
+            # Split selected file into directory and filename
+            file_dir = os.path.dirname(selected_file)
+            file_name = os.path.basename(selected_file)
+            
+            # Read molecule data from the selected file
+            mole_save_data = read_from_user_csv(
+                file_path=file_dir,
+                file_name=file_name,
+                update_save_file_names=self.islat.user_settings.get(
+                    "update_save_file_names_in_save_csv", False
+                )
+            )
+            
+            if mole_save_data is None:
+                if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+                    self.islat.GUI.data_field.insert_text(
+                        f'Failed to read save file: {file_name}',
+                        clear_after=True
+                    )
+                return
+            
+            # Clear existing molecules and load from file
+            self.islat.molecules_dict.clear()
+            self.islat.init_molecules(mole_save_data)
+            self.islat._molecules_loaded = True
+            
+            # Update GUI components
+            if hasattr(self.islat, 'GUI'):
+                if hasattr(self.islat.GUI, 'plot'):
+                    self.main_plot.update_all_plots()
+                if hasattr(self.islat.GUI, 'control_panel'):
+                    self.islat.GUI.control_panel.refresh_from_molecules_dict()
+                if hasattr(self.islat.GUI, 'data_field'):
+                    self.islat.GUI.data_field.insert_text(
+                        f'Loaded parameters from: {file_name}',
+                        clear_after=False
+                    )
+            
+            print(f"Successfully loaded parameters from: {selected_file}")
+            
+        except Exception as e:
+            print(f"Error loading parameters from file: {e}")
+            if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+                self.islat.GUI.data_field.insert_text(
+                    f'Error loading parameters: {str(e)}',
+                    clear_after=True
+                )
+
+    def retreat_plot_start(self):
+        """Retreat the plot start by the current range value."""
+        if self.control_panel:
+            self.control_panel.retreat_plot_start()
+    
+    def advance_plot_start(self):
+        """Advance the plot start by the current range value."""
+        if self.control_panel:
+            self.control_panel.advance_plot_start()
+    
     def toggle_legend(self):
         #print("Toggled legend on plot")
         self.main_plot.toggle_legend()

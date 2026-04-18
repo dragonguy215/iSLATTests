@@ -6,19 +6,25 @@ Panels:
     2. Line inspection zoom    (ax2)
     3. Population diagram      (ax3)
 
-This view simply delegates to the *existing* axes and :class:`PlotRenderer`
-that already live on the :class:`iSLATPlot` controller.  It adds no new
-figures or canvases — it packs / unpacks the original ``self.canvas``.
+This view **composes** a :class:`MainPlotGrid` in *borrowed-axes* mode
+for all spectrum-panel rendering, mirroring how :class:`FullSpectrumView`
+composes a :class:`FullSpectrumPlot`.  The axes and canvas are still
+owned by the :class:`iSLATPlot` controller — :class:`MainPlotGrid`
+renders onto them without calling ``fig.clf()`` so that cached
+references in ``InteractionHandler`` and ``PlotRenderer`` stay valid.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional, Tuple, List
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, List
 
 import numpy as np
 
 from .PlotView import PlotView
 from .BasePlot import BasePlot
+from .ToggleMixin import ToggleMixin
+from .MainPlotGrid import MainPlotGrid
+from .LineInspectionPlot import LineInspectionPlot
 
 if TYPE_CHECKING:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -27,8 +33,11 @@ if TYPE_CHECKING:
     from .PlotRenderer import PlotRenderer
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from iSLAT.Modules.DataTypes.Molecule import Molecule
+    from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
 
+import iSLAT.Constants as c
 from iSLAT.Modules.FileHandling.iSLATFileHandling import load_atomic_lines
+from iSLAT.Modules.DataProcessing.LineAnalyzer import LineAnalyzer
 
 # Import debug configuration
 try:
@@ -42,13 +51,14 @@ except ImportError:
         def trace(self, *a, **k): pass
     debug_config = _Fallback()
 
-class ThreePanelView(PlotView):
+class ThreePanelView(ToggleMixin, PlotView):
     """
-    Standard 3-panel GUI view backed by the existing PlotRenderer.
+    Standard 3-panel GUI view backed by a :class:`MainPlotGrid`.
 
-    This is a *thin adapter*: it owns nothing new.  The axes, canvas, and
-    PlotRenderer are still held by the iSLATPlot controller.  The view
-    just provides the :class:`PlotView` API on top.
+    The grid is created lazily in *borrowed-axes* mode on first render:
+    it receives the controller's ``ax1``/``ax2``/``ax3`` and renders
+    directly onto them.  Toggle-state management (atomic lines, saved
+    lines, summed spectrum, legend) is provided by :class:`ToggleMixin`.
     """
 
     def __init__(self, plot_manager: Any) -> None:
@@ -61,6 +71,17 @@ class ThreePanelView(PlotView):
         self._pm = plot_manager  # short alias for the controller
         self._needs_refresh: bool = True  # Set True when data changes; cleared after re-render
 
+        # MainPlotGrid in borrowed-axes mode — created lazily in
+        # _ensure_grid() because wave_data/flux_data are not available
+        # until the first render call.
+        self._grid: MainPlotGrid | None = None
+
+        # Active-line state (line inspection markers + pop-diagram scatter)
+        self.active_lines: List[Any] = []
+        self.selected_line: Optional[Dict[str, Any]] = None
+        self._pick_event_connected: bool = False
+        self._line_analyzer = LineAnalyzer()
+
     # ------------------------------------------------------------------
     # Helpers (private, short-hand access to controller state)
     # ------------------------------------------------------------------
@@ -70,6 +91,36 @@ class ThreePanelView(PlotView):
             if hasattr(artist, tag):
                 return True
         return False
+
+    def _ensure_grid(self) -> MainPlotGrid:
+        """Return the composed :class:`MainPlotGrid`, creating it lazily.
+
+        The grid is constructed in *borrowed-axes* mode using the
+        controller's ``ax1``/``ax2``/``ax3``.  Because it never calls
+        ``fig.clf()``, all external references to these axes stay valid.
+        """
+        if self._grid is not None:
+            return self._grid
+
+        islat = self._islat
+        wave = getattr(islat, 'wave_data', np.array([]))
+        flux = getattr(islat, 'flux_data', np.array([]))
+        err = getattr(islat, 'err_data', None)
+        mol_dict = getattr(islat, 'molecules_dict', None)
+        active_mol = getattr(islat, 'active_molecule', None)
+
+        self._grid = MainPlotGrid(
+            wave_data=wave,
+            flux_data=flux,
+            error_data=err,
+            molecules=mol_dict,
+            active_molecule=active_mol,
+            theme=self._pm.theme,
+            ax_spectrum=self._pm.ax1,
+            ax_inspection=self._pm.ax2,
+            ax_popdiagram=self._pm.ax3,
+        )
+        return self._grid
     @property
     def _renderer(self) -> "PlotRenderer":
         return self._pm.plot_renderer
@@ -101,6 +152,9 @@ class ThreePanelView(PlotView):
         """Show the original 3-panel canvas and refresh."""
         self._canvas.get_tk_widget().pack(fill="both", expand=True, padx=0, pady=0)
 
+        # Sync theme in case it changed while the other view was active.
+        self.apply_theme(self._pm.theme)
+
         if self._needs_refresh:
             # Data changed while we were inactive — full re-render
             self._do_update_model_plot()
@@ -117,6 +171,40 @@ class ThreePanelView(PlotView):
         self._canvas.get_tk_widget().pack_forget()
 
     # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+    def apply_theme(self, theme: dict) -> None:
+        """Apply *theme* to the three-panel figure, axes, and canvas.
+
+        Delegates to the controller's :meth:`_apply_plot_theming` which
+        already handles figure/axes/spine/tick colouring.  Also updates
+        the PlotRenderer and its sub-plot delegates so subsequent renders
+        pick up the new colours.
+        """
+        # Keep the controller's theme reference in sync
+        self._pm.theme = theme
+
+        if hasattr(self._pm, 'plot_renderer'):
+            self._pm.plot_renderer.theme = theme
+            if hasattr(self._pm.plot_renderer, '_line_inspection_plot') and self._pm.plot_renderer._line_inspection_plot is not None:
+                self._pm.plot_renderer._line_inspection_plot.theme = theme
+            if hasattr(self._pm.plot_renderer, '_population_diagram_plot') and self._pm.plot_renderer._population_diagram_plot is not None:
+                self._pm.plot_renderer._population_diagram_plot.theme = theme
+
+        # Restyle figure / axes / data artists
+        self._pm._apply_plot_theming()
+
+        # Restyle canvas widget background
+        try:
+            self._canvas.get_tk_widget().configure(
+                bg=theme.get("background", "#181A1B")
+            )
+        except Exception:
+            pass
+
+        self._canvas.draw_idle()
+
+    # ------------------------------------------------------------------
     # Core rendering
     # ------------------------------------------------------------------
     def update_model_plot(
@@ -131,10 +219,17 @@ class ThreePanelView(PlotView):
         self._needs_refresh = False
 
     def _do_update_model_plot(self) -> None:
-        """Internal full re-render mirroring the old ``iSLATPlot.update_model_plot`` logic."""
+        """Internal full re-render via the composed :class:`MainPlotGrid`.
+
+        Data is fetched from the ``iSLAT`` controller, pushed into the
+        grid's ``update_data()`` method (which clears and re-renders the
+        spectrum panel on the borrowed axes), and then toggle states are
+        reconciled on top.
+        """
         islat = self._islat
 
         if not hasattr(islat, 'molecules_dict') or len(islat.molecules_dict) == 0:
+            # No molecules — fall back to the renderer for a quick clear
             self._renderer.clear_model_lines()
             self._canvas.draw_idle()
             return
@@ -142,37 +237,29 @@ class ThreePanelView(PlotView):
         mol_dict = islat.molecules_dict
 
         # Always work from the original observer-frame wavelengths.
-        # MoleculeDict.get_summed_flux handles stellar RV and pixel
-        # matching internally; it returns rest-frame wavelengths.
         wave_data_obs = islat.wave_data_original
-
-        # Compute summed flux.  get_summed_flux expects observer-frame
-        # wavelengths and returns (rest_frame_wavelengths, summed_flux).
-        summed_wavelengths = summed_flux = None
-        try:
-            if hasattr(mol_dict, 'get_summed_flux'):
-                summed_wavelengths, summed_flux = mol_dict.get_summed_flux(
-                    wave_data_obs, visible_only=True
-                )
-        except Exception as e:
-            debug_config.warning("three_panel", f"Could not get summed flux: {e}")
 
         # RV-corrected (rest-frame) wavelengths for the display x-axis.
         wave_data = mol_dict.apply_stellar_rv(wave_data_obs)
         islat.wave_data = wave_data
 
-        self._renderer.render_main_spectrum_plot(
+        # Push data into the grid and re-render all three panels.
+        grid = self._ensure_grid()
+        grid.update_data(
             wave_data=wave_data,
             flux_data=islat.flux_data,
-            molecules=islat.molecules_dict,
-            summed_wavelengths=summed_wavelengths,
-            summed_flux=summed_flux,
+            molecules=mol_dict,
+            active_molecule=getattr(islat, 'active_molecule', None),
             error_data=getattr(islat, 'err_data', None),
+            wave_data_obs=wave_data_obs,
         )
 
-        # Respect summed_toggle
+        # Respect summed_toggle — hide the summed fill if the user
+        # toggled it off.
         if not self._pm.summed_toggle:
-            self._renderer.set_summed_spectrum_visibility(False)
+            BasePlot._clear_tagged_artists(
+                grid.ax_spectrum, "_islat_summed", lines=False,
+            )
 
         # Overlay saved / atomic lines if their toggles are on
         if self._pm.atomic_toggle:
@@ -206,123 +293,449 @@ class ThreePanelView(PlotView):
         """
         Fast incremental update — toggle one molecule's artists on ax1.
 
-        Delegates all heavy-lifting to ``PlotRenderer.handle_molecule_visibility_change``
-        which already handles line removal, summed-spectrum update, and legend rebuild.
+        Delegates to :meth:`MainPlotGrid.handle_molecule_visibility_change`
+        which handles artist toggling, summed-spectrum update, and legend
+        rebuild on the borrowed spectrum axes.
         """
-        self._renderer.handle_molecule_visibility_change(
+        grid = self._ensure_grid()
+        # Keep the grid's molecules reference in sync
+        grid.molecules = molecules_dict
+        grid.wave_data_obs = getattr(self._islat, 'wave_data_original', wave_data)
+
+        grid.handle_molecule_visibility_change(
             molecule_name=molecule_name,
             is_visible=is_visible,
-            molecules_dict=molecules_dict,
-            wave_data=wave_data,
-            active_molecule=active_molecule,
-            current_selection=current_selection,
-            is_full_spectrum=False,  # We are the three-panel view
             force_rerender=force_rerender,
         )
         self._canvas.draw_idle()
 
     # ------------------------------------------------------------------
-    # Toggle helpers
+    # Selection & line-inspection
     # ------------------------------------------------------------------
-    def sync_toggle_state(self, toggle_state: dict) -> None:
+    def on_selection(self, xmin: float, xmax: float) -> None:
+        """Handle a span-selector drag — render line inspection + population diagram.
+
+        This is the main entry-point that replaces the old
+        ``iSLATPlot.plot_spectrum_around_line`` for the three-panel view.
         """
-        Reconcile visual state with the controller's toggle_state dict.
+        debug_config.verbose("line_inspection", f"on_selection called", xmin=xmin, xmax=xmax)
 
-        Ensures overlays match the canonical state without a full re-render.
+        active_mol = getattr(self._islat, 'active_molecule', None)
+
+        if active_mol is None:
+            return
+
+        # Get lines in range
+        try:
+            line_data = self._get_molecule_line_data(active_mol, xmin, xmax)
+            if not line_data:
+                if hasattr(self._islat, 'GUI') and hasattr(self._islat.GUI, 'data_field'):
+                    self._islat.GUI.data_field.insert_text(
+                        f"No transitions found for {active_mol.name} in the selected range"
+                    )
+                self.clear_active_lines()
+                self._render_population_diagram_base()
+                self._canvas.draw_idle()
+                return
+        except Exception as e:
+            debug_config.warning("three_panel_view", f"Could not get line data: {e}")
+            self.clear_active_lines()
+            self._render_population_diagram_base()
+            self._canvas.draw_idle()
+            return
+
+        # Clear previous active lines and render fresh ones
+        self.clear_active_lines()
+        self._render_line_inspection(xmin, xmax, line_data)
+        self._render_population_diagram_with_lines(line_data)
+
+        # Highlight strongest line AFTER both panels are populated
+        self._highlight_strongest_line()
+
+        # Connect pick event once
+        if not self._pick_event_connected:
+            self._canvas.mpl_connect('pick_event', self._on_pick_line)
+            self._pick_event_connected = True
+
+        self._canvas.draw_idle()
+        debug_config.verbose("line_inspection", "on_selection completed")
+
+    def clear_selection(self) -> None:
+        """Clear the current line-inspection selection and reset panels 2-3."""
+        self.clear_active_lines()
+        self.ax2.clear()
+        self._render_population_diagram_base()
+        self._canvas.draw_idle()
+
+    def clear_active_lines(self) -> None:
+        """Remove all active-line artists (vlines, text, scatter)."""
+        grid = self._ensure_grid()
+        grid.clear_active_lines(self.active_lines)
+
+    # ------------------------------------------------------------------
+    # Molecule lifecycle callbacks
+    # ------------------------------------------------------------------
+    def on_active_molecule_changed(
+        self,
+        new_molecule: Optional["Molecule"] = None,
+        current_selection: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        """The user selected a different active molecule."""
+        debug_config.info("active_molecule", "ThreePanelView.on_active_molecule_changed()")
+
+        if new_molecule is not None:
+            self.ax3.set_title(f'{new_molecule.displaylabel} Population diagram')
+
+        self.clear_active_lines()
+
+        if current_selection is not None:
+            xmin, xmax = current_selection
+            self.on_selection(xmin, xmax)
+        else:
+            self._render_population_diagram_base()
+            self._canvas.draw_idle()
+
+    def on_molecule_parameter_changed(
+        self,
+        molecule_name: str,
+        parameter_name: str,
+        current_selection: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        """A molecule parameter changed — update spectrum + possibly line inspection."""
+        # Visibility changes are handled separately
+        if parameter_name == 'is_visible':
+            return
+
+        mol_dict = getattr(self._islat, 'molecules_dict', None)
+        if mol_dict is None or molecule_name not in mol_dict:
+            return
+
+        molecule = mol_dict[molecule_name]
+
+        if molecule.is_visible:
+            # Re-render the full spectrum panel
+            self._do_update_model_plot()
+
+        active_mol = getattr(self._islat, 'active_molecule', None)
+        if (active_mol is not None
+                and hasattr(active_mol, 'name')
+                and active_mol.name == molecule_name):
+            if current_selection is not None:
+                xmin, xmax = current_selection
+                self.on_selection(xmin, xmax)
+            else:
+                self._render_population_diagram_base()
+                self._canvas.draw_idle()
+
+    def on_molecule_deleted(self, molecule_name: str) -> None:
+        """A molecule was removed — clear and rebuild everything."""
+        self._renderer.clear_model_lines()
+
+        active_mol = getattr(self._islat, 'active_molecule', None)
+        if (active_mol is not None
+                and hasattr(active_mol, 'name')
+                and active_mol.name == molecule_name):
+            self.clear_active_lines()
+
+        self._do_update_model_plot()
+
+    # ------------------------------------------------------------------
+    # Private helpers — line inspection rendering
+    # ------------------------------------------------------------------
+    def _get_line_threshold(self) -> float:
+        """Return the line-intensity threshold (0-1) from user settings.
+
+        Falls back to 0.3 (30%) when ``user_settings`` is unavailable.
         """
-        # Atomic lines
-        if toggle_state.get("atomic_lines", False):
-            if not self._has_tagged_artists("_islat_atomic_line"):
-                self._plot_atomic_lines()
-        else:
-            if self._has_tagged_artists("_islat_atomic_line"):
-                self._remove_atomic_lines()
-
-        # Saved lines
-        if toggle_state.get("saved_lines", False):
-            if not self._has_tagged_artists("_islat_saved_line"):
-                self._plot_saved_lines()
-        else:
-            if self._has_tagged_artists("_islat_saved_line"):
-                self._remove_saved_lines()
-
-        # Summed spectrum
-        self._renderer.set_summed_spectrum_visibility(
-            toggle_state.get("summed", True)
+        return getattr(self._islat, 'user_settings', {}).get(
+            'line_threshold', 0.3,
         )
 
-        # Legend
-        legend_on = toggle_state.get("legend", True)
-        for ax in (self.ax1, self.ax2, self.ax3):
-            leg = ax.get_legend()
-            if leg is not None:
-                leg.set_visible(legend_on)
+    def _get_molecule_line_data(
+        self, molecule: "Molecule", xmin: float, xmax: float,
+    ) -> List[Tuple["MoleculeLine", float, Optional[float]]]:
+        """Get molecule lines in a wavelength range (pure data-access)."""
+        return self._pm.get_molecule_line_data(molecule, xmin, xmax)
 
-        self._canvas.draw_idle()
+    def _render_line_inspection(
+        self,
+        xmin: float,
+        xmax: float,
+        line_data: List[Tuple["MoleculeLine", float, Any]],
+    ) -> None:
+        """Render the line-inspection panel (ax2) with vertical markers."""
+        # Render the base line inspection plot (observed + molecule model)
+        fit_result = getattr(self._pm, 'fit_result', None)
+        grid = self._ensure_grid()
+        grid.render_line_inspection_plot(
+            wave_data=self._islat.wave_data,
+            flux_data=self._islat.flux_data,
+            xmin=xmin, xmax=xmax,
+            active_molecule=self._islat.active_molecule,
+            fit_result=fit_result,
+        )
 
-    def toggle_summed_spectrum(self, visible: bool) -> None:
-        self._renderer.set_summed_spectrum_visibility(visible)
-        self._canvas.draw_idle()
+        # Compute max_y for line-height scaling
+        data_mask = (self._islat.wave_data >= xmin) & (self._islat.wave_data <= xmax)
+        data_region_y = self._islat.flux_data[data_mask]
+        max_y = (
+            float(np.nanmax(data_region_y))
+            if len(data_region_y) > 0
+            else (self.ax2.get_ylim()[1] / 1.1)
+        )
 
-    def toggle_legend(self, visible: Optional[bool] = None) -> None:
-        for ax in (self.ax1, self.ax2, self.ax3):
-            leg = ax.get_legend()
-            if leg is not None:
-                if visible is not None:
-                    leg.set_visible(visible)
-                else:
-                    leg.set_visible(not leg.get_visible())
-        self._canvas.draw_idle()
+        # Add active-line vertical markers via MainPlotGrid
+        grid = self._ensure_grid()
+        grid.render_active_line_markers(
+            line_data, self.active_lines, max_y,
+            threshold=self._get_line_threshold(),
+        )
 
-    def toggle_saved_lines(self, show: bool, loaded_lines: Any = None) -> None:
-        if show:
-            self._plot_saved_lines(loaded_lines=loaded_lines)
-        else:
-            self._remove_saved_lines()
-        self._canvas.draw_idle()
+    def _render_population_diagram_base(self) -> None:
+        """Render the base population diagram for the active molecule."""
+        grid = self._ensure_grid()
+        grid.render_population_diagram_for_molecule(self._islat.active_molecule)
 
-    def toggle_atomic_lines(self, show: bool) -> None:
-        if show:
-            self._plot_atomic_lines()
-        else:
-            self._remove_atomic_lines()
-        self._canvas.draw_idle()
+    def _render_population_diagram_with_lines(
+        self, line_data: List[Tuple["MoleculeLine", float, Any]],
+    ) -> None:
+        """Render pop-diagram base + scatter points for *line_data*."""
+        self._render_population_diagram_base()
+        if line_data:
+            grid = self._ensure_grid()
+            active_mol = self._islat.active_molecule
+            sc = grid.render_active_line_scatter(
+                line_data, self.active_lines, active_mol,
+                threshold=self._get_line_threshold(),
+            )
+            # Store scatter collection for pick-event handling
+            if sc is not None:
+                self._active_scatter_collection = sc
+                self._active_scatter_count = len(
+                    [e for e in self.active_lines if e[2] is not None]
+                )
 
     # ------------------------------------------------------------------
-    # Atomic / saved line helpers (self-contained via BasePlot)
+    # Private helpers — pick / highlight interaction
     # ------------------------------------------------------------------
-    def _plot_atomic_lines(self) -> None:
-        """Render atomic lines on ax1 using BasePlot helpers.
+    def _on_pick_line(self, event: Any) -> None:
+        """Handle line pick events — self-contained interaction logic."""
+        picked_value = self._handle_line_pick_event(event)
+        if picked_value:
+            self.selected_line = picked_value
+            self._display_line_info(picked_value)
+        self._canvas.draw_idle()
 
-        Note: does **not** call ``draw_idle()`` — the caller is responsible
-        for batching a single draw after all artist mutations are done.
+    def _handle_line_pick_event(self, event: Any) -> Any:
+        """Handle line pick events and highlight the selected line.
+
+        Returns the value data dict of the picked line, or *None*.
         """
+        picked_value = None
+        picked_scatter_idx = None
+        picked_artist = event.artist
+
+        scatter_collection = getattr(self, '_active_scatter_collection', None)
+        scatter_count = getattr(self, '_active_scatter_count', 0)
+        grid = self._ensure_grid()
+        active_color = grid._get_theme_value("active_scatter_line_color", 'green')
+
+        scatter_point_clicked = None
+        if picked_artist is scatter_collection and hasattr(event, 'ind') and len(event.ind) > 0:
+            scatter_point_clicked = event.ind[0]
+
+        for line, text_obj, scatter, value in self.active_lines:
+            is_line_picked = (picked_artist is line)
+            point_idx = value.get('_scatter_point_index', None) if value else None
+            is_scatter_picked = (scatter_point_clicked is not None and point_idx == scatter_point_clicked)
+            is_picked = is_line_picked or is_scatter_picked
+
+            if line is not None:
+                line.set_color(active_color)
+            if text_obj is not None:
+                text_obj.set_color(active_color)
+
+            if is_picked:
+                picked_value = value
+                picked_scatter_idx = point_idx
+                if line is not None:
+                    line.set_color('orange')
+                if text_obj is not None:
+                    text_obj.set_color('orange')
+
+        if scatter_collection is not None and scatter_count > 0:
+            import matplotlib.colors as mcolors
+            colors = [mcolors.to_rgba(active_color)] * scatter_count
+            if picked_scatter_idx is not None and picked_scatter_idx < scatter_count:
+                colors[picked_scatter_idx] = mcolors.to_rgba('orange')
+            scatter_collection.set_facecolors(colors)
+
+        return picked_value
+
+    def _highlight_strongest_line(self) -> None:
+        """Find and highlight the strongest line in active_lines."""
+        if not self.active_lines:
+            return
+
+        scatter_collection = getattr(self, '_active_scatter_collection', None)
+        scatter_count = getattr(self, '_active_scatter_count', 0)
+        grid = self._ensure_grid()
+        active_color = grid._get_theme_value("active_scatter_line_color", 'green')
+
+        # Reset all to active colour
+        for line, text_obj, scatter, value in self.active_lines:
+            if line is not None:
+                line.set_color(active_color)
+            if text_obj is not None:
+                text_obj.set_color(active_color)
+
+        # Find strongest
+        highest_intensity = -float('inf')
+        strongest = None
+        strongest_scatter_idx = None
+
+        for line, text_obj, scatter, value in self.active_lines:
+            intensity = value.get('intensity', 0) if value else 0
+            if intensity > highest_intensity:
+                highest_intensity = intensity
+                strongest = (line, text_obj, scatter, value)
+                strongest_scatter_idx = value.get('_scatter_point_index', None) if value else None
+
+        if scatter_collection is not None and scatter_count > 0:
+            import matplotlib.colors as mcolors
+            colors = [mcolors.to_rgba(active_color)] * scatter_count
+            if strongest_scatter_idx is not None and strongest_scatter_idx < scatter_count:
+                colors[strongest_scatter_idx] = mcolors.to_rgba('orange')
+            scatter_collection.set_facecolors(colors)
+            scatter_collection.set_zorder(1)
+
+        if strongest is not None:
+            line, text_obj, scatter, value = strongest
+            if line is not None:
+                line.set_color('orange')
+            if text_obj is not None:
+                text_obj.set_color('orange')
+            self.selected_line = value
+            if value:
+                self._display_line_info(value)
+
+    def _display_line_info(self, value: Dict[str, Any], clear_data_field: bool = True) -> None:
+        """Display line information in the GUI data field.
+
+        Formats line properties via :meth:`LineInspectionPlot.get_line_info`
+        and enriches with observed / model flux integrals when a selection
+        range is active.
+        """
+        islat = self._islat
+
+        # --- flux integrals in the selected range ----------------------
+        data_flux = None
+        model_flux = None
+        current_selection = self._pm.toggle_state.get("current_selection")
+        if current_selection is not None:
+            xmin, xmax = current_selection
+            err_data = getattr(islat, 'err_data', None)
+            line_flux, _ = self._line_analyzer.flux_integral(
+                lam=islat.wave_data,
+                flux=islat.flux_data,
+                lam_min=xmin, lam_max=xmax,
+                err=err_data,
+            )
+            data_flux = line_flux[0] if isinstance(line_flux, (list, tuple)) else line_flux
+            active_mol = getattr(islat, 'active_molecule', None)
+            if active_mol is not None:
+                molecule_wave, molecule_flux_arr = active_mol.get_flux(return_wavelengths=True)
+                model_flux, _ = self._line_analyzer.flux_integral(
+                    lam=molecule_wave,
+                    flux=molecule_flux_arr,
+                    lam_min=xmin, lam_max=xmax,
+                    err=None,
+                )
+
+        # --- build line info dict + formatted string -------------------
+        if 'formatted_text' in value:
+            class _Line2:
+                pass
+            _l2 = _Line2()
+            _l2.lam = value.get('lam')
+            _l2.e_up = value.get('e_up')
+            _l2.e_low = value.get('e_low')
+            _l2.a_stein = value.get('a_stein')
+            _l2.g_up = value.get('g_up')
+            _l2.g_low = value.get('g_low')
+            _l2.lev_up = value.get('up_lev')
+            _l2.lev_low = value.get('low_lev')
+            info = LineInspectionPlot.get_line_info(
+                _l2,
+                intensity=value.get('intensity', 0),
+                tau=value.get('tau'),
+                data_flux_in_range=data_flux,
+                model_flux_in_range=model_flux,
+            )
+        else:
+            class _Line:
+                pass
+            _l = _Line()
+            _l.lam = value.get('lam')
+            _l.e_up = value.get('e_up', value.get('e'))
+            _l.e_low = value.get('e_low')
+            _l.a_stein = value.get('a_stein', value.get('a'))
+            _l.g_up = value.get('g_up', value.get('g'))
+            _l.g_low = value.get('g_low')
+            _l.lev_up = value.get('up_lev')
+            _l.lev_low = value.get('low_lev')
+            info = LineInspectionPlot.get_line_info(
+                _l,
+                intensity=value.get('intensity', value.get('inten', 0)),
+                tau=value.get('tau'),
+                data_flux_in_range=data_flux,
+                model_flux_in_range=model_flux,
+            )
+
+        info_str = LineInspectionPlot.format_line_info(info)
+
+        # --- push to GUI data-field ------------------------------------
+        if (hasattr(islat, 'GUI') and hasattr(islat.GUI, 'data_field') and
+                islat.GUI.data_field is not None):
+            try:
+                if hasattr(islat.GUI.data_field, 'text') and islat.GUI.data_field.text.winfo_exists():
+                    islat.GUI.data_field.insert_text(info_str, clear_after=clear_data_field)
+            except Exception as e:
+                debug_config.warning("three_panel_view", f"Could not update data field: {e}")
+
+    # ------------------------------------------------------------------
+    # ToggleMixin hooks
+    # ------------------------------------------------------------------
+    def _toggle_ready(self) -> bool:
+        """ThreePanelView is always ready (it delegates to pre-existing axes)."""
+        return True
+
+    def _iter_toggle_axes(self):
+        """Yield the three fixed axes."""
+        yield self.ax1
+        yield self.ax2
+        yield self.ax3
+
+    def _add_atomic_line_artists(self) -> None:
+        """Render atomic lines on ax1 using BasePlot helpers."""
         atomic_data = load_atomic_lines()
         if atomic_data.empty:
             return
         BasePlot._plot_atomic_lines(self.ax1, atomic_data, tag="_islat_atomic_line")
 
-    def _remove_atomic_lines(self) -> None:
-        """Remove previously plotted atomic line artists from ax1.
-
-        Note: does **not** call ``draw_idle()`` — the caller is responsible
-        for batching a single draw after all artist mutations are done.
-        """
+    def _remove_atomic_line_artists(self) -> None:
+        """Remove previously plotted atomic line artists from ax1."""
         BasePlot._clear_tagged_artists(
             self.ax1, "_islat_atomic_line", lines=True, collections=False, texts=True,
         )
 
-    def _plot_saved_lines(self, loaded_lines: Any = None) -> None:
-        """Render saved lines on ax1 using BasePlot helpers.
-
-        Note: does **not** call ``draw_idle()`` — the caller is responsible
-        for batching a single draw after all artist mutations are done.
-        """
-        import iSLAT.Modules.FileHandling.iSLATFileHandling as ifh
+    def _add_saved_line_artists(self) -> None:
+        """Render saved lines on ax1 using BasePlot helpers."""
+        loaded_lines = getattr(self, 'line_data', None)
         if loaded_lines is None:
-            loaded_lines = ifh.read_line_saves(file_name=self._islat.input_line_list)
-            if loaded_lines.empty:
-                return
+            loaded_lines = self._load_saved_line_data()
+        if loaded_lines is None or (hasattr(loaded_lines, 'empty') and loaded_lines.empty):
+            return
         theme = self._pm.theme
         BasePlot._plot_saved_line_markers(
             self.ax1,
@@ -332,15 +745,51 @@ class ThreePanelView(PlotView):
             range_color=theme.get("saved_line_color_two", "orange"),
         )
 
-    def _remove_saved_lines(self) -> None:
-        """Remove previously plotted saved line artists from ax1.
-
-        Note: does **not** call ``draw_idle()`` — the caller is responsible
-        for batching a single draw after all artist mutations are done.
-        """
+    def _remove_saved_line_artists(self) -> None:
+        """Remove previously plotted saved line artists from ax1."""
         BasePlot._clear_tagged_artists(
             self.ax1, "_islat_saved_line", lines=True, collections=False, texts=False,
         )
+
+    def _load_saved_line_data(self):
+        """Load saved-line data from disk."""
+        import iSLAT.Modules.FileHandling.iSLATFileHandling as ifh
+        return ifh.read_line_saves(file_name=self._islat.input_line_list)
+
+    # ------------------------------------------------------------------
+    # Override sync_toggle_state for idempotent behaviour
+    # ------------------------------------------------------------------
+    def sync_toggle_state(self, toggle_state: dict) -> None:
+        """Reconcile visual state, skipping redundant add/remove operations.
+
+        The base :class:`ToggleMixin` always removes-then-adds; here we
+        check ``_has_tagged_artists`` first for a lighter touch when the
+        view is merely being re-activated.
+        """
+        # Atomic lines
+        if toggle_state.get("atomic_lines", False):
+            if not self._has_tagged_artists("_islat_atomic_line"):
+                self._add_atomic_line_artists()
+        else:
+            if self._has_tagged_artists("_islat_atomic_line"):
+                self._remove_atomic_line_artists()
+
+        # Saved lines
+        if toggle_state.get("saved_lines", False):
+            if not self._has_tagged_artists("_islat_saved_line"):
+                self._set_saved_line_data(self._load_saved_line_data())
+                self._add_saved_line_artists()
+        else:
+            if self._has_tagged_artists("_islat_saved_line"):
+                self._remove_saved_line_artists()
+
+        # Summed spectrum
+        self._set_summed_visibility(toggle_state.get("summed", True))
+
+        # Legend
+        self._set_legend_visibility(toggle_state.get("legend", True))
+
+        self.draw()
 
     # ------------------------------------------------------------------
     # Selection restoration
@@ -363,7 +812,7 @@ class ThreePanelView(PlotView):
                     except Exception:
                         pass
             # Re-run the line inspection / population diagram
-            self._pm.onselect(xmin, xmax)
+            self.on_selection(xmin, xmax)
         self._canvas.draw_idle()
 
     # ------------------------------------------------------------------

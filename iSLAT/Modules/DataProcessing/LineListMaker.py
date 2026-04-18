@@ -31,7 +31,7 @@ from typing import (
 import numpy as np
 import pandas as pd
 
-from ..DataTypes import MoleculeLineList
+from ..DataTypes.MoleculeLineList import MoleculeLineList
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -101,8 +101,16 @@ class LineListMaker:
             species = getattr(source, "molecule_id", None)
         self._species: Optional[str] = species
 
-        # Build the working DataFrame
-        self._df: pd.DataFrame = _ensure_dataframe(source, molecule_id=species)
+        # Build the working DataFrame (include extras when available)
+        if isinstance(source, MoleculeLineList) and source.extra_fields:
+            self._df: pd.DataFrame = _ensure_dataframe(source, molecule_id=species)
+            # Append extra columns from the linelist
+            n_rows = len(self._df)
+            for col, values in source.extra_fields.items():
+                if col not in self._df.columns and len(values) == n_rows:
+                    self._df[col] = values
+        else:
+            self._df: pd.DataFrame = _ensure_dataframe(source, molecule_id=species)
 
         # Overwrite species column if explicitly provided
         if species is not None:
@@ -113,6 +121,66 @@ class LineListMaker:
 
         # Active filter registry: list of (name, kwargs) tuples
         self._filters: List[Tuple[str, Dict[str, Any]]] = []
+
+    # ------------------------------------------------------------------
+    # Alternate constructors
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_file(
+        cls,
+        filepath: Union[str, Path],
+        molecule_id: Optional[str] = None,
+        format: Optional[str] = None,
+    ) -> "LineListMaker":
+        """Construct a :class:`LineListMaker` from any supported line-list file.
+
+        Uses :meth:`MoleculeLineList.from_file` under the hood, so all
+        registered readers (HITRAN ``.par``, iSLAT CSV, saved-lines CSV,
+        and custom formats) are supported.
+
+        Parameters
+        ----------
+        filepath : str or Path
+            Path to the line-list file.
+        molecule_id : str, optional
+            Molecule identifier.  Derived from file metadata when *None*.
+        format : str, optional
+            ``"hitran"``, ``"csv"``, ``"saved"``, or *None* for auto-detect.
+
+        Returns
+        -------
+        LineListMaker
+        """
+        ll = MoleculeLineList.from_file(
+            filepath,
+            molecule_id=molecule_id,
+            format=format,
+        )
+        return cls(ll, species=ll.molecule_id)
+
+    @classmethod
+    def from_saved_lines(
+        cls,
+        filepath: Union[str, Path],
+        molecule_id: Optional[str] = None,
+    ) -> "LineListMaker":
+        """Convenience constructor for LINESAVES CSV files.
+
+        Parameters
+        ----------
+        filepath : str or Path
+            Path to a saved-lines CSV (e.g. ``DATAFILES/LINESAVES/BALLS.csv``).
+        molecule_id : str, optional
+            Molecule identifier.
+
+        Returns
+        -------
+        LineListMaker
+            A maker whose DataFrame includes all fit-result columns
+            (``Flux_data``, ``Err_data``, ``FWHM_fit``, etc.).
+        """
+        return cls.from_file(filepath, molecule_id=molecule_id, format="saved")
 
     # ------------------------------------------------------------------
     # Repr / info
@@ -531,17 +599,52 @@ class LineListMaker:
     def to_linelist(self) -> MoleculeLineList:
         """Create a new :class:`MoleculeLineList` from the filtered data.
 
+        Extra columns beyond the 10-core fields (and ``species``) are
+        preserved via :attr:`MoleculeLineList.extra_fields`.
+
         Returns
         -------
         MoleculeLineList
             A fresh instance containing only the filtered lines.
         """
+        from ..DataTypes.MoleculeLineList import MoleculeLineList as _MLL
+        from iSLAT.Modules.FileHandling.line_list_readers import CORE_FIELD_NAMES
+
         df = self._df.drop(columns=["species"], errors="ignore")
-        lines_data = df.to_dict(orient="records")
-        return MoleculeLineList(
+
+        # Separate core columns from extras
+        core_cols = set(CORE_FIELD_NAMES)
+        extra_cols = [c for c in df.columns if c not in core_cols]
+
+        extra_fields: Dict[str, list] = {}
+        for col in extra_cols:
+            extra_fields[col] = df[col].tolist()
+
+        # Build lines_data from core columns only
+        core_df = df[[c for c in df.columns if c in core_cols]]
+        lines_data = core_df.to_dict(orient="records")
+
+        # Carry over source_format and partition from the original linelist
+        fmt = None
+        partition = None
+        molar_mass = None
+        if self._linelist is not None:
+            fmt = getattr(self._linelist, "source_format", None)
+            partition = getattr(self._linelist, "partition_function", None)
+            molar_mass = getattr(self._linelist, "_molar_mass", None)
+
+        ll = _MLL(
             molecule_id=self._species,
             lines_data=lines_data,
+            format=fmt,
+            extra_fields=extra_fields if extra_fields else None,
         )
+        if partition is not None:
+            ll.partition_function = partition
+        if molar_mass is not None:
+            ll._molar_mass = molar_mass
+
+        return ll
 
     # ------------------------------------------------------------------
     # Combination / merging

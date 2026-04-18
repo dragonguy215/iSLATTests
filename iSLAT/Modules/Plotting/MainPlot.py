@@ -3,7 +3,6 @@ matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
 
 import numpy as np
 
@@ -71,7 +70,6 @@ class iSLATPlot:
         # This prevents blocking during startup while lazy loading triggers
         self._data_initialized = False
 
-        self.active_lines = []  # List of (line, text, scatter, values) tuples for active molecular lines
         self.atomic_lines = []
         self.saved_lines = []
 
@@ -82,17 +80,17 @@ class iSLATPlot:
             "saved_lines":  False,
             "summed":       True,
             "legend":       True,
+            "show_residuals": False,
             "current_selection": None,   # (xmin, xmax) or None
         }
 
         #self.fig = plt.Figure(figsize=(15, 8.5))
         self.fig = plt.Figure(constrained_layout=True)
-        # Adjust subplot parameters to minimize margins and maximize plot area
-        #self.fig.subplots_adjust(left=0.06, bottom=0.06, right=0.98, top=0.96, hspace=0.15, wspace=0.15)
-        gs = GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1.5], figure=self.fig)
-        self.ax1 = self.full_spectrum = self.fig.add_subplot(gs[0, :])
-        self.ax2 = self.line_inspection = self.fig.add_subplot(gs[1, 0])
-        self.ax3 = self.population_diagram = self.fig.add_subplot(gs[1, 1])
+        # Use shared 3-panel layout helper from BasePlot
+        self.ax1, self.ax2, self.ax3 = BasePlot.create_three_panel_axes(self.fig)
+        self.full_spectrum = self.ax1
+        self.line_inspection = self.ax2
+        self.population_diagram = self.ax3
 
         self.ax1.set_title("Full Spectrum with Line Inspection")
         self.ax1.set_ylabel('Flux density (Jy)')
@@ -121,6 +119,9 @@ class iSLATPlot:
         self._full_spectrum_view: PlotView = FullSpectrumView(self)
         self.active_view: PlotView = self._three_panel_view
         self.is_full_spectrum: bool = False
+
+        # View-change callbacks — notified when active_view switches
+        self._view_change_callbacks: list = []
 
         # Molecules whose parameters changed while they were hidden.
         # Consumed by on_molecule_visibility_changed to force a re-render
@@ -185,6 +186,14 @@ class iSLATPlot:
     def legend_toggle(self, value: bool) -> None:
         self.toggle_state["legend"] = value
 
+    @property
+    def residual_toggle(self) -> bool:
+        return self.toggle_state["show_residuals"]
+
+    @residual_toggle.setter
+    def residual_toggle(self, value: bool) -> None:
+        self.toggle_state["show_residuals"] = value
+
     def initialize_data(self):
         """
         Initialize data-dependent plot elements.
@@ -214,51 +223,52 @@ class iSLATPlot:
         return self.toolbar
 
     def _apply_plot_theming(self):
-        """Apply theme colors to matplotlib figure and toolbar"""
-        try:
-            # Set figure background color
-            self.fig.patch.set_facecolor(self.theme.get("background", "#181A1B"))
-            
-            # Set axes background colors and text colors
-            for ax in [self.ax1, self.ax2, self.ax3]:
-                ax.set_facecolor(self.theme.get("graph_fill_color", "#282C34"))
-                ax.tick_params(colors=self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")), which='both')
-                ax.xaxis.label.set_color(self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")))
-                ax.yaxis.label.set_color(self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")))
-                ax.title.set_color(self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")))
-                
-                # Set spine colors
-                for spine in ax.spines.values():
-                    spine.set_color(self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")))   
+        """Apply theme colors to matplotlib figure, axes, data artists, and toolbar.
 
+        Delegates figure/axes background and data-artist re-colouring to
+        :meth:`PlotRenderer.apply_theme_to_figure` (inherited from
+        :class:`BasePlot`) and adds GUI-specific extras on top:
+        canvas widget background, toolbar, legend frame colouring, grid
+        lines, and ``axis_text_label_color`` support.
+        """
+        try:
+            # --- Common figure/axes/artist theming via BasePlot ----------
+            # PlotRenderer now inherits BasePlot, so it has
+            # apply_theme_to_figure().  We temporarily ensure its theme
+            # reference is in sync, then call the inherited method.
+            self.plot_renderer.theme = self.theme
+            self.plot_renderer.apply_theme_to_figure(self.fig)
+
+            # --- GUI-specific extras ------------------------------------
+            # Some GUI themes define 'axis_text_label_color' which is
+            # more specific than BasePlot's generic 'foreground'.
+            fg = self.theme.get("foreground", "#F0F0F0")
+            label_color = self.theme.get("axis_text_label_color", fg)
+
+            if label_color != fg:
+                # Re-apply the GUI-specific label colour on top
+                for ax in [self.ax1, self.ax2, self.ax3]:
+                    ax.tick_params(colors=label_color, which='both')
+                    ax.xaxis.label.set_color(label_color)
+                    ax.yaxis.label.set_color(label_color)
+                    ax.title.set_color(label_color)
+                    for spine in ax.spines.values():
+                        spine.set_color(label_color)
+
+            # Grid lines (GUI-only feature)
+            for ax in [self.ax1, self.ax2, self.ax3]:
                 if self.theme.get(f'ax{ax.get_gid()}_grid', False):
-                    ax.grid(True, color=self.theme.get("axis_text_label_color", self.theme.get("foreground", "#F0F0F0")), alpha=0.3, linestyle='-', linewidth=0.5)
-                    
-            # Apply theme to canvas widget
+                    ax.grid(True, color=label_color, alpha=0.3, linestyle='-', linewidth=0.5)
+
+            # Canvas widget background
             if hasattr(self.canvas.get_tk_widget(), 'configure'):
                 try:
                     self.canvas.get_tk_widget().configure(bg=self.theme.get("background", "#181A1B"))
                 except Exception:
                     pass
 
-            # Recolour data artists in-place so they match the new theme
-            fg = self.theme.get("foreground", "#F0F0F0")
-            label_color = self.theme.get("axis_text_label_color", fg)
-            summed_color = self.theme.get("summed_spectra_color", "lightgray")
-            scatter_color = self.theme.get("scatter_main_color", "#838B8B")
-
+            # Legend frame / text colouring
             for ax in [self.ax1, self.ax2, self.ax3]:
-                for artist in ax.lines:
-                    # Observed-spectrum lines are tagged at creation
-                    if getattr(artist, '_islat_observed', False):
-                        artist.set_color(fg)
-                for artist in ax.collections:
-                    # Summed-spectrum fills are tagged at creation
-                    if getattr(artist, '_islat_summed', False):
-                        artist.set_facecolor(summed_color)
-                        artist.set_edgecolor(summed_color)
-
-                # Legend frame / text
                 legend = ax.get_legend()
                 if legend is not None:
                     frame = legend.get_frame()
@@ -311,20 +321,10 @@ class iSLATPlot:
 
         # Register for active molecule changes
         self.islat.add_active_molecule_change_callback(self._on_active_molecule_changed)
-
-        # Register for comparison molecule changes
-        self.islat.add_comparison_molecule_change_callback(self._on_comparison_molecules_changed)
     
     def _on_active_molecule_changed(self, old_molecule, new_molecule):
         """Handle active molecule changes"""
         self.on_active_molecule_changed()
-
-    def _on_comparison_molecules_changed(self, comparison_molecules):
-        """Handle comparison molecule list changes — refresh line inspection."""
-        if hasattr(self, 'current_selection') and self.current_selection:
-            xmin, xmax = self.current_selection
-            self.update_line_inspection_plot(xmin=xmin, xmax=xmax)
-            self.canvas.draw_idle()
     
     def _on_global_parameter_changed(self, parameter_name, old_value, new_value):
         """Handle global parameter changes that affect all molecules.
@@ -338,13 +338,16 @@ class iSLATPlot:
 
         # If there's an active line inspection selection, refresh it
         # with the new parameters instead of clearing it.
-        if hasattr(self, 'current_selection') and self.current_selection:
-            xmin, xmax = self.current_selection
-            self.plot_spectrum_around_line(xmin, xmax, highlight_strongest=True)
+        current_selection = getattr(self, 'current_selection', None)
+        if current_selection is not None:
+            xmin, xmax = current_selection
+            self.active_view.on_selection(xmin, xmax)
         else:
-            # No selection — just refresh the population diagram
-            self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-            self.canvas.draw_idle()
+            # No selection — let the active view refresh its panels
+            self.active_view.on_active_molecule_changed(
+                new_molecule=getattr(self.islat, 'active_molecule', None),
+                current_selection=None,
+            )
 
     def match_display_range(self, match_y=False):
         # Sync plot xlim to islat.display_range if set, else update islat.display_range from plot
@@ -436,11 +439,14 @@ class iSLATPlot:
     def update_all_plots(self):
         """
         Updates all plots in the GUI.
-        This method leverages the molecular data model for updates and avoids redundant rendering.
-        """    
+        Delegates to the active view for rendering.
+        """
         self.update_model_plot()
-        self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-        self.plot_spectrum_around_line()
+        current_selection = getattr(self, 'current_selection', None)
+        self.active_view.on_active_molecule_changed(
+            new_molecule=getattr(self.islat, 'active_molecule', None),
+            current_selection=current_selection,
+        )
 
     def update_model_plot(self):
         """
@@ -468,168 +474,8 @@ class iSLATPlot:
         self.selected_wave = self.islat.wave_data[mask]
         self.selected_flux = self.islat.flux_data[mask]
 
-        self.plot_spectrum_around_line(
-            xmin=xmin,
-            xmax=xmax
-        )
-
-    def _gather_all_active_line_data(self, xmin: float, xmax: float):
-        """Collect line data from the active molecule and all comparison molecules.
-
-        Returns
-        -------
-        dict[Molecule, list]
-            Mapping from molecule object to its ``(MoleculeLine, intensity, tau)`` tuples.
-        """
-        all_line_data: dict = {}
-
-        # Active molecule
-        active = self.islat.active_molecule
-        if active is not None:
-            try:
-                ld = self.get_molecule_line_data(active, xmin, xmax)
-                if ld:
-                    all_line_data[active] = ld
-            except Exception as e:
-                debug_config.warning("main_plot", f"Could not get line data for {active.name}: {e}")
-
-        # Comparison molecules
-        for comp_mol in getattr(self.islat, 'comparison_molecules', []):
-            if comp_mol is active:
-                continue
-            try:
-                ld = self.get_molecule_line_data(comp_mol, xmin, xmax)
-                if ld:
-                    all_line_data[comp_mol] = ld
-            except Exception as e:
-                debug_config.warning("main_plot", f"Could not get line data for {comp_mol.name}: {e}")
-
-        return all_line_data
-
-    def plot_spectrum_around_line(self, xmin=None, xmax=None, highlight_strongest=True):
-        """
-        Plot spectrum around selected lines using molecule's built-in caching.
-        
-        Gathers line data from the active molecule **and** all comparison
-        molecules, renders them with per-molecule colours, and keeps the
-        population diagram synchronised with the selected line.
-        """
-        debug_config.verbose("line_inspection", f"plot_spectrum_around_line called", 
-                           xmin=xmin, xmax=xmax, highlight_strongest=highlight_strongest)
-
-        if xmin is None or xmax is None:
-            # If no selection but we need to update population diagram due to molecule/parameter changes
-            debug_config.verbose("line_inspection", "No selection, updating population diagram only")
-            self.clear_active_lines()
-            self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-            self.plot_renderer.ax2.clear()
-            self.current_selection = None
-            self.canvas.draw_idle()
-            return
-
-        debug_config.trace("line_inspection", f"Processing selection: {xmin:.3f} - {xmax:.3f}")
-        
-        # Gather lines from active + comparison molecules
-        all_line_data = self._gather_all_active_line_data(xmin, xmax)
-
-        if not all_line_data:
-            active_name = getattr(self.islat.active_molecule, 'name', '?')
-            self.islat.GUI.data_field.insert_text(
-                f"No transitions found for active molecules in the selected range")
-            debug_config.verbose("line_inspection", "No lines in range, clearing active lines")
-            self.clear_active_lines()
-            self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-            self.canvas.draw_idle()
-            return
-
-        total_lines = sum(len(v) for v in all_line_data.values())
-        debug_config.trace("line_inspection", f"Found {total_lines} lines across {len(all_line_data)} molecule(s)")
-
-        # Clear previous active_lines before plotting
-        self.clear_active_lines()
-        self.plot_line_inspection(xmin, xmax, all_line_data=all_line_data, highlight_strongest=highlight_strongest)
-        self.plot_population_diagram(all_line_data=all_line_data)
-        # Highlight strongest line AFTER both line inspection and population diagram are rendered
-        # so that both the vertical line and scatter point get the orange color
-        if highlight_strongest:
-            self.highlight_strongest_line()
-        # Only connect pick event once (check if already connected)
-        if not hasattr(self, '_pick_event_connected'):
-            self.canvas.mpl_connect('pick_event', self.on_pick_line)
-            self._pick_event_connected = True
-        # Single canvas update at the end
-        self.canvas.draw_idle()
-        debug_config.verbose("line_inspection", "plot_spectrum_around_line completed")
-    
-    def on_pick_line(self, event):
-        """Handle line pick events — interaction logic owned by the controller.
-
-        When a line belonging to a comparison molecule is picked the
-        population diagram is refreshed to show that molecule.
-        """
-        picked_value = self._handle_line_pick_event(event, self.active_lines)
-        if picked_value:
-            self.selected_line = picked_value
-            self._display_line_info(picked_value)
-
-            # Switch population diagram to the molecule that owns this line
-            picked_mol = picked_value.get('_molecule')
-            if picked_mol is not None:
-                self.plot_renderer.render_population_diagram(picked_mol, force_redraw=True)
-                self.ax3.set_title(
-                    f"{BasePlot.get_molecule_display_name(picked_mol)} Population diagram",
-                    color=self.plot_renderer._get_theme_value('foreground', 'black'),
-                )
-                # Re-render the scatter dots for that molecule's lines
-                self.plot_renderer._active_scatter_collections = []
-                mol_line_data = [
-                    entry[3] for entry in self.active_lines
-                    if entry[3].get('_molecule') is picked_mol
-                ]
-                if mol_line_data:
-                    # Rebuild (line, intensity, tau) tuples from value_data
-                    class _MiniLine:
-                        pass
-                    rebuilt = []
-                    for vd in mol_line_data:
-                        ml = _MiniLine()
-                        ml.lam = vd.get('lam')
-                        ml.e_up = vd.get('e_up')
-                        ml.e_low = vd.get('e_low')
-                        ml.a_stein = vd.get('a_stein')
-                        ml.g_up = vd.get('g_up')
-                        ml.g_low = vd.get('g_low')
-                        ml.lev_up = vd.get('up_lev')
-                        ml.lev_low = vd.get('low_lev')
-                        rebuilt.append((ml, vd.get('intensity', 0), vd.get('tau')))
-                    self.plot_renderer.render_active_lines_in_population_diagram(
-                        rebuilt, self.active_lines, molecule=picked_mol,
-                    )
-                    # Highlight the picked scatter point orange in the new collection
-                    picked_idx = picked_value.get('_scatter_point_index')
-                    if picked_idx is not None:
-                        import matplotlib.colors as mcolors
-                        for sc, count, mol in self.plot_renderer._active_scatter_collections:
-                            if mol is picked_mol and picked_idx < count:
-                                mol_color = BasePlot.get_molecule_color(mol)
-                                colors = [mcolors.to_rgba(mol_color)] * count
-                                colors[picked_idx] = mcolors.to_rgba('orange')
-                                sc.set_facecolors(colors)
-        self.canvas.draw_idle()
-
-    def highlight_strongest_line(self):
-        """
-        Highlight the strongest line — interaction logic owned by the controller.
-        Note: Does NOT call canvas.draw_idle() — caller is responsible for batching.
-        """
-        strongest = self._highlight_strongest_line(self.active_lines)
-        if strongest is not None:
-            # Display strongest line information in data field
-            line, text, scatter, value = strongest
-            self.selected_line = value
-            if value:
-                self._display_line_info(value)
-        # Don't call canvas.draw_idle() here - let caller batch it
+        # Delegate rendering to the active view
+        self.active_view.on_selection(xmin, xmax)
 
     # ------------------------------------------------------------------
     # Data-access & interaction helpers (moved from PlotRenderer)
@@ -689,350 +535,12 @@ class iSLATPlot:
             print(f"Error getting molecule lines: {e}")
             return []
 
-    def _handle_line_pick_event(
-        self, event: Any, active_lines_list: List[Any],
-    ) -> Any:
-        """
-        Handle line pick events and highlight the selected line.
-
-        Parameters
-        ----------
-        event : Any
-            The matplotlib pick event
-        active_lines_list : List[Any]
-            List of [line_artist, text_obj, scatter_artist, value_data] tuples
-
-        Returns
-        -------
-        Any
-            The value data of the picked line or None
-        """
-        import matplotlib.colors as mcolors
-
-        picked_value = None
-        picked_scatter_collection = None
-        picked_scatter_idx = None
-        picked_artist = event.artist
-
-        # Gather all scatter collections tracked by the renderer
-        scatter_collections = getattr(self.plot_renderer, '_active_scatter_collections', [])
-        # Build a set for quick artist identity checks
-        scatter_artists = {sc for sc, _cnt, _mol in scatter_collections}
-
-        # Determine if a scatter point was clicked and in which collection
-        scatter_point_clicked = None
-        clicked_sc = None
-        if picked_artist in scatter_artists and hasattr(event, 'ind') and len(event.ind) > 0:
-            scatter_point_clicked = event.ind[0]
-            clicked_sc = picked_artist
-
-        # Pass 1: reset every line to its molecule colour and find the picked entry
-        for line, text_obj, scatter, value in active_lines_list:
-            mol_color = value.get('_molecule_color', 'green') if value else 'green'
-
-            is_line_picked = (picked_artist is line)
-            point_idx = value.get('_scatter_point_index', None) if value else None
-            is_scatter_picked = (clicked_sc is not None and scatter is clicked_sc
-                                 and point_idx == scatter_point_clicked)
-            is_picked = is_line_picked or is_scatter_picked
-
-            # Reset to molecule colour
-            if line is not None:
-                line.set_color(mol_color)
-            if text_obj is not None:
-                text_obj.set_color(mol_color)
-
-            if is_picked:
-                picked_value = value
-                picked_scatter_collection = scatter
-                picked_scatter_idx = point_idx
-                if line is not None:
-                    line.set_color('orange')
-                if text_obj is not None:
-                    text_obj.set_color('orange')
-
-        # Pass 2: reset scatter collection colours per-molecule, then highlight pick
-        for sc, count, mol in scatter_collections:
-            mol_color = BasePlot.get_molecule_color(mol)
-            colors = [mcolors.to_rgba(mol_color)] * count
-            if (sc is picked_scatter_collection
-                    and picked_scatter_idx is not None
-                    and picked_scatter_idx < count):
-                colors[picked_scatter_idx] = mcolors.to_rgba('orange')
-            sc.set_facecolors(colors)
-
-        return picked_value
-
-    def _highlight_strongest_line(
-        self, active_lines_list: List[Any],
-    ) -> Any:
-        """
-        Find and highlight the strongest line in the active lines.
-
-        Parameters
-        ----------
-        active_lines_list : List[Any]
-            List of [line_artist, text_obj, scatter_artist, value_data] tuples
-
-        Returns
-        -------
-        Any
-            The strongest line quadruplet or None
-        """
-        if not active_lines_list:
-            return None
-
-        import matplotlib.colors as mcolors
-
-        scatter_collections = getattr(self.plot_renderer, '_active_scatter_collections', [])
-
-        # Reset all line inspection lines to their molecule colour
-        for line, text_obj, scatter, value in active_lines_list:
-            mol_color = value.get('_molecule_color', 'green') if value else 'green'
-            if line is not None:
-                line.set_color(mol_color)
-            if text_obj is not None:
-                text_obj.set_color(mol_color)
-
-        # Find the line with the highest intensity
-        highest_intensity = -float('inf')
-        strongest_triplet = None
-        strongest_scatter_collection = None
-        strongest_scatter_idx = None
-
-        for line, text_obj, scatter, value in active_lines_list:
-            intensity = value.get('intensity', 0) if value else 0
-            if intensity > highest_intensity:
-                highest_intensity = intensity
-                strongest_triplet = [line, text_obj, scatter, value]
-                strongest_scatter_collection = scatter
-                strongest_scatter_idx = value.get('_scatter_point_index', None) if value else None
-
-        # Reset scatter collections to molecule colours, highlight strongest in orange
-        for sc, count, mol in scatter_collections:
-            mol_color = BasePlot.get_molecule_color(mol)
-            colors = [mcolors.to_rgba(mol_color)] * count
-            if (sc is strongest_scatter_collection
-                    and strongest_scatter_idx is not None
-                    and strongest_scatter_idx < count):
-                colors[strongest_scatter_idx] = mcolors.to_rgba('orange')
-            sc.set_facecolors(colors)
-            sc.set_zorder(1)
-
-        # Highlight the strongest line inspection elements in orange
-        if strongest_triplet is not None:
-            line, text_obj, scatter, value = strongest_triplet
-            if line is not None:
-                line.set_color('orange')
-            if text_obj is not None:
-                text_obj.set_color('orange')
-
-        return strongest_triplet
-
-    def _display_line_info(self, value, clear_data_field=True):
-        """
-        Helper method to display line information in the data field.
-
-        Delegates formatting to :meth:`LineInspectionPlot.get_line_info` and
-        enriches the result with observed / model flux integrals when a
-        selection range is active.
-        """
-        from .LineInspectionPlot import LineInspectionPlot
-
-        # Calculate flux integrals in the selected range ----------------
-        data_flux = None
-        model_flux = None
-        if hasattr(self, 'current_selection') and self.current_selection:
-            xmin, xmax = self.current_selection
-            err_data = getattr(self.islat, 'err_data', None)
-            line_flux, _ = self.flux_integral(
-                lam=self.islat.wave_data,
-                flux=self.islat.flux_data,
-                lam_min=xmin, lam_max=xmax,
-                err=err_data,
-            )
-            data_flux = line_flux[0] if isinstance(line_flux, (list, tuple)) else line_flux
-            molecule_wave, molecule_flux_arr = self.islat.active_molecule.get_flux(return_wavelengths=True)
-            model_flux, _ = self.flux_integral(
-                lam=molecule_wave,
-                flux=molecule_flux_arr,
-                lam_min=xmin, lam_max=xmax,
-                err=None,
-            )
-
-        # If the value dict already comes from get_line_info, update flux
-        # fields and regenerate the formatted text.  Otherwise fall back
-        # to the legacy key names.
-        if 'formatted_text' in value:
-            # Re-generate info with actual flux values (the original was
-            # created at render time without them).
-            class _Line2:
-                pass
-            _l2 = _Line2()
-            _l2.lam = value.get('lam')
-            _l2.e_up = value.get('e_up')
-            _l2.e_low = value.get('e_low')
-            _l2.a_stein = value.get('a_stein')
-            _l2.g_up = value.get('g_up')
-            _l2.g_low = value.get('g_low')
-            _l2.lev_up = value.get('up_lev')
-            _l2.lev_low = value.get('low_lev')
-            info = LineInspectionPlot.get_line_info(
-                _l2,
-                intensity=value.get('intensity', 0),
-                tau=value.get('tau'),
-                data_flux_in_range=data_flux,
-                model_flux_in_range=model_flux,
-            )
-        else:
-            # Legacy value_data dict (keys: lam/e/a/g/inten/…)
-            # Build a minimal namespace so get_line_info can work.
-            class _Line:
-                pass
-            _l = _Line()
-            _l.lam = value.get('lam')
-            _l.e_up = value.get('e_up', value.get('e'))
-            _l.e_low = value.get('e_low')
-            _l.a_stein = value.get('a_stein', value.get('a'))
-            _l.g_up = value.get('g_up', value.get('g'))
-            _l.g_low = value.get('g_low')
-            _l.lev_up = value.get('up_lev')
-            _l.lev_low = value.get('low_lev')
-            info = LineInspectionPlot.get_line_info(
-                _l,
-                intensity=value.get('intensity', value.get('inten', 0)),
-                tau=value.get('tau'),
-                data_flux_in_range=data_flux,
-                model_flux_in_range=model_flux,
-            )
-
-        info_str = LineInspectionPlot.format_line_info(info)
-
-        # Push to the GUI data-field (with error protection) -----------
-        if (hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field') and
-            self.islat.GUI.data_field is not None):
-            try:
-                if hasattr(self.islat.GUI.data_field, 'text') and self.islat.GUI.data_field.text.winfo_exists():
-                    self.islat.GUI.data_field.insert_text(info_str, clear_after=clear_data_field)
-            except Exception as e:
-                print(f"Warning: Could not update data field: {e}")
-                pass
-
     def clear_selection(self):
         self.current_selection = None
         self.toggle_state["current_selection"] = None
-        self.clear_active_lines()
-        self.ax2.clear()
-        # Refresh population diagram without active line dots
-        if hasattr(self.islat, 'active_molecule') and self.islat.active_molecule:
-            self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-        self.canvas.draw_idle()
+        # Delegate rendering cleanup to the active view
+        self.active_view.clear_selection()
         return
-
-    def plot_line_inspection(self, xmin=None, xmax=None, line_data=None,
-                             all_line_data=None, highlight_strongest=True):
-        """Render the line inspection panel with vertical line markers.
-
-        Parameters
-        ----------
-        all_line_data : dict[Molecule, list], optional
-            Per-molecule line data gathered by
-            :meth:`_gather_all_active_line_data`.  When provided the old
-            *line_data* argument is ignored.
-        """
-        if xmin is None or xmax is None:
-            self.clear_active_lines()
-            self.plot_renderer.ax2.clear()
-            if hasattr(self.islat, 'active_molecule') and self.islat.active_molecule:
-                self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-            self.current_selection = None
-            self.canvas.draw_idle()
-            return
-
-        # Legacy single-molecule path: wrap into the new dict format.
-        if all_line_data is None:
-            if line_data is None:
-                try:
-                    line_data = self.get_molecule_line_data(self.islat.active_molecule, xmin, xmax)
-                except Exception as e:
-                    debug_config.warning("main_plot", f"Could not get line data: {e}")
-                    line_data = []
-            if not line_data:
-                self.clear_active_lines()
-                self.ax2.clear()
-                if hasattr(self.islat, 'active_molecule') and self.islat.active_molecule:
-                    self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-                self.current_selection = None
-                self.canvas.draw_idle()
-                return
-            all_line_data = {self.islat.active_molecule: line_data}
-
-        # First update the basic line inspection plot (observed + model spectra)
-        self.update_line_inspection_plot(xmin=xmin, xmax=xmax)
-
-        # Get the max y value for scaling line heights
-        data_mask = (self.islat.wave_data >= xmin) & (self.islat.wave_data <= xmax)
-        data_region_y = self.islat.flux_data[data_mask]
-        max_y = np.nanmax(data_region_y) if len(data_region_y) > 0 else (self.plot_renderer.ax2.get_ylim()[1] / 1.1)
-
-        # Add vertical lines using PlotRenderer (clear_active_lines already called by caller)
-        self.plot_renderer.render_active_lines_in_line_inspection_multi(
-            all_line_data, self.active_lines, max_y,
-        )
-
-        # Don't call canvas.draw_idle() here - let caller batch it
-        # Don't highlight here - do it after population diagram scatter points are created
-
-    def plot_population_diagram(self, line_data=None, all_line_data=None):
-        """Plot population diagram for the currently active lines.
-
-        Parameters
-        ----------
-        line_data : list, optional
-            Legacy single-molecule list of ``(MoleculeLine, intensity, tau)``.
-        all_line_data : dict[Molecule, list], optional
-            Per-molecule line data.  Takes precedence over *line_data*.
-        """
-        # Render the base population diagram for the active molecule
-        self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-
-        # Reset per-cycle scatter tracking before adding new scatter collections
-        self.plot_renderer._active_scatter_collections = []
-
-        # Wrap legacy single-molecule path
-        if all_line_data is None and line_data:
-            all_line_data = {self.islat.active_molecule: line_data}
-
-        if all_line_data:
-            # Render scatter points for every molecule (each gets its own colour)
-            for mol, ld in all_line_data.items():
-                if ld:
-                    self.plot_renderer.render_active_lines_in_population_diagram(
-                        ld, self.active_lines, molecule=mol,
-                    )
-
-        # Don't call canvas.draw_idle() here - let caller batch it
-        # Don't call highlight_strongest_line() here - already called in plot_line_inspection
-
-    def update_line_inspection_plot(self, xmin=None, xmax=None):
-        """
-        Update the line inspection plot showing data and active molecule model in the selected range.
-        Uses only PlotRenderer logic with molecule's built-in caching for optimal performance.
-
-        The stored ``fit_result`` is always forwarded so that fit overlays
-        survive ax2.clear() calls.  ``fit_result`` is reset to *None* in
-        :meth:`onselect` whenever the user drags a new span selection.
-        """
-        fit_result = getattr(self, 'fit_result', None)
-        self.plot_renderer.render_complete_line_inspection_plot(
-            wave_data=self.islat.wave_data,
-            flux_data=self.islat.flux_data,
-            xmin=xmin,
-            xmax=xmax,
-            active_molecule=self.islat.active_molecule,
-            fit_result=fit_result
-        )
-        # Don't call canvas.draw_idle() here - let caller batch it
 
     def toggle_atomic_lines(self, show: Optional[bool] = None) -> None:
         """
@@ -1096,35 +604,6 @@ class iSLATPlot:
         """
         return self.line_analyzer.flux_integral(lam, flux, err, lam_min, lam_max)
 
-    def clear_active_lines(self) -> None:
-        """
-        Clear active lines by delegating to PlotRenderer.
-        """
-        self.plot_renderer.clear_active_lines(self.active_lines)
-
-    def clear_model_lines(self):
-        """
-        Clear model spectrum lines from the main plot.
-        Delegates to PlotRenderer for efficient line management.
-        """
-        self.plot_renderer.clear_model_lines()
-    
-    def clear_all_plots(self):
-        """
-        Clear all plots and reset visual state.
-        Delegates to PlotRenderer for comprehensive plot clearing.
-        """
-        self.plot_renderer.clear_all_plots()
-        self.canvas.draw_idle()
-
-    def highlight_line_selection(self, xmin, xmax):
-        """
-        Highlight a selected wavelength range.
-        Delegates to PlotRenderer for visual highlighting.
-        """
-        self.plot_renderer.highlight_line_selection(xmin, xmax)
-        self.canvas.draw_idle()
-    
     def remove_atomic_lines(self):
         """Remove atomic lines — delegates to the active view."""
         self.atomic_toggle = False
@@ -1143,6 +622,21 @@ class iSLATPlot:
         self.plot_renderer.plot_vertical_lines(wavelengths, heights, colors, labels)
         self.canvas.draw_idle()
 
+    def plot_fitted_saved_lines(self, fit_results_data, ax=None):
+        """Plot fitted saved lines on the main spectrum axes.
+
+        Parameters
+        ----------
+        fit_results_data : tuple
+            (gauss_fits, fitted_waves, fitted_fluxes) as returned by the
+            batch-fitting pipeline.
+        ax : Axes, optional
+            Target axes.  Defaults to ``self.ax1``.
+        """
+        if ax is None:
+            ax = self.ax1
+        self.plot_renderer.plot_fitted_saved_lines(fit_results_data, ax)
+
     def on_click(self, event):
         """Handle mouse click events on the plot."""
         self.interaction_handler.handle_click_event(event)
@@ -1150,35 +644,33 @@ class iSLATPlot:
     def on_active_molecule_changed(self):
         """
         Called when the active molecule changes.
-        Updates plot titles and refreshes displays with current selection if available.
+        Delegates rendering to the active view.
         """
         debug_config.info("active_molecule", "on_active_molecule_changed() called")
-        
-        # Update the population diagram title
-        if hasattr(self.islat, 'active_molecule') and self.islat.active_molecule:
-            self.ax3.set_title(f'{self.islat.active_molecule.displaylabel} Population diagram')
-            debug_config.verbose("active_molecule", f"Set title for molecule: {self.islat.active_molecule.displaylabel}")
-        
-        # Clear active lines since they belong to the previous molecule
-        debug_config.verbose("active_molecule", "Clearing active lines")
-        self.clear_active_lines()
-        
-        # If we have a current selection, refresh the line inspection and population diagram
-        if hasattr(self, 'current_selection') and self.current_selection:
-            xmin, xmax = self.current_selection
-            debug_config.verbose("active_molecule", f"Refreshing line inspection for selection: {xmin:.3f} - {xmax:.3f}")
-            self.plot_spectrum_around_line(xmin, xmax, highlight_strongest=True)
+
+        new_molecule = getattr(self.islat, 'active_molecule', None)
+        current_selection = getattr(self, 'current_selection', None)
+
+        # Delegate to the active view — it handles title, active-line
+        # clearing, and re-running the selection chain if needed.
+        self.active_view.on_active_molecule_changed(
+            new_molecule=new_molecule,
+            current_selection=current_selection,
+        )
+
+        # Mark the other view as stale so it picks up the change on
+        # next activate().
+        if self.is_full_spectrum:
+            self._three_panel_view._needs_refresh = True
         else:
-            # Just update the population diagram without active lines
-            debug_config.verbose("active_molecule", "Updating population diagram only")
-            self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-            self.canvas.draw_idle()
-        
+            self._full_spectrum_view._needs_refresh = True
+
         debug_config.info("active_molecule", "on_active_molecule_changed() completed")
 
     def on_molecule_parameter_changed(self, molecule_name, parameter_name, old_value, new_value):
         """
         Called when any molecule parameter changes.
+        Manages stale-molecule bookkeeping, then delegates rendering to the active view.
         """
         debug_config.info("main_plot", f"Parameter change: {molecule_name}.{parameter_name}: {old_value} → {new_value}")
 
@@ -1187,77 +679,46 @@ class iSLATPlot:
         # double-rendering.
         if parameter_name == 'is_visible':
             return
-        
-        # Check if this molecule is visible - if so, we need to update plots
-        if (hasattr(self.islat, 'molecules_dict') and 
+
+        # Check if this molecule is visible — if hidden, mark stale
+        if (hasattr(self.islat, 'molecules_dict') and
             molecule_name in self.islat.molecules_dict):
-            
+
             molecule = self.islat.molecules_dict[molecule_name]
-            
+
             if molecule.is_visible:
                 # Delegate to update_model_plot so the inactive view is
                 # also marked stale and refreshes on next activate().
                 self.update_model_plot()
             else:
-                # Molecule is hidden — record it as stale so that when it
-                # is next made visible we re-render from fresh data rather
-                # than just toggling the old (now outdated) artists.
                 self._stale_molecules.add(molecule_name)
                 debug_config.trace("main_plot", f"{molecule_name} parameter changed while hidden — marked stale")
-        
-        # Check if the changed molecule is the active one for additional updates
-        is_active = (hasattr(self.islat, 'active_molecule') and 
-            self.islat.active_molecule and 
-            hasattr(self.islat.active_molecule, 'name') and
-            self.islat.active_molecule.name == molecule_name)
 
-        # Check if the changed molecule is a comparison molecule
-        is_comparison = any(
-            getattr(m, 'name', None) == molecule_name
-            for m in getattr(self.islat, 'comparison_molecules', [])
+        # Delegate line-inspection / pop-diagram updates to the active view
+        current_selection = getattr(self, 'current_selection', None)
+        self.active_view.on_molecule_parameter_changed(
+            molecule_name=molecule_name,
+            parameter_name=parameter_name,
+            current_selection=current_selection,
         )
-
-        if is_active:
-            # If we have a current selection, refresh the line inspection and population diagram
-            if hasattr(self, 'current_selection') and self.current_selection:
-                xmin, xmax = self.current_selection
-                self.plot_spectrum_around_line(xmin, xmax, highlight_strongest=True)
-            else:
-                # Just update the population diagram without active lines
-                self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-                self.canvas.draw_idle()
-        elif is_comparison:
-            # Comparison molecule changed — refresh line inspection only
-            if hasattr(self, 'current_selection') and self.current_selection:
-                xmin, xmax = self.current_selection
-                self.update_line_inspection_plot(xmin=xmin, xmax=xmax)
-                self.canvas.draw_idle()
 
     def on_molecule_deleted(self, molecule_name):
         """
-        Handle molecule deletion by clearing relevant plot elements and updating displays.
-        
+        Handle molecule deletion by delegating to the active view.
+
         Parameters
         ----------
         molecule_name : str
             Name of the deleted molecule
         """
-        # Clear model lines first
-        self.clear_model_lines()
-        
-        # Clear active lines if they belong to the deleted molecule
-        if (hasattr(self.islat, 'active_molecule') and 
-            self.islat.active_molecule and 
-            hasattr(self.islat.active_molecule, 'name') and
-            self.islat.active_molecule.name == molecule_name):
-            self.clear_active_lines()
+        # Delegate to the active view which handles clearing + rebuild
+        self.active_view.on_molecule_deleted(molecule_name)
 
-        # Remove from comparison molecules if present
-        comp_mols = getattr(self.islat, '_comparison_molecules', [])
-        comp_mols[:] = [m for m in comp_mols if getattr(m, 'name', None) != molecule_name]
-        
-        # Update all plots to reflect the change
-        self.update_all_plots()
+        # Mark the other view as stale
+        if self.is_full_spectrum:
+            self._three_panel_view._needs_refresh = True
+        else:
+            self._full_spectrum_view._needs_refresh = True
     
     def on_molecule_visibility_changed(self, molecule_name, is_visible):
         """
@@ -1460,38 +921,21 @@ class iSLATPlot:
         tick / label / spine colours, canvas widget, toolbar, and the
         full-spectrum view.  No spectrum data is recomputed, so the
         update is near-instant.
+
+        Both views are updated unconditionally so that a theme change
+        made while one view is active is immediately reflected when the
+        user switches to the other view.  Each view's
+        :meth:`PlotView.apply_theme` implementation handles its own
+        figure, axes, canvas, and sub-delegates.
         """
         if theme:
             self.theme = theme
 
-        # Keep the PlotRenderer's theme reference in sync so that any
-        # subsequent render calls (e.g. on the next user interaction)
-        # use the new colours.
-        if hasattr(self, 'plot_renderer'):
-            self.plot_renderer.theme = self.theme
-            # Also update the sub-plot delegates if they exist
-            if hasattr(self.plot_renderer, '_line_inspection_plot') and self.plot_renderer._line_inspection_plot is not None:
-                self.plot_renderer._line_inspection_plot.theme = self.theme
-            if hasattr(self.plot_renderer, '_population_diagram_plot') and self.plot_renderer._population_diagram_plot is not None:
-                self.plot_renderer._population_diagram_plot.theme = self.theme
-
-        # Theme the three-panel axes (ax1/ax2/ax3)
-        self._apply_plot_theming()
-
-        # Theme the full-spectrum view's figure if it has been initialised
-        if hasattr(self, '_full_spectrum_view'):
-            fsv = self._full_spectrum_view
-            if fsv._plot is not None:
-                fsv._plot.theme = self.theme
-                fsv._plot.apply_theme_to_figure()
-            if fsv._canvas is not None:
-                try:
-                    fsv._canvas.get_tk_widget().configure(
-                        bg=self.theme.get("background", "#181A1B")
-                    )
-                    fsv._canvas.draw_idle()
-                except Exception:
-                    pass
+        # Propagate to both views — the currently invisible view will
+        # also be themed so the next activate() doesn't flash stale
+        # colours.
+        self._three_panel_view.apply_theme(self.theme)
+        self._full_spectrum_view.apply_theme(self.theme)
 
         # Theme the matplotlib toolbar
         if hasattr(self, 'toolbar') and self.toolbar is not None:
@@ -1506,21 +950,71 @@ class iSLATPlot:
                         pass
             except Exception:
                 pass
-
-        # Single canvas draw for the three-panel view
-        if hasattr(self, 'canvas'):
-            self.canvas.draw_idle()
     
+    # ------------------------------------------------------------------
+    # View-change callback infrastructure
+    # ------------------------------------------------------------------
+    def add_view_change_callback(self, cb):
+        """Register a callback invoked when the active view changes.
+
+        The callback signature is ``cb(old_view, new_view)`` where both
+        arguments are :class:`PlotView` instances (or *None* for the
+        initial call).
+        """
+        if cb not in self._view_change_callbacks:
+            self._view_change_callbacks.append(cb)
+
+    def remove_view_change_callback(self, cb):
+        """Remove a previously registered view-change callback."""
+        try:
+            self._view_change_callbacks.remove(cb)
+        except ValueError:
+            pass
+
+    def _notify_view_change(self, old_view, new_view):
+        """Notify all registered listeners that the active view changed."""
+        for cb in self._view_change_callbacks:
+            try:
+                cb(old_view, new_view)
+            except Exception as exc:
+                debug_config.warning(
+                    "main_plot",
+                    f"View-change callback {cb} raised: {exc}",
+                )
+
     def load_full_spectrum(self):
         """Activate the full-spectrum view (called by toggle_full_spectrum)."""
+        old_view = self.active_view
         self._three_panel_view.deactivate()
         self._full_spectrum_view.activate(self.parent_frame)
         self.active_view = self._full_spectrum_view
+        self._notify_view_change(old_view, self.active_view)
 
     def toggle_summed_spectrum(self):
         """Toggle visibility of the summed spectral flux."""
         self.summed_toggle = not self.summed_toggle
         self.active_view.toggle_summed_spectrum(self.summed_toggle)
+
+    def toggle_residuals(self) -> None:
+        """Toggle residual sub-panels in the full-spectrum view.
+
+        When activated while the full-spectrum view is showing, the view
+        switches from :class:`FullSpectrumPlot` to
+        :class:`ResidualSpectrumPlot` (and vice-versa) by rebuilding
+        the composed plot.
+
+        If the three-panel view is active the flag is stored but no
+        visual change occurs until the user enters full-spectrum mode.
+        """
+        self.residual_toggle = not self.residual_toggle
+        debug_config.info(
+            "main_plot",
+            f"toggle_residuals: show_residuals = {self.residual_toggle}",
+        )
+
+        # Only trigger a rebuild when the full-spectrum view is active
+        if self.is_full_spectrum:
+            self._full_spectrum_view.toggle_residuals(self.residual_toggle)
 
     def toggle_full_spectrum(self):
         """Toggle between the regular three-panel view and the full spectrum view."""
@@ -1531,6 +1025,8 @@ class iSLATPlot:
             self.load_full_spectrum()
         else:
             # Switch back to three-panel view
+            old_view = self.active_view
             self._full_spectrum_view.deactivate()
             self.active_view = self._three_panel_view
             self._three_panel_view.activate(self.parent_frame)
+            self._notify_view_change(old_view, self.active_view)

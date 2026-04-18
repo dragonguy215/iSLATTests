@@ -26,7 +26,6 @@ from iSLAT.Modules.Debug.PerformanceLogger import perf_log, log_timing, Performa
 
 # Lazy imports for performance
 _scipy_imported = False
-_pd_imported = False
 
 def _get_scipy():
     """Lazy import of scipy components"""
@@ -37,17 +36,8 @@ def _get_scipy():
         _scipy_imported = True
     return fixed_quad
 
-def _get_pandas():
-    """Lazy import of pandas"""
-    global _pd_imported, pd
-    if not _pd_imported:
-        try:
-            import pandas as pd
-            _pd_imported = True
-        except ImportError:
-            pd = None
-            _pd_imported = True
-    return pd
+from ._pandas_import import get_pandas as _get_pandas
+from ._mixins import WavelengthRangeMixin
 
 if TYPE_CHECKING:
     import pandas
@@ -60,11 +50,13 @@ else:
 
 __all__ = ["Intensity"]
 
-class Intensity:
+class Intensity(WavelengthRangeMixin):
     __slots__ = ('_molecule', '_intensity', '_tau', '_t_kin', '_n_mol', '_dv', '_cache_valid', '_sorted_idx', '_sorted_freq',
-                 '_cached_freq_cubed', '_cached_line_scalar', '_cached_e_delta')
+                 '_cached_line_scalar', '_cached_e_delta', '_cached_dv_star',
+                 '_cached_freq_ratio', '_wavelength_range')
     
-    def __init__(self, molecule_line_list: 'MoleculeLineList') -> None:
+    def __init__(self, molecule_line_list: 'MoleculeLineList',
+                 wavelength_range: Optional[tuple] = None) -> None:
         """Initialize an intensity class which calculates the intensities for a given molecule and provided
         physical parameters.
 
@@ -72,12 +64,20 @@ class Intensity:
         ----------
         molecule_line_list: MoleculeLineList
             Molecular line list data to calculate the intensity
+        wavelength_range: tuple of (float, float), optional
+            Wavelength range ``(lam_min, lam_max)`` in microns.  When set,
+            only lines within this range are used for intensity calculations.
+            The range is propagated to the underlying MoleculeLineList.
         """
         if TYPE_CHECKING:
             self._molecule: "MoleculeLineList" = molecule_line_list
         else:
             # Runtime: accept any compatible object
             self._molecule = molecule_line_list
+        
+        self._wavelength_range = wavelength_range
+        if wavelength_range is not None:
+            self._molecule.wavelength_range = wavelength_range
             
         self._intensity: Optional[np.ndarray] = None
         self._tau: Optional[np.ndarray] = None
@@ -88,9 +88,10 @@ class Intensity:
         self._sorted_idx: Optional[np.ndarray] = None
         self._sorted_freq: Optional[np.ndarray] = None
         # Pre-computed line constants (molecule-dependent, not parameter-dependent)
-        self._cached_freq_cubed: Optional[np.ndarray] = None
         self._cached_line_scalar: Optional[np.ndarray] = None
         self._cached_e_delta: Optional[np.ndarray] = None
+        self._cached_dv_star: Optional[np.ndarray] = None  # per-neighbor dv thresholds for overlap
+        self._cached_freq_ratio: Optional[np.ndarray] = None  # freq / c, shape (1, n_lines)
 
     # Pre-computed constants for blackbody calculation (class-level for efficiency)
     _BB_COEFF_RJ = 2.0 * c.BOLTZMANN_CONSTANT / (c.SPEED_OF_LIGHT_CGS ** 2)
@@ -101,6 +102,17 @@ class Intensity:
     _SQRT_LN2_INV = 1.0 / (2.0 * np.sqrt(np.log(2.0)))  # ~ 0.6005
     _C3_OVER_8PI = (c.SPEED_OF_LIGHT_CGS ** 3) / (8.0 * np.pi)  # c^3/(8π)
     _INV_FGAUSS_1E5 = 1.0 / (1e5 * c.FGAUSS_PREFACTOR)  # 1/(10^5 * FGAUSS_PREFACTOR)
+    _TWO_SQRT_LN2 = 2.0 * np.sqrt(np.log(2.0))  # ~ 1.6651, for converting dv to x-units
+    
+    # tau-regime shortcut threshold
+    _TAU_THIN = 0.01     # below this, F(tau_0) ~ tau_0 * Sum_k w_k exp(-x_k^2)  (linear regime)
+    
+    # Pre-computed sqrt(pi) sum for thin-regime shortcut (set by _initialize_gauss_quad)
+    _GAUSS_QUAD_SQRT_PI_SUM = None  # Sum_k w_k * exp(-x_k^2) ~ sqrt(pi)
+    
+    # Weak-blend early-exit threshold in Gaussian widths
+    # At 4*sigma, overlap contribution is exp(-16) ~ 1.1e-7 -- negligible
+    _WEAK_BLEND_THRESHOLD = 4.0
     
     @staticmethod
     def _bb(nu: np.ndarray, T: np.ndarray) -> np.ndarray:
@@ -126,27 +138,16 @@ class Intensity:
         
         # Check if we have multiple temperatures (batch mode)
         if T.size == 1:
-            # Single temperature - optimized scalar path
+            # Single temperature - branchless scalar path
+            # np.clip prevents overflow in np.expm1 for x > ~709 (Wien regime)
+            # and for x < 1e-5 (Rayleigh-Jeans), expm1 is already accurate.
             T_val = T.item()
             inv_T = 1.0 / T_val
             x = cls._BB_X_FACTOR * inv_T * nu
             
-            nu_sq = nu * nu
-            nu_cu = nu_sq * nu
+            nu_cu = nu * nu * nu
             
-            out = np.empty_like(nu, dtype=np.float64)
-            
-            m_rj = x < 1.0e-5
-            m_wien = x > 20.0
-            m_mid = ~(m_rj | m_wien)
-            
-            out[m_rj] = cls._BB_COEFF_RJ * T_val * nu_sq[m_rj]
-            out[m_wien] = cls._BB_COEFF_PLANCK * nu_cu[m_wien] * np.exp(-x[m_wien])
-            
-            if np.any(m_mid):
-                out[m_mid] = cls._BB_COEFF_PLANCK * nu_cu[m_mid] / np.expm1(x[m_mid])
-            
-            return out
+            return cls._BB_COEFF_PLANCK * nu_cu / np.expm1(np.clip(x, 1e-300, 709.0))
         else:
             # Multiple temperatures - vectorized batch path
             # Shape: T is (n_cond,), nu is (n_lines,)
@@ -165,20 +166,23 @@ class Intensity:
             m_wien = x > 20.0
             m_mid = ~(m_rj | m_wien)
             
-            # Rayleigh-Jeans: broadcast T (n_cond,1) * nu_sq (n_lines,)
-            T_broadcast = T[:, np.newaxis]  # (n_cond, 1)
-            nu_sq_broadcast = nu_sq[np.newaxis, :]  # (1, n_lines)
-            nu_cu_broadcast = nu_cu[np.newaxis, :]  # (1, n_lines)
+            # Compute directly into masked positions to avoid full-size temporaries
+            # Use np.broadcast_to for zero-copy broadcast views
+            T_2d = np.broadcast_to(T[:, np.newaxis], x.shape)
+            nu_sq_2d = np.broadcast_to(nu_sq[np.newaxis, :], x.shape)
+            nu_cu_2d = np.broadcast_to(nu_cu[np.newaxis, :], x.shape)
             
-            rj_vals = cls._BB_COEFF_RJ * T_broadcast * nu_sq_broadcast
-            out[m_rj] = rj_vals[m_rj]
+            # Rayleigh-Jeans regime
+            if np.any(m_rj):
+                out[m_rj] = cls._BB_COEFF_RJ * T_2d[m_rj] * nu_sq_2d[m_rj]
             
-            wien_vals = cls._BB_COEFF_PLANCK * nu_cu_broadcast * np.exp(-x)
-            out[m_wien] = wien_vals[m_wien]
+            # Wien regime
+            if np.any(m_wien):
+                out[m_wien] = cls._BB_COEFF_PLANCK * nu_cu_2d[m_wien] * np.exp(-x[m_wien])
             
+            # Full Planck regime
             if np.any(m_mid):
-                planck_vals = cls._BB_COEFF_PLANCK * nu_cu_broadcast / np.expm1(x)
-                out[m_mid] = planck_vals[m_mid]
+                out[m_mid] = cls._BB_COEFF_PLANCK * nu_cu_2d[m_mid] / np.expm1(x[m_mid])
             
             return out
 
@@ -186,6 +190,43 @@ class Intensity:
     _GAUSS_QUAD_X = None
     _GAUSS_QUAD_W = None
     _GAUSS_QUAD_INITIALIZED = False
+
+    # Strategy registry for intensity calculation methods
+    _strategy_registry: dict = {}
+
+    @classmethod
+    def _ensure_strategy_registry(cls) -> None:
+        """Populate the strategy registry lazily (avoids circular imports)."""
+        if not cls._strategy_registry:
+            from ._intensity_strategies import DEFAULT_STRATEGIES
+            cls._strategy_registry.update(DEFAULT_STRATEGIES)
+
+    @classmethod
+    def register_strategy(cls, method_name: str, strategy) -> None:
+        """Register a new (or replacement) intensity calculation strategy.
+
+        Parameters
+        ----------
+        method_name : str
+            Key used in ``calc_intensity(method=...)``.
+        strategy : IntensityStrategy
+            Any object with a ``calculate(...)`` method matching the
+            :class:`IntensityStrategy` protocol.
+        """
+        cls._ensure_strategy_registry()
+        cls._strategy_registry[method_name] = strategy
+
+    @classmethod
+    def _get_strategy(cls, method: str):
+        """Look up a strategy by *method* name, raising on unknown keys."""
+        cls._ensure_strategy_registry()
+        strategy = cls._strategy_registry.get(method)
+        if strategy is None:
+            raise ValueError(
+                f"Unknown intensity method {method!r}. "
+                f"Available: {sorted(cls._strategy_registry)}"
+            )
+        return strategy
     
     @classmethod
     def _initialize_gauss_quad(cls):
@@ -199,13 +240,16 @@ class Intensity:
                 cls._GAUSS_QUAD_X = 6.0 * x_quad  # Store actual quadrature points
                 cls._GAUSS_QUAD_EXP = np.exp(-(cls._GAUSS_QUAD_X ** 2))
                 cls._GAUSS_QUAD_W = 6.0 * w_quad
+                cls._GAUSS_QUAD_SQRT_PI_SUM = float(np.dot(cls._GAUSS_QUAD_W, cls._GAUSS_QUAD_EXP))
                 cls._GAUSS_QUAD_INITIALIZED = True
             except ImportError:
                 # Fallback to scipy method if numpy.polynomial not available
                 fixed_quad = _get_scipy()
                 # Use a simple tau value to initialize quadrature
                 cls._GAUSS_QUAD_X = np.linspace(-6, 6, 20)  # Store actual x values
+                cls._GAUSS_QUAD_EXP = np.exp(-(cls._GAUSS_QUAD_X ** 2))
                 cls._GAUSS_QUAD_W = np.ones(20) * (12.0 / 20.0)  # Simple uniform weighting
+                cls._GAUSS_QUAD_SQRT_PI_SUM = float(np.dot(cls._GAUSS_QUAD_W, cls._GAUSS_QUAD_EXP))
                 cls._GAUSS_QUAD_INITIALIZED = True
 
     def _fint_multi(self, center_tau: np.ndarray, dv_cond: np.ndarray,
@@ -222,11 +266,11 @@ class Intensity:
         Algorithm Overview:
         1. Identify isolated vs. overlapping lines using velocity separation criteria  
         2. Process isolated lines in batch using vectorized operations
-        3. For overlapping lines: sum optical depths → apply curve-of-growth → distribute intensity
+        3. For overlapping lines: sum optical depths -> apply curve-of-growth -> distribute intensity
         
         Physical Basis:
-        - Isolated lines: I = (physical_factors) * ∫[1 - exp(-τ)] dv
-        - Overlapping lines: I_total = ∫[1 - exp(-Στ_i)] dv, then distribute proportionally
+        - Isolated lines: I = (physical_factors) * integral[1 - exp(-tau)] dv
+        - Overlapping lines: I_total = integral[1 - exp(-Sum(tau_i))] dv, then distribute proportionally
         
         Performance:
         - Memory complexity: O(n) instead of O(n^2) for overlap detection
@@ -251,12 +295,15 @@ class Intensity:
         Returns
         -------
         np.ndarray, shape (n_conditions, n_lines)
-            Calculated line intensities in CGS units (erg cm^2 s^-1 Hz^-1)
+            Line-integrated specific intensities following Banzatti et al. 2012 Eq. A1.
+            Units: (1/(2*sqrt(ln(2)))) x 10^5 x dv x (nu/c) x B_nu(T) x F(tau_0), where F is the
+            curve-of-growth integral. The 10^5 factor converts km/s to cm/s.
             
         Notes
         -----
         - Uses Gaussian quadrature for numerical integration of curve-of-growth
-        - Velocity overlap criterion: lines within 10 km/s are considered overlapping
+        - Velocity overlap criterion: lines are grouped when their frequency
+          separation corresponds to less than the current dv (FWHM)
         """
         cls = self.__class__
         # Initialize quadrature points and weights
@@ -266,171 +313,340 @@ class Intensity:
         # Setup arrays and extract dimensions
         dv_cond = np.atleast_1d(dv_cond)
         n_cond, n_lines = center_tau.shape
-        intensity = np.zeros((n_cond, n_lines), dtype=np.float64)
         
         # Quadrature setup for curve-of-growth integration
         exp_neg_x_squared = cls._GAUSS_QUAD_EXP  # (n_quad,) - don't add dimension yet
         weights = cls._GAUSS_QUAD_W
         
-        # Only copy if not already contiguous (avoid unnecessary memory allocation)
-        if not center_tau.flags['C_CONTIGUOUS']:
-            center_tau = np.ascontiguousarray(center_tau, dtype=np.float64)
-        if not bb_vals.flags['C_CONTIGUOUS']:
-            bb_vals = np.ascontiguousarray(bb_vals, dtype=np.float64)
-        if not freq_ratio.flags['C_CONTIGUOUS']:
-            freq_ratio = np.ascontiguousarray(freq_ratio, dtype=np.float64)
-        if not frequencies.flags['C_CONTIGUOUS']:
-            frequencies = np.ascontiguousarray(frequencies, dtype=np.float64)
-        
-        # ═══════════════════════════════════════════════════════════════
+        # ===============================================================
         # STEP 1: Identify isolated vs. overlapping lines
-        # ═══════════════════════════════════════════════════════════════
+        # ===============================================================
         
-        # Physical overlap criterion: lines within 10 km/s velocity separation. prevents spurious overlap detection for large datasets
-        #cutoff_velocity = min(10.0, 3 * np.max(dv_cond))  # km/s
-        #cutoff_velocity = np.max(dv_cond)  # km/s
-        
-        # Convert velocity cutoff to frequency tolerance
-        freq_tolerance = np.max(dv_cond) * frequencies / c.SPEED_OF_LIGHT_KMS
+        # Pre-compute physical factors once (used by all code paths below)
+        physical_factors = np.empty((n_cond, n_lines), dtype=np.float64)
+        np.multiply(freq_ratio, bb_vals, out=physical_factors)
+        physical_factors *= (sqrt_ln2_inv * 1e5)
+        physical_factors *= dv_cond[:, np.newaxis]
 
-        # Cache sorted order per instance (frequencies are from the molecule and stable)
+        # Cache sorted order and per-neighbor dv_star thresholds per instance
+        # (frequencies are molecule-dependent and stable across calls).
+        # dv_star[i] = the minimum dv (km/s) at which sorted lines i and i+1 overlap:
+        #   dv_star_i = c * dnu_i / max(nu_i, nu_{i+1})
         if self._sorted_idx is None:
             self._sorted_idx = np.argsort(frequencies)
             self._sorted_freq = frequencies[self._sorted_idx]
+            sf = self._sorted_freq
+            if sf.size > 1:
+                self._cached_dv_star = (c.SPEED_OF_LIGHT_KMS
+                    * np.diff(sf) / np.maximum(sf[:-1], sf[1:]))
+            else:
+                self._cached_dv_star = np.array([], dtype=np.float64)
 
         sort_indices = self._sorted_idx
-        sorted_frequencies = self._sorted_freq
-        tol_sorted = freq_tolerance[sort_indices]
-
-        # If every adjacent pair is separated by more than the stricter of the two tolerances,
-        # then there are no overlaps anywhere; do the isolated batch and return.
-        gaps = np.diff(sorted_frequencies)
-        if gaps.size == 0 or np.all(gaps > np.maximum(tol_sorted[:-1], tol_sorted[1:])):
-            # Pre-compute physical factors using in-place multiplication chain
-            # physical_factors = sqrt_ln2_inv * 1e5 * dv_cond[:, np.newaxis] * freq_ratio * bb_vals
-            physical_factors = np.empty((n_cond, n_lines), dtype=np.float64)
-            np.multiply(freq_ratio, bb_vals, out=physical_factors)
-            physical_factors *= (sqrt_ln2_inv * 1e5)
-            physical_factors *= dv_cond[:, np.newaxis]
-
-            # Vectorized curve-of-growth for all lines at once
-            # Use tensordot instead of explicit 3D array + matmul for memory efficiency
-            # integrand shape would be (n_cond, n_lines, n_quad) - can be large
-            # Instead: compute in chunks or use broadcasting more carefully
-            tau_exp = center_tau[:, :, np.newaxis] * exp_neg_x_squared  # (n_cond, n_lines, n_quad)
-            np.negative(tau_exp, out=tau_exp)
-            np.expm1(tau_exp, out=tau_exp)  # in-place expm1
-            np.negative(tau_exp, out=tau_exp)  # -expm1(-x) = 1 - exp(-x)
-            fint_vals = tau_exp @ weights  # (n_cond, n_lines)
+        dv_star = self._cached_dv_star  # (n_sorted - 1,)
+        
+        # Use the effective dv for grouping. In batch mode with varying dv,
+        # use max(dv_cond) to find the *superset* of potentially blended pairs.
+        # The exact multi-line quadrature in Step 3 handles per-condition
+        # offsets correctly, so over-grouping here is conservative, not wrong.
+        # For single-condition calls, this is exact.
+        dv_group = np.max(dv_cond)
+        
+        # Fast all-isolated check: if even the widest dv doesn't blend any pair
+        if dv_star.size == 0 or np.all(dv_group < dv_star):
+            # tau-regime shortcuts: partition lines into thin / normal / thick
+            fint_vals = self._cog_with_tau_shortcuts(center_tau, exp_neg_x_squared, weights)
             
             # Final multiplication in-place
             np.multiply(physical_factors, fint_vals, out=physical_factors)
             return physical_factors
         
-        # Lines are already sorted by frequency; expand contiguous windows while
-        # adjacent pairs are within either neighbor's tolerance (max of the pair).
-        isolated_lines = []
-        blended_groups = []
-
-        i = 0
-        n_sorted = sorted_frequencies.size
-        while i < n_sorted:
-            j = i + 1
-            # Grow the group while neighbors mutually overlap
-            while j < n_sorted:
-                gap = sorted_frequencies[j] - sorted_frequencies[j - 1]
-                if gap <= max(tol_sorted[j], tol_sorted[j - 1]):
-                    j += 1
-                else:
-                    break
-
-            # Map back to original indices
-            group_orig_idx = sort_indices[i:j]
-            if group_orig_idx.size == 1:
-                isolated_lines.append(int(group_orig_idx[0]))
-            else:
-                blended_groups.append(np.asarray(group_orig_idx, dtype=np.int64))
-
-            i = j
+        # Vectorized overlap grouping using cumsum-based labeling.
+        # This avoids np.split (O(n_groups) Python objects) and instead assigns
+        # a contiguous integer group label to each sorted line, then uses
+        # np.bincount to identify isolated vs blended groups in O(n) time.
+        is_boundary = dv_group < dv_star
         
-        # ═══════════════════════════════════════════════════════════════
-        # STEP 2: Process isolated lines (optimized vectorization)
-        # ═══════════════════════════════════════════════════════════════
+        # Assign group labels via cumulative sum of boundary flags
+        group_labels = np.empty(n_lines, dtype=np.int32)
+        group_labels[0] = 0
+        group_labels[1:] = np.cumsum(is_boundary)
         
-        # Pre-compute physical factors using in-place operations
-        physical_factors = np.empty((n_cond, n_lines), dtype=np.float64)
-        np.multiply(freq_ratio, bb_vals, out=physical_factors)
-        physical_factors *= (sqrt_ln2_inv * 1e5)
-        physical_factors *= dv_cond[:, np.newaxis]
+        # Count lines per group using bincount
+        group_counts = np.bincount(group_labels)
         
-        if isolated_lines:
-            isolated_indices = np.asarray(isolated_lines, dtype=np.intp)
-            n_isolated = len(isolated_indices)
+        # Map group counts back to each sorted line position
+        line_group_counts = group_counts[group_labels]
+        
+        # Isolated lines: groups with exactly 1 member
+        isolated_sorted_mask = line_group_counts == 1
+        blended_sorted_mask = ~isolated_sorted_mask
+        
+        # ===============================================================
+        # STEP 2: Process isolated lines
+        # ===============================================================
+        
+        if np.any(isolated_sorted_mask):
+            isolated_indices = sort_indices[isolated_sorted_mask]
+            tau_batch = center_tau[:, isolated_indices]
             
-            # Process all isolated lines at once if memory allows, else batch
-            batch_size = 20000
-            if n_isolated <= batch_size:
-                # Single batch - most common case
-                tau_batch = center_tau[:, isolated_indices]
-                
-                # In-place curve-of-growth computation
-                tau_exp = tau_batch[:, :, np.newaxis] * exp_neg_x_squared
-                np.negative(tau_exp, out=tau_exp)
-                np.expm1(tau_exp, out=tau_exp)
-                np.negative(tau_exp, out=tau_exp)
-                fint_vals = tau_exp @ weights
-                
-                # In-place final multiplication
-                intensity[:, isolated_indices] = physical_factors[:, isolated_indices] * fint_vals
-            else:
-                # Multiple batches for very large line lists
-                for batch_start in range(0, n_isolated, batch_size):
-                    batch_end = min(batch_start + batch_size, n_isolated)
-                    batch_indices = isolated_indices[batch_start:batch_end]
-                    
-                    tau_batch = center_tau[:, batch_indices]
-                    tau_exp = tau_batch[:, :, np.newaxis] * exp_neg_x_squared
-                    np.negative(tau_exp, out=tau_exp)
-                    np.expm1(tau_exp, out=tau_exp)
-                    np.negative(tau_exp, out=tau_exp)
-                    fint_vals = tau_exp @ weights
-                    
-                    intensity[:, batch_indices] = physical_factors[:, batch_indices] * fint_vals
+            # tau-regime shortcuts: partition lines into thin / normal / thick
+            fint_vals = self._cog_with_tau_shortcuts(tau_batch, exp_neg_x_squared, weights)
+            
+            # Multiply curve-of-growth factors in-place into physical_factors
+            physical_factors[:, isolated_indices] *= fint_vals
         
-        # ═══════════════════════════════════════════════════════════════  
-        # STEP 3: Process overlapping lines
-        # ═══════════════════════════════════════════════════════════════
+        # ===============================================================
+        # STEP 3: Process overlapping lines with separation-aware physics
+        # ===============================================================
+        # Exact multi-line quadrature for blended groups:
+        #   Computes tau_tot(x_k) = Sum_j tau_{0,j} exp(-(x_k - delta_j)^2) at each
+        #   quadrature point, applies [1 - exp(-tau_tot)] correctly, then
+        #   distributes intensity to lines by their fractional opacity.
+        #
+        # This fixes the co-centered approximation that ignores line separations,
+        # which over-saturates peak optical depth and underestimates emission
+        # for blends separated by ~0.5-2 line widths.
         
-        if blended_groups:
-            # Process all blended groups - typically small and few
-            for overlapping_indices in blended_groups:
-                n_overlap = len(overlapping_indices)
+        if not np.any(blended_sorted_mask):
+            return physical_factors
+        
+        x_quad = cls._GAUSS_QUAD_X  # (n_quad,) actual quadrature points in [-6, 6]
+        two_sqrt_ln2 = cls._TWO_SQRT_LN2
+        
+        # Extract blended line data in sorted order
+        blended_sort_positions = np.where(blended_sorted_mask)[0]
+        blended_orig_indices = sort_indices[blended_sort_positions]
+        blended_group_labels = group_labels[blended_sort_positions]
+        
+        # Find group boundaries within the blended-only arrays
+        unique_blend_labels, blend_group_starts = np.unique(blended_group_labels, return_index=True)
+        blend_group_ends = np.append(blend_group_starts[1:], len(blended_orig_indices))
+        blend_group_sizes = blend_group_ends - blend_group_starts
+        
+        # ---------------------------------------------------------------
+        # STEP 3a: Batch-vectorized processing for common group sizes
+        # ---------------------------------------------------------------
+        # Groups of the same size can be processed in a single vectorized
+        # operation, avoiding per-group Python overhead.
+        
+        _BATCH_MAX_SIZE = 32  # Batch groups up to this size; larger ones use per-group loop
+        
+        processed_mask = np.zeros(len(unique_blend_labels), dtype=bool)
+        
+        for target_size in range(2, _BATCH_MAX_SIZE + 1):
+            size_mask = blend_group_sizes == target_size
+            if not np.any(size_mask):
+                continue
+            
+            size_group_idx = np.where(size_mask)[0]
+            n_groups_this_size = len(size_group_idx)
+            
+            # Gather indices for all groups of this size into (n_groups, target_size)
+            all_indices = np.empty((n_groups_this_size, target_size), dtype=np.intp)
+            for k in range(target_size):
+                all_indices[:, k] = blended_orig_indices[blend_group_starts[size_group_idx] + k]
+            
+            # Process each condition
+            for ic in range(n_cond):
+                tau_batch_g = center_tau[ic][all_indices]     # (n_groups, target_size)
+                freq_batch_g = frequencies[all_indices]       # (n_groups, target_size)
                 
-                if n_overlap <= 1:
+                # Skip negligible groups
+                tau_max_per_group = tau_batch_g.max(axis=1)
+                active = tau_max_per_group > 1e-300
+                if not np.any(active):
                     continue
+                
+                tau_bg = tau_batch_g[active]                   # (n_active, target_size)
+                freq_bg = freq_batch_g[active]                 # (n_active, target_size)
+                active_indices = all_indices[active]           # (n_active, target_size)
+                
+                # tau-weighted reference frequency
+                tau_sums = tau_bg.sum(axis=1)                  # (n_active,)
+                safe_sums = np.where(tau_sums > 1e-300, tau_sums, 1.0)
+                freq_refs = ((tau_bg * freq_bg).sum(axis=1) / safe_sums)[:, np.newaxis]
+                
+                # Velocity offsets in quadrature x-units
+                dv_kms = (freq_bg - freq_refs) * (c.SPEED_OF_LIGHT_KMS / freq_refs)
+                delta_x = (dv_kms / dv_cond[ic]) * two_sqrt_ln2  # (n_active, target_size)
+                
+                # Shifted Gaussian profiles in-place: (n_quad, n_active, target_size)
+                gp = x_quad[:, np.newaxis, np.newaxis] - delta_x[np.newaxis, :, :]
+                np.multiply(gp, gp, out=gp)            # gp = shifted_x^2
+                np.negative(gp, out=gp)                 # gp = -shifted_x^2
+                np.exp(gp, out=gp)                      # gp = exp(-shifted_x^2)
+                
+                # tau_tot at each quadrature point: (n_quad, n_active)
+                tau_at_quad = np.einsum('qgl,gl->qg', gp, tau_bg)
+                
+                # Curve-of-growth: 1 - exp(-tau_tot)
+                # Keep tau_at_quad intact for the division; compute integrand into a separate array
+                cog_mask = tau_at_quad > 1e-300
+                integrand = np.empty_like(tau_at_quad)
+                np.negative(tau_at_quad, out=integrand)         # -tau
+                np.expm1(integrand, out=integrand)              # expm1(-tau)
+                np.negative(integrand, out=integrand)           # 1-exp(-tau)
+                cog_over_tau = np.where(cog_mask, integrand / np.where(cog_mask, tau_at_quad, 1.0), 0.0)
+                
+                # Distribute intensity proportionally, reusing gp array in-place
+                gp *= (cog_over_tau * weights[:, np.newaxis])[:, :, np.newaxis]
+                fint = gp.sum(axis=0)                          # (n_active, target_size)
+                fint *= tau_bg
+                
+                # Scatter results back into physical_factors
+                physical_factors[ic][active_indices.ravel()] *= fint.ravel()
+            
+            processed_mask[size_group_idx] = True
+        
+        # ---------------------------------------------------------------
+        # STEP 3b: Per-group loop for remaining large groups
+        # ---------------------------------------------------------------
+        remaining_idx = np.where(~processed_mask)[0]
+        
+        if len(remaining_idx) > 0:
+            weak_blend_thresh = cls._WEAK_BLEND_THRESHOLD
+            tau_thin_thresh = cls._TAU_THIN
+            
+            for gi in remaining_idx:
+                start = blend_group_starts[gi]
+                end = blend_group_ends[gi]
+                overlapping_indices = blended_orig_indices[start:end]
                 
                 # Extract optical depths for this blended group
                 tau_group = center_tau[:, overlapping_indices]  # (n_cond, n_overlap)
                 
-                # Sum optical depths (use method call for speed)
-                tau_total = tau_group.sum(axis=1)  # (n_cond,)
+                # Early exit: skip quadrature if all tau_0 values are negligible
+                if tau_group.max() < 1e-300:
+                    continue
                 
-                # Apply curve-of-growth to total blended optical depth (in-place)
-                tau_exp = tau_total[:, np.newaxis] * exp_neg_x_squared
-                np.negative(tau_exp, out=tau_exp)
-                np.expm1(tau_exp, out=tau_exp)
-                np.negative(tau_exp, out=tau_exp)
-                fint_total = tau_exp @ weights  # (n_cond,)
+                freq_group = frequencies[overlapping_indices]
+                freq_group_mean = freq_group.mean()
                 
-                # Calculate fractional contributions and apply in one step
-                # Combine: (fint_total / tau_total)[:, np.newaxis] * tau_group
-                scale = fint_total / tau_total  # (n_cond,)
-                fint_lines = scale[:, np.newaxis] * tau_group  # (n_cond, n_overlap)
-                
-                # Apply physical factors
-                intensity[:, overlapping_indices] = physical_factors[:, overlapping_indices] * fint_lines
+                for ic in range(n_cond):
+                    tg = tau_group[ic]
+                    
+                    if tg.max() < 1e-300:
+                        continue
+                    
+                    # tau_0-weighted reference frequency
+                    tau_sum_ic = tg.sum()
+                    if tau_sum_ic > 1e-300:
+                        freq_ref_ic = np.dot(tg, freq_group) / tau_sum_ic
+                    else:
+                        freq_ref_ic = freq_group_mean
+                    
+                    dv_kms_ic = (freq_group - freq_ref_ic) * (c.SPEED_OF_LIGHT_KMS / freq_ref_ic)
+                    delta_x_ic = (dv_kms_ic / dv_cond[ic]) * two_sqrt_ln2
+                    
+                    # Weak-blend early exit
+                    if np.max(np.abs(delta_x_ic)) > weak_blend_thresh:
+                        sorted_dx = np.sort(delta_x_ic)
+                        max_neighbor_sep = np.max(np.diff(sorted_dx)) if len(sorted_dx) > 1 else 0.0
+                        if max_neighbor_sep > 2.0 * weak_blend_thresh:
+                            tau_exp_ic = tg[:, np.newaxis] * exp_neg_x_squared
+                            np.negative(tau_exp_ic, out=tau_exp_ic)
+                            np.expm1(tau_exp_ic, out=tau_exp_ic)
+                            np.negative(tau_exp_ic, out=tau_exp_ic)
+                            fint_ic = tau_exp_ic @ weights
+                            physical_factors[ic, overlapping_indices] *= fint_ic
+                            continue
+                    
+                    # Full overlap quadrature (in-place shifted_x -> gp)
+                    gp = x_quad[:, np.newaxis] - delta_x_ic[np.newaxis, :]
+                    np.multiply(gp, gp, out=gp)
+                    np.negative(gp, out=gp)
+                    np.exp(gp, out=gp)
+                    tau_at_quad_ic = gp @ tg
+                    
+                    if tau_at_quad_ic.max() < tau_thin_thresh:
+                        fint_ic = (gp.T @ weights) * tg
+                        physical_factors[ic, overlapping_indices] *= fint_ic
+                        continue
+                    
+                    # Curve-of-growth in-place
+                    cog_mask_ic = tau_at_quad_ic > 1e-300
+                    integrand_ic = np.negative(tau_at_quad_ic)
+                    np.expm1(integrand_ic, out=integrand_ic)
+                    np.negative(integrand_ic, out=integrand_ic)  # 1 - exp(-tau)
+                    cog_over_tau_ic = np.where(cog_mask_ic,
+                                              integrand_ic / np.where(cog_mask_ic, tau_at_quad_ic, 1.0), 0.0)
+                    # Reuse gp array for weighted sum
+                    gp *= (cog_over_tau_ic * weights)[:, np.newaxis]
+                    fint_ic = gp.sum(axis=0)
+                    fint_ic *= tg
+                    physical_factors[ic, overlapping_indices] *= fint_ic
 
-        return intensity
+        return physical_factors
+
+    def _cog_with_tau_shortcuts(self, center_tau: np.ndarray,
+                                exp_neg_x_squared: np.ndarray,
+                                weights: np.ndarray) -> np.ndarray:
+        """Curve-of-growth integration with thin-regime shortcut for isolated lines.
+        
+        Partitions lines into two regimes:
+        - Thin (tau_0 < 0.01): F(tau_0) ~ tau_0 * Sum_k w_k exp(-x_k^2)  (linear, no exp needed)
+        - Normal: full Gauss-Hermite quadrature (exact for all tau_0)
+        
+        Parameters
+        ----------
+        center_tau : np.ndarray, shape (n_cond, n_lines)
+            Line center optical depths
+        exp_neg_x_squared : np.ndarray, shape (n_quad,)
+            Pre-computed exp(-x_k^2) at quadrature points
+        weights : np.ndarray, shape (n_quad,)
+            Quadrature weights
+            
+        Returns
+        -------
+        np.ndarray, shape (n_cond, n_lines)
+            Curve-of-growth integral values F(tau_0)
+        """
+        cls = self.__class__
+        n_cond, n_lines = center_tau.shape
+        sqrt_pi_sum = cls._GAUSS_QUAD_SQRT_PI_SUM  # ~ sqrt(pi) from quadrature initialization
+        tau_thin = cls._TAU_THIN
+        
+        # Find max tau across all conditions for each line to classify regime
+        tau_max = np.max(center_tau, axis=0) if n_cond > 1 else center_tau[0]
+        
+        # Fast path: all lines optically thin
+        all_thin = tau_max.max() < tau_thin if tau_max.size > 0 else False
+        
+        if all_thin:
+            # All lines optically thin: F(tau_0) ~= tau_0 * sqrt_pi_sum
+            return center_tau * sqrt_pi_sum
+        
+        # Fast path: no lines are thin -- full quadrature for all
+        all_normal = tau_max.min() >= tau_thin if tau_max.size > 0 else True
+        
+        if all_normal:
+            tau_exp = center_tau[:, :, np.newaxis] * exp_neg_x_squared
+            np.negative(tau_exp, out=tau_exp)
+            np.expm1(tau_exp, out=tau_exp)
+            np.negative(tau_exp, out=tau_exp)
+            return tau_exp @ weights
+        
+        # Mixed: some thin, some normal
+        fint_vals = np.empty_like(center_tau)
+        
+        thin_mask = tau_max < tau_thin
+        normal_mask = ~thin_mask
+        
+        # Thin regime: F ~ tau_0 * sqrt_pi_sum
+        if np.any(thin_mask):
+            fint_vals[:, thin_mask] = center_tau[:, thin_mask] * sqrt_pi_sum
+        
+        # Normal regime: full quadrature (handles all tau_0 values exactly)
+        if np.any(normal_mask):
+            tau_normal = center_tau[:, normal_mask]
+            tau_exp = tau_normal[:, :, np.newaxis] * exp_neg_x_squared
+            np.negative(tau_exp, out=tau_exp)
+            np.expm1(tau_exp, out=tau_exp)
+            np.negative(tau_exp, out=tau_exp)
+            fint_vals[:, normal_mask] = tau_exp @ weights
+        
+        return fint_vals
 
     def _calc_intensity_core(self, t_kin_vals: np.ndarray, n_mol_vals: np.ndarray, 
                             dv_vals: np.ndarray, method: str = "curve_growth") -> tuple:
@@ -503,7 +719,7 @@ class Intensity:
             line_term = cls._C3_OVER_8PI / freq_cubed                     # (n_lines,)
             self._cached_line_scalar = line_term * lines.g_up * lines.a_stein
             self._cached_e_delta = lines.e_up - lines.e_low
-            self._cached_freq_cubed = freq_cubed
+            self._cached_freq_ratio = (lines.freq / c.SPEED_OF_LIGHT_CGS)[np.newaxis, :]
         
         line_scalar = self._cached_line_scalar
         e_delta = self._cached_e_delta
@@ -511,7 +727,6 @@ class Intensity:
         # --- Fewer exponentials for Boltzmann difference ---
         # Replace einsum with direct outer product broadcasting (faster for 2D)
         n_cond = len(invT)
-        n_lines = len(lines.freq)
         
         # E_low = invT[:, np.newaxis] * lines.e_low[np.newaxis, :]
         # Use np.outer for single condition, broadcasting for multiple
@@ -535,35 +750,19 @@ class Intensity:
             center_tau = (cond_scalar[:, np.newaxis] * boltz_diff) * line_scalar
         
         # Blackbody calculation - vectorized for all temperatures at once
-        bb_vals = self._bb(lines.freq[:], t_kin_flat[:])
+        bb_vals = self._bb(lines.freq, t_kin_flat)
         
-        # Blackbody and frequency ratio calculations
-        freq_ratio = lines.freq[np.newaxis, :] / c.SPEED_OF_LIGHT_CGS
+        # Use cached frequency ratio (computed once per Intensity instance)
+        freq_ratio = self._cached_freq_ratio
         
         # Use pre-computed constant
         sqrt_ln2_inv = cls._SQRT_LN2_INV
         
-        if method == "radex":
-            intensity = (c.FGAUSS_PREFACTOR * 1e5 * dv_flat[:, np.newaxis] * 
-                                freq_ratio * bb_vals * (-np.expm1(-center_tau)))
-        elif method == "curve_growth":
-            intensity = self._fint_multi(center_tau, dv_flat, 
-                                      bb_vals, freq_ratio, sqrt_ln2_inv, lines.freq)
-        elif method == "curve_growth_no_overlap":
-            # Replicate the old curve_growth method without overlap treatment
-            # Initialize quadrature if needed
-            cls = self.__class__
-            if not cls._GAUSS_QUAD_INITIALIZED:
-                cls._initialize_gauss_quad()
-            
-            # Calculate fint using the old method (pre-computed exp(-x^2) values)
-            original_shape = center_tau.shape
-            tau_flat = center_tau.ravel()
-            integrand = 1.0 - np.exp(-tau_flat[:, np.newaxis] * cls._GAUSS_QUAD_EXP[np.newaxis, :])
-            fint_vals = np.dot(integrand, cls._GAUSS_QUAD_W).reshape(original_shape)
-            
-            # Calculate intensity using the old formula
-            intensity = sqrt_ln2_inv * 1e5 * dv_flat[:, np.newaxis] * freq_ratio * bb_vals * fint_vals
+        # Dispatch to the registered strategy for the requested method
+        strategy = self._get_strategy(method)
+        intensity = strategy.calculate(
+            self, center_tau, dv_flat, bb_vals, freq_ratio, sqrt_ln2_inv, lines.freq
+        )
         
         if not was_scalar:
             intensity = intensity.reshape(output_shape + (len(lines.freq),))
@@ -661,6 +860,8 @@ class Intensity:
     def invalidate_cache(self) -> None:
         """Invalidate the calculation cache, forcing recalculation on next call."""
         self._cache_valid = False
+        self._intensity = None
+        self._tau = None
 
     def bulk_parameter_update_vectorized(self, parameter_combinations: list, method: Literal["curve_growth", "radex", "curve_growth_no_overlap"] = "curve_growth") -> np.ndarray:
         """Update multiple parameter combinations and calculate intensities in a vectorized manner.
@@ -689,28 +890,26 @@ class Intensity:
         intensity, _ = self._calc_intensity_core(t_kin_vals, n_mol_vals, dv_vals, method)
         return intensity
 
-    def get_table_in_range(self, lam_min: float, lam_max: float) -> Any:
-        """Get a table with the lines in the specified wavelength range.
+    def get_table_in_range(self, lam_min: float, lam_max: float) -> "pandas.DataFrame":
+        """Get a table of lines within a specific wavelength window.
+
+        Convenience alias for ``build_table(wavelength_range=(lam_min, lam_max))``.
 
         Parameters
         ----------
-        lam_min: float
-            Minimum wavelength in microns
-        lam_max: float
-            Maximum wavelength in microns
+        lam_min : float
+            Minimum wavelength in microns.
+        lam_max : float
+            Maximum wavelength in microns.
 
         Returns
         -------
-        pd.DataFrame:
-            Dataframe with the lines in the specified range
+        pandas.DataFrame
+            DataFrame with line data and computed intensity/tau for
+            the requested sub-range.
         """
-        pd = _get_pandas()
-        if pd is None:
-            raise ImportError("Pandas required to create table")
+        return self.build_table(wavelength_range=(lam_min, lam_max))
 
-        mask = (self.molecule.lines_as_namedtuple.lam >= lam_min) & (self.molecule.lines_as_namedtuple.lam <= lam_max)
-        return self.get_table[mask]
-    
     def get_lines_in_range_with_intensity(self, lam_min: float, lam_max: float):
         """
         Get MoleculeLine objects in the specified wavelength range with computed intensity and tau values.
@@ -724,8 +923,8 @@ class Intensity:
             
         Returns
         -------
-        list
-            List of tuples (MoleculeLine, intensity, tau) within the range
+        list[tuple[MoleculeLine, float, float]]
+            List of ``(MoleculeLine, intensity, tau)`` tuples within the range.
         """
         # If no intensity calculated yet, return empty list
         if self._intensity is None or self._tau is None:
@@ -786,53 +985,680 @@ class Intensity:
         """float: Line width in km/s used for calculation"""
         return self._dv
 
+    # wavelength_range property provided by WavelengthRangeMixin
+
+    def _on_wavelength_range_changed(self, old, new):
+        """Hook called by WavelengthRangeMixin when wavelength_range changes."""
+        self._molecule.wavelength_range = new
+        self.invalidate_cache()
+        # Also invalidate pre-computed line constants since the set of lines changed
+        self._sorted_idx = None
+        self._sorted_freq = None
+        self._cached_line_scalar = None
+        self._cached_e_delta = None
+        self._cached_dv_star = None
+        self._cached_freq_ratio = None
+
     def __repr__(self) -> str:
         return f"Intensity(Mol-Name={self.molecule.name}, t_kin={self.t_kin} n_mol={self.n_mol} dv={self.dv}, " \
                f"tau={self.tau}, intensity={self.intensity})"
 
-    @property
-    def get_table(self) -> "pandas.DataFrame":
-        """pd.DataFrame: Pandas dataframe with line data"""
+    def build_table(
+        self,
+        *,
+        full_range: bool = False,
+        wavelength_range: Optional[tuple[float, float]] = None,
+    ) -> "pandas.DataFrame":
+        """Build a DataFrame of line data with computed intensity and tau.
+
+        By default returns only lines within the active wavelength range
+        (same behaviour as the legacy ``get_table`` property).  Use the
+        keyword arguments to widen or narrow the output.
+
+        Parameters
+        ----------
+        full_range : bool, optional
+            If ``True``, include all lines in the underlying HITRAN
+            file regardless of any wavelength filter on the
+            ``MoleculeLineList``.  Intensity and tau are computed for
+            every line using the current physical parameters.
+            Defaults to ``False`` (active wavelength range only).
+        wavelength_range : tuple[float, float], optional
+            ``(lam_min, lam_max)`` in microns.  When provided, the
+            returned table is filtered to this sub-window.
+            * If *full_range* is also ``True``, the sub-window is
+              applied to the full line list.
+            * If *full_range* is ``False``, the sub-window is applied
+              to the active (already-filtered) line list.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns: ``lev_up``, ``lev_low``, ``lam``, ``tau``,
+            ``intens``, ``a_stein``, ``e_up``, ``e_low``, ``g_up``,
+            ``g_low``.
+
+        Raises
+        ------
+        ImportError
+            If *pandas* is not installed.
+
+        Examples
+        --------
+        >>> # Active range only (default)
+        >>> df = intensity.build_table()
+
+        >>> # All lines in the HITRAN file with intensity computed for each
+        >>> df_full = intensity.build_table(full_range=True)
+
+        >>> # Narrow sub-window of the active range
+        >>> df_sub = intensity.build_table(wavelength_range=(4.9, 5.0))
+        """
         pd = _get_pandas()
         if pd is None:
             raise ImportError("Pandas required to create table")
 
-        # Use optimized approach with individual MoleculeLine objects for better performance
-        if hasattr(self.molecule, 'lines') and self.molecule.lines:
-            # Pre-calculate list comprehensions for better performance
-            tau_list = self.tau.tolist() if self.tau is not None else [None] * len(self.molecule.lines)
-            intens_list = self.intensity.tolist() if self.intensity is not None else [None] * len(self.molecule.lines)
-            
-            data_dict = {
-                'lev_up': [line.lev_up for line in self.molecule.lines],
-                'lev_low': [line.lev_low for line in self.molecule.lines],
-                'lam': [line.lam for line in self.molecule.lines],
-                'tau': tau_list,
-                'intens': intens_list,
-                'a_stein': [line.a_stein for line in self.molecule.lines],
-                'e_up': [line.e_up for line in self.molecule.lines],
-                'e_low': [line.e_low for line in self.molecule.lines],
-                'g_up': [line.g_up for line in self.molecule.lines],
-                'g_low': [line.g_low for line in self.molecule.lines]
-            }
-            return pd.DataFrame(data_dict)
+        df = self._build_table(pd, full_range=full_range)
 
-        # Fallback to namedtuple approach
-        lines = self.molecule.lines_as_namedtuple
+        # Apply optional wavelength sub-window
+        if wavelength_range is not None:
+            lam_min, lam_max = wavelength_range
+            mask = (df["lam"] >= lam_min) & (df["lam"] <= lam_max)
+            df = df.loc[mask].reset_index(drop=True)
+
+        return df
+
+    # ---- internal table builder -------------------------------------
+
+    # Column order used by all table-building paths
+    _TABLE_COLUMNS = ('lev_up', 'lev_low', 'lam', 'tau', 'intens',
+                      'a_stein', 'e_up', 'e_low', 'g_up', 'g_low')
+
+    def _build_table(self, pd, *, full_range: bool) -> "pandas.DataFrame":
+        """Unified table builder for both active-range and full-range modes.
+
+        Parameters
+        ----------
+        pd : module
+            The pandas module (already imported by caller).
+        full_range : bool
+            If ``True``, use all lines from the HITRAN file and
+            compute intensity and tau for every line, not just those
+            in the active wavelength window.  This reproduces the
+            behaviour from before wavelength-range filtering was
+            introduced.  If ``False``, use only the active lines.
+
+        Returns
+        -------
+        pandas.DataFrame
+        """
+        self.molecule._ensure_data_loaded()
+
+        if full_range:
+            raw = self.molecule._raw_lines_data
+        else:
+            raw = self.molecule._get_active_raw_data()
+
+        if raw is None or len(raw) == 0:
+            return pd.DataFrame(columns=list(self._TABLE_COLUMNS))
+
+        n_rows = len(raw)
+
+        # ---- intensity / tau mapping --------------------------------
+        if not full_range:
+            # Active range: computed arrays align 1-to-1 with *raw*
+            tau_col = self._tau if self._tau is not None else np.full(n_rows, np.nan)
+            intens_col = self._intensity if self._intensity is not None else np.full(n_rows, np.nan)
+        else:
+            # Full range: compute intensity for ALL lines so that the
+            # population diagram (and similar consumers) see the same
+            # data they did before wavelength-range filtering existed.
+            intens_col, tau_col = self._compute_full_range_intensity(raw)
+
         return pd.DataFrame({
-            'lev_up': lines.lev_up,
-            'lev_low': lines.lev_low,
-            'lam': lines.lam,
-            'tau': self.tau,
-            'intens': self.intensity,
-            'a_stein': lines.a_stein,
-            'e_up': lines.e_up,
-            'e_low': lines.e_low,
-            'g_up': lines.g_up,
-            'g_low': lines.g_low
+            'lev_up': raw['lev_up'],
+            'lev_low': raw['lev_low'],
+            'lam': raw['lam'],
+            'tau': tau_col,
+            'intens': intens_col,
+            'a_stein': raw['a_stein'],
+            'e_up': raw['e_up'],
+            'e_low': raw['e_low'],
+            'g_up': raw['g_up'].astype(int),
+            'g_low': raw['g_low'].astype(int),
         })
+
+    def _compute_full_range_intensity(self, raw) -> tuple:
+        """Compute intensity and tau for all lines in the HITRAN file.
+
+        Creates a temporary unfiltered MoleculeLineList and Intensity
+        object, then runs the standard calculation pipeline with the
+        same physical parameters (t_kin, n_mol, dv) stored on this
+        instance.  This avoids duplicating any calculation logic.
+
+        Parameters
+        ----------
+        raw : structured np.ndarray
+            The full ``_raw_lines_data`` array from the parent
+            MoleculeLineList.
+
+        Returns
+        -------
+        tuple of (np.ndarray, np.ndarray)
+            ``(intensity, tau)`` arrays with length ``len(raw)``.
+            Returns arrays filled with NaN if no parameters have
+            been set yet.
+        """
+        n_rows = len(raw)
+        if self._t_kin is None or self._n_mol is None or self._dv is None:
+            return np.full(n_rows, np.nan), np.full(n_rows, np.nan)
+
+        # Create a temporary unfiltered MoleculeLineList and Intensity
+        # so the full calculation pipeline runs over all lines.
+        from .MoleculeLineList import MoleculeLineList as _MLL
+        tmp_mll = _MLL(
+            molecule_id=self.molecule.molecule_id,
+            filename=self.molecule._filename,
+            wavelength_range=None,
+        )
+        tmp_intens = Intensity(tmp_mll, wavelength_range=None)
+        try:
+            tmp_intens.calc_intensity(
+                t_kin=self._t_kin,
+                n_mol=self._n_mol,
+                dv=self._dv,
+                method="curve_growth",
+            )
+            return (tmp_intens._intensity, tmp_intens._tau)
+        except Exception:
+            return np.full(n_rows, np.nan), np.full(n_rows, np.nan)
+
+    # ---- Batch evaluation API ------------------------------------
+
+    def prepare_batch_context(self, line_indices: Optional[np.ndarray] = None) -> dict:
+        """Pre-extract all line-level data into a flat dict for fast batch evaluation.
+
+        The returned context dict contains NumPy arrays that are
+        independent of the physical parameters (T, N, dv) and can be
+        reused across thousands of ``calc_intensity_batch_fast`` calls
+        without repeated attribute lookups.
+
+        Parameters
+        ----------
+        line_indices : np.ndarray, optional
+            If provided, only extract data for these line indices
+            (into the full molecule line list).  This allows overlap
+            grouping and all per-step computation to operate on the
+            reduced set of lines, dramatically cutting cost when many
+            weak lines have been filtered out.  The returned arrays
+            will have shape ``(len(line_indices),)`` and
+            ``ctx['line_indices']`` will be set to ``None`` (no further
+            slicing needed in ``calc_intensity_batch_fast``).
+
+        Returns
+        -------
+        dict
+            Keys:
+
+            * ``freq`` — line frequencies in Hz, shape ``(n_lines,)``
+            * ``e_up``, ``e_low`` — upper/lower energy levels
+            * ``e_delta`` — ``e_up - e_low``
+            * ``line_scalar`` — ``c^3 / (8 pi nu^3) * g_up * A``
+            * ``freq_ratio`` — ``nu / c``, shape ``(1, n_lines)``
+            * ``partition_t``, ``partition_q`` — partition function table
+            * ``x_quad``, ``w_quad``, ``exp_neg_x2`` — quadrature arrays
+            * ``sqrt_pi_sum`` — thin-regime constant
+            * ``overlap`` — ``None`` until ``prepare_overlap_structure`` is called
+        """
+        cls = self.__class__
+        if not cls._GAUSS_QUAD_INITIALIZED:
+            cls._initialize_gauss_quad()
+
+        m = self._molecule
+        lines = m.lines_as_namedtuple
+        partition = m.partition
+
+        # If line_indices provided, slice all line-level arrays to the subset
+        if line_indices is not None:
+            freq = np.ascontiguousarray(lines.freq[line_indices])
+            e_up = np.ascontiguousarray(lines.e_up[line_indices])
+            e_low_arr = np.ascontiguousarray(lines.e_low[line_indices])
+            g_up = lines.g_up[line_indices]
+            a_stein = lines.a_stein[line_indices]
+        else:
+            freq = np.ascontiguousarray(lines.freq)
+            e_up = np.ascontiguousarray(lines.e_up)
+            e_low_arr = np.ascontiguousarray(lines.e_low)
+            g_up = lines.g_up
+            a_stein = lines.a_stein
+
+        freq_cubed = freq ** 3
+        line_scalar = (cls._C3_OVER_8PI / freq_cubed) * g_up * a_stein
+        e_delta = e_up - e_low_arr
+        freq_ratio = (freq / c.SPEED_OF_LIGHT_CGS)[np.newaxis, :]
+
+        # Float32 line-level arrays (cast once, reused every batch step)
+        e_low_f32 = e_low_arr.astype(np.float32)
+        e_delta_f32 = e_delta.astype(np.float32)
+        line_scalar_f32 = line_scalar.astype(np.float32)
+        freq_ratio_f32 = freq_ratio.astype(np.float32)
+        freq_f32 = freq.astype(np.float32)
+
+        # Float32 quadrature arrays
+        x_quad_f32 = cls._GAUSS_QUAD_X.astype(np.float32)
+        w_quad_f32 = cls._GAUSS_QUAD_W.astype(np.float32)
+        exp_neg_x2_f32 = cls._GAUSS_QUAD_EXP.astype(np.float32)
+        sqrt_pi_sum_f32 = np.float32(cls._GAUSS_QUAD_SQRT_PI_SUM)
+        two_sqrt_ln2_f32 = np.float32(cls._TWO_SQRT_LN2)
+        tau_thin_f32 = np.float32(cls._TAU_THIN)
+
+        return {
+            'freq': freq,
+            'e_up': e_up,
+            'e_low': e_low_arr,
+            'e_delta': e_delta,
+            'line_scalar': line_scalar,
+            'freq_ratio': freq_ratio,
+            'partition_t': np.ascontiguousarray(partition.t),
+            'partition_q': np.ascontiguousarray(partition.q),
+            'x_quad': cls._GAUSS_QUAD_X,
+            'w_quad': cls._GAUSS_QUAD_W,
+            'exp_neg_x2': cls._GAUSS_QUAD_EXP,
+            'sqrt_pi_sum': cls._GAUSS_QUAD_SQRT_PI_SUM,
+            'overlap': None,
+            'n_lines': len(freq),
+            # Pre-cast float32 arrays
+            'e_low_f32': e_low_f32,
+            'e_delta_f32': e_delta_f32,
+            'line_scalar_f32': line_scalar_f32,
+            'freq_ratio_f32': freq_ratio_f32,
+            'freq_f32': freq_f32,
+            'x_quad_f32': x_quad_f32,
+            'w_quad_f32': w_quad_f32,
+            'exp_neg_x2_f32': exp_neg_x2_f32,
+            'sqrt_pi_sum_f32': sqrt_pi_sum_f32,
+            'two_sqrt_ln2_f32': two_sqrt_ln2_f32,
+            'tau_thin_f32': tau_thin_f32,
+            # When line_indices are baked in, no further slicing needed
+            'line_indices': None,
+        }
+
+    def prepare_overlap_structure(self, ctx: dict, dv: float) -> None:
+        """Pre-compute overlap grouping at a reference line width.
+
+        This populates ``ctx['overlap']`` with the group structure
+        needed by ``calc_intensity_batch_fast``.
+
+        Parameters
+        ----------
+        ctx : dict
+            Context dict returned by ``prepare_batch_context()``.
+        dv : float
+            Reference Doppler width in km/s used to determine which
+            lines overlap.
+        """
+        freq = ctx['freq']
+        n_lines = len(freq)
+
+        sort_idx = np.argsort(freq)
+        sorted_freq = freq[sort_idx]
+
+        if n_lines <= 1:
+            ctx['overlap'] = {'all_isolated': True}
+            return
+
+        dv_star = (c.SPEED_OF_LIGHT_KMS
+                   * np.diff(sorted_freq)
+                   / np.maximum(sorted_freq[:-1], sorted_freq[1:]))
+
+        if np.all(dv < dv_star):
+            ctx['overlap'] = {'all_isolated': True}
+            return
+
+        # Cumsum-based group labeling (same logic as _fint_multi)
+        is_boundary = dv < dv_star
+        group_labels = np.empty(n_lines, dtype=np.int32)
+        group_labels[0] = 0
+        group_labels[1:] = np.cumsum(is_boundary)
+
+        group_counts = np.bincount(group_labels)
+        line_group_counts = group_counts[group_labels]
+
+        isolated_mask = line_group_counts == 1
+        blended_mask = ~isolated_mask
+
+        # Map back to original (unsorted) indices
+        isolated_orig = sort_idx[isolated_mask]
+        blended_sort_positions = np.where(blended_mask)[0]
+        blended_orig = sort_idx[blended_sort_positions]
+        blended_glabels = group_labels[blended_sort_positions]
+
+        unique_labels, group_starts = np.unique(blended_glabels, return_index=True)
+        group_ends = np.append(group_starts[1:], len(blended_orig))
+        group_sizes = group_ends - group_starts
+
+        # Build per-group index arrays
+        groups = []
+        for i in range(len(unique_labels)):
+            groups.append(blended_orig[group_starts[i]:group_ends[i]])
+
+        # Pre-compute size-bucketed arrays
+        # NOTE: freq_all is kept in float64 — float32 causes catastrophic
+        # precision loss in freq_ref / delta_x for large blended groups
+        # whose frequencies span ~2e13 Hz (only 7 sig figs in f32).
+        freq_f64 = ctx['freq']  # already float64
+        size_buckets = {}
+        unique_sizes = np.unique(group_sizes)
+        for target_size in unique_sizes:
+            sz = int(target_size)
+            gidx_list = [i for i, gs in enumerate(group_sizes) if gs == sz]
+            all_idx = np.empty((len(gidx_list), sz), dtype=np.intp)
+            for k, gi in enumerate(gidx_list):
+                all_idx[k] = groups[gi]
+            freq_bucket = freq_f64[all_idx]  # (n_grps, target_size) float64
+            size_buckets[sz] = {
+                'all_idx': all_idx,
+                'freq_all': freq_bucket,
+                'n_grps': len(gidx_list),
+            }
+
+        ctx['overlap'] = {
+            'all_isolated': False,
+            'sort_idx': sort_idx,
+            'dv_star': dv_star,
+            'isolated_indices': isolated_orig,
+            'n_isolated': int(isolated_mask.sum()),
+            'n_blended_lines': int(blended_mask.sum()),
+            'n_groups': len(groups),
+            'groups': groups,
+            'group_sizes': group_sizes,
+            'size_buckets': size_buckets,
+        }
+
+    def calc_intensity_batch_fast(self,
+                                  t_kin_array: np.ndarray,
+                                  n_mol_array: np.ndarray,
+                                  dv_array: np.ndarray,
+                                  ctx: dict) -> np.ndarray:
+        """Fast batch intensity calculation for batch fitting using pre-computed context.
+
+        Bypasses ``_fint_multi`` entirely, operating
+        directly on the pre-computed overlap structure from
+        ``prepare_overlap_structure`` to avoid re-sorting, re-grouping,
+        and per-condition Python loops.
+
+        All heavy computation is vectorized across walkers (conditions)
+        simultaneously using ``float32`` arithmetic to halve memory
+        bandwidth and improve cache utilisation.
+
+        Parameters
+        ----------
+        t_kin_array : np.ndarray, shape ``(n_walkers,)``
+            Kinetic temperatures in K.
+        n_mol_array : np.ndarray, shape ``(n_walkers,)``
+            Column densities in cm⁻².
+        dv_array : np.ndarray, shape ``(n_walkers,)``
+            Line widths in km/s.
+        ctx : dict
+            Pre-computed context from ``prepare_batch_context`` (with
+            overlap structure populated by ``prepare_overlap_structure``).
+
+        Returns
+        -------
+        np.ndarray, shape ``(n_walkers, n_lines)``
+            Line intensities for every walker and every line.
+        """
+        cls = self.__class__
+
+        # Unpack pre-computed arrays (float64 originals + cached float32)
+        freq = ctx['freq']
+        part_t = ctx['partition_t']
+        part_q = ctx['partition_q']
+        n_lines = ctx['n_lines']
+
+        # Use cached float32 arrays
+        e_low_f = ctx['e_low_f32']
+        e_delta_f = ctx['e_delta_f32']
+        line_scalar_f = ctx['line_scalar_f32']
+        freq_ratio_f = ctx['freq_ratio_f32']
+
+        t_kin_array = np.asarray(t_kin_array, dtype=np.float64)
+        n_mol_array = np.asarray(n_mol_array, dtype=np.float64)
+        dv_array = np.asarray(dv_array, dtype=np.float64)
+        n_cond = len(t_kin_array)
+
+        # --- Partition function interpolation ---
+        q_vals = np.interp(t_kin_array, part_t, part_q)
+        invT = 1.0 / t_kin_array
+
+        # --- Boltzmann + tau computation (float32 for batch speed) ---
+        cond_scalar = (n_mol_array * cls._INV_FGAUSS_1E5 / dv_array) / q_vals
+
+        invT_f = invT.astype(np.float32)
+        cond_scalar_f = cond_scalar.astype(np.float32)
+
+        if n_cond == 1:
+            e_low_scaled = np.exp(-invT_f[0] * e_low_f)
+            boltz_diff = e_low_scaled * (-np.expm1(-invT_f[0] * e_delta_f))
+            center_tau = (cond_scalar_f[0] * boltz_diff * line_scalar_f)[np.newaxis, :]
+        else:
+            E_low_2d = np.multiply.outer(invT_f, e_low_f)
+            E_delta_2d = np.multiply.outer(invT_f, e_delta_f)
+            exp_low_2d = np.exp(-E_low_2d)
+            boltz_diff = exp_low_2d * (-np.expm1(-E_delta_2d))
+            center_tau = (cond_scalar_f[:, np.newaxis] * boltz_diff) * line_scalar_f
+
+        # --- Blackbody (kept in float64 for numerical safety, cast after) ---
+        bb_vals = self._bb(freq, t_kin_array).astype(np.float32)
+
+        # --- Physical factors: (freq_ratio * bb) * sqrt_ln2_inv * 1e5 * dv ---
+        physical_factors = np.empty((n_cond, n_lines), dtype=np.float32)
+        np.multiply(freq_ratio_f, bb_vals, out=physical_factors)
+        physical_factors *= np.float32(cls._SQRT_LN2_INV * 1e5)
+        dv_f = dv_array.astype(np.float32)
+        physical_factors *= dv_f[:, np.newaxis]
+
+        # --- Quadrature arrays (pre-cast in prepare_batch_context) ---
+        exp_neg_x2 = ctx['exp_neg_x2_f32']
+        weights = ctx['w_quad_f32']
+        sqrt_pi_sum = ctx['sqrt_pi_sum_f32']
+        x_quad = ctx['x_quad_f32']
+        two_sqrt_ln2 = ctx['two_sqrt_ln2_f32']
+        tau_thin = ctx['tau_thin_f32']
+
+        # ===============================================================
+        # Use pre-computed overlap structure — NO re-sorting / re-grouping
+        # ===============================================================
+        overlap = ctx.get('overlap')
+        all_isolated = (overlap is None or overlap.get('all_isolated', True))
+
+        if all_isolated:
+            # --- Fast path: every line is isolated ---
+            fint = self._cog_batch_f32(center_tau, exp_neg_x2, weights,
+                                       sqrt_pi_sum, tau_thin)
+            np.multiply(physical_factors, fint, out=physical_factors)
+            return physical_factors
+
+        # --- Mixed: isolated lines + blended groups ---
+        isolated_idx = overlap['isolated_indices']  # original-order indices
+        groups = overlap['groups']                  # list of index arrays
+
+        # Process isolated lines (vectorized across all conditions)
+        if len(isolated_idx) > 0:
+            tau_iso = center_tau[:, isolated_idx]
+            fint_iso = self._cog_batch_f32(tau_iso, exp_neg_x2, weights,
+                                           sqrt_pi_sum, tau_thin)
+            physical_factors[:, isolated_idx] *= fint_iso
+
+        # --- Process blended groups fully vectorized across conditions ---
+        # Use pre-computed size buckets
+        size_buckets = overlap['size_buckets']
+
+        for target_size, bucket in size_buckets.items():
+            n_grps = bucket['n_grps']
+            all_idx = bucket['all_idx']      # (n_grps, target_size)
+            freq_all = bucket['freq_all']    # (n_grps, target_size)
+
+            # Gather arrays for all groups and ALL conditions at once
+            # tau_all: (n_cond, n_grps, target_size)
+            tau_all = center_tau[:, all_idx.ravel()].reshape(
+                n_cond, n_grps, target_size)
+
+            # Skip groups that are negligible across ALL conditions
+            tau_max_per_group = tau_all.max(axis=(0, 2))  # (n_grps,)
+            active = tau_max_per_group > 1e-30
+            if not np.any(active):
+                continue
+
+            tau_a = tau_all[:, active]          # (n_cond, n_active, sz)
+            freq_a = freq_all[active]           # (n_active, sz)
+            idx_a = all_idx[active]             # (n_active, sz)
+            n_active = idx_a.shape[0]
+
+            # tau-weighted reference frequency per condition per group
+            # Computed in float64 to avoid catastrophic precision loss
+            # when freq ~ 2e13 Hz (only 7 sig figs in f32).
+            tau_a_f64 = tau_a.astype(np.float64)
+            tau_sums = tau_a_f64.sum(axis=2)  # (n_cond, n_active)
+            safe_sums = np.where(tau_sums > 1e-300, tau_sums, 1.0)
+            # freq_a is now float64 (stored that way in prepare_overlap_structure)
+            freq_refs = (tau_a_f64 * freq_a[np.newaxis, :, :]).sum(axis=2) / safe_sums
+
+            # Velocity offsets in x-units: (n_cond, n_active, sz) — float64
+            safe_freq_refs = np.where(freq_refs > 0, freq_refs, 1.0)
+            dv_kms = ((freq_a[np.newaxis, :, :] - freq_refs[:, :, np.newaxis])
+                      * (c.SPEED_OF_LIGHT_KMS / safe_freq_refs[:, :, np.newaxis]))
+            delta_x = dv_kms * (float(two_sqrt_ln2) / dv_array[:, np.newaxis, np.newaxis])
+
+            # Shifted Gaussian profiles: (n_quad, n_cond, n_active, sz)
+            # Computed in float64 then cast to f32 for the quadrature dot products.
+            shifted = (x_quad.astype(np.float64)[:, np.newaxis, np.newaxis, np.newaxis]
+                       - delta_x[np.newaxis, :, :, :])
+            np.multiply(shifted, shifted, out=shifted)
+            np.negative(shifted, out=shifted)
+            np.exp(shifted, out=shifted)
+            shifted = shifted.astype(np.float32)  # back to f32 for speed
+
+            # Total tau at each quad point: (n_quad, n_cond, n_active)
+            # Reshaped matmul replaces einsum for speed:
+            # shifted: (n_quad, n_cond, n_active, sz) → (n_quad*n_cond*n_active, sz)
+            # tau_a:   (n_cond, n_active, sz)         → (n_cond*n_active, sz, 1) broadcast
+            n_quad = shifted.shape[0]
+            # Reshape to (n_quad, n_cond*n_active, sz) @ (n_cond*n_active, sz, 1)
+            shifted_2d = shifted.reshape(n_quad, n_cond * n_active, target_size)
+            tau_a_flat = tau_a.reshape(n_cond * n_active, target_size)
+            # Batched dot via element-wise multiply + sum (avoids 4D einsum overhead)
+            tau_at_quad = (shifted_2d * tau_a_flat[np.newaxis, :, :]).sum(axis=2)
+            tau_at_quad = tau_at_quad.reshape(n_quad, n_cond, n_active)
+
+            # Curve-of-growth: 1 - exp(-tau_tot)
+            cog_mask = tau_at_quad > 1e-30
+            integrand = np.empty_like(tau_at_quad)
+            np.negative(tau_at_quad, out=integrand)
+            np.expm1(integrand, out=integrand)
+            np.negative(integrand, out=integrand)
+            cog_over_tau = np.where(
+                cog_mask,
+                integrand / np.where(cog_mask, tau_at_quad, np.float32(1.0)),
+                np.float32(0.0))
+
+            # Distribute intensity proportionally
+            # gp * (cog/tau * w): (n_quad, n_cond, n_active, sz)
+            shifted *= (cog_over_tau * weights[:, np.newaxis, np.newaxis])[:, :, :, np.newaxis]
+            fint = shifted.sum(axis=0)  # (n_cond, n_active, sz)
+            fint *= tau_a
+
+            # Scatter back into physical_factors
+            # idx_a is (n_active, sz) — scatter across all conditions
+            idx_flat = idx_a.ravel()  # (n_active * sz,)
+            fint_flat = fint.reshape(n_cond, -1)  # (n_cond, n_active * sz)
+            physical_factors[:, idx_flat] *= fint_flat
+
+        # --- Optional pre-slicing: return only lines in fitting range ---
+        cached_idx = ctx.get('line_indices')
+        if cached_idx is not None:
+            return physical_factors[:, cached_idx]
+
+        return physical_factors
+
+    @staticmethod
+    def _cog_batch_f32(center_tau: np.ndarray,
+                       exp_neg_x2: np.ndarray,
+                       weights: np.ndarray,
+                       sqrt_pi_sum: np.float32,
+                       tau_thin: np.float32) -> np.ndarray:
+        """Curve-of-growth integration in float32 for isolated lines.
+
+        Mirrors ``_cog_with_tau_shortcuts`` but operates entirely in
+        ``float32`` and is a static method (no instance lookups).
+
+        Parameters
+        ----------
+        center_tau : (n_cond, n_lines) float32
+        exp_neg_x2 : (n_quad,) float32
+        weights : (n_quad,) float32
+        sqrt_pi_sum : float32
+        tau_thin : float32
+
+        Returns
+        -------
+        (n_cond, n_lines) float32
+        """
+        n_cond = center_tau.shape[0]
+        tau_max = np.max(center_tau, axis=0) if n_cond > 1 else center_tau[0]
+
+        tmax_global = tau_max.max() if tau_max.size > 0 else np.float32(0.0)
+
+        # All optically thin
+        if tmax_global < tau_thin:
+            return center_tau * sqrt_pi_sum
+
+        # All normal (no thin lines)
+        tmin_global = tau_max.min() if tau_max.size > 0 else np.float32(1.0)
+        if tmin_global >= tau_thin:
+            tau_exp = center_tau[:, :, np.newaxis] * exp_neg_x2
+            np.negative(tau_exp, out=tau_exp)
+            np.expm1(tau_exp, out=tau_exp)
+            np.negative(tau_exp, out=tau_exp)
+            return tau_exp @ weights
+
+        # Mixed
+        fint = np.empty_like(center_tau)
+        thin_mask = tau_max < tau_thin
+        normal_mask = ~thin_mask
+
+        if np.any(thin_mask):
+            fint[:, thin_mask] = center_tau[:, thin_mask] * sqrt_pi_sum
+
+        if np.any(normal_mask):
+            tau_n = center_tau[:, normal_mask]
+            tau_exp = tau_n[:, :, np.newaxis] * exp_neg_x2
+            np.negative(tau_exp, out=tau_exp)
+            np.expm1(tau_exp, out=tau_exp)
+            np.negative(tau_exp, out=tau_exp)
+            fint[:, normal_mask] = tau_exp @ weights
+
+        return fint
+
+    # ---- backward-compatible aliases --------------------------------
+
+    @property
+    def get_table(self) -> "pandas.DataFrame":
+        """pd.DataFrame: Line data for the active wavelength range.
+
+        .. deprecated::
+            Prefer ``build_table()`` which accepts ``full_range`` and
+            ``wavelength_range`` keyword arguments.  This property is
+            kept for backward compatibility.
+        """
+        return self.build_table()
+
+    @property
+    def table(self) -> "pandas.DataFrame":
+        """Alias for ``build_table()`` (active range only)."""
+        return self.build_table()
 
     def _repr_html_(self) -> Optional[str]:
         # noinspection PyProtectedMember
         pd = _get_pandas()
-        return self.get_table._repr_html_() if pd is not None else None
+        return self.build_table()._repr_html_() if pd is not None else None

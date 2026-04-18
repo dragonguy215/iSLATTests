@@ -3,8 +3,6 @@ from typing import (
     Iterator, ItemsView, ValuesView, overload,
 )
 import numpy as np
-import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import time
 import os
 
@@ -13,6 +11,7 @@ from iSLAT.Modules.Debug.PerformanceLogger import perf_log, log_timing, Performa
 
 from .Molecule import Molecule
 import iSLAT.Constants as default_parms
+from ._mixins import ObservableMixin
 
 def _ci_get(data: dict, key: str):
     """Look up *key* in *data* with a case-insensitive fallback.
@@ -66,7 +65,7 @@ def _safe_float(data: dict, key: Union[str, List[str]], default=None,
     except (ValueError, TypeError):
         return default
 
-class MoleculeDict(dict):
+class MoleculeDict(ObservableMixin, dict):
     """
     A dictionary to store Molecule objects with their names as keys.
     Provides efficient operations on collections of molecules with unified processing.
@@ -97,7 +96,7 @@ class MoleculeDict(dict):
         # Flag to enable matched spectral sampling (interpolate model to data wavelengths)
         self._match_spectral_sampling = False
         
-        self._global_parameter_change_callbacks: List[Callable] = []
+        self._init_callbacks()  # ObservableMixin: initialises self._callbacks
         self._suppress_global_callbacks: bool = False
         
         from .Molecule import Molecule
@@ -289,7 +288,11 @@ class MoleculeDict(dict):
                 continue
 
             molecule = self[mol_name]
-            molecule._wavelength_range = self._global_wavelength_range
+            # Safety: ensure molecule uses the global range.
+            # Use the property setter so dirty flags and sub-object
+            # propagation are handled by the mixin hook.
+            if molecule._wavelength_range != self._global_wavelength_range:
+                molecule.wavelength_range = self._global_wavelength_range
 
             try:
                 # Call get_flux the same way individual plotting does:
@@ -466,8 +469,8 @@ class MoleculeDict(dict):
             start = time.perf_counter()
             try:
                 molecule = self[mol_name]
-                # Set wavelength range
-                molecule._wavelength_range = self._global_wavelength_range
+                # Set wavelength range (propagates to line list)
+                molecule.wavelength_range = self._global_wavelength_range
                 # Trigger lazy calculation
                 molecule._ensure_intensity_calculated()
                 elapsed = time.perf_counter() - start
@@ -477,6 +480,7 @@ class MoleculeDict(dict):
                 return (mol_name, False, elapsed, str(e))
         
         # Execute in parallel
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(calculate_single_molecule, name): name 
                       for name in valid_molecules}
@@ -580,7 +584,9 @@ class MoleculeDict(dict):
                 return (mol_name, None, None, 0.0)
 
             molecule = self[mol_name]
-            molecule._wavelength_range = self._global_wavelength_range
+            # Safety: ensure molecule uses the global range.
+            if molecule._wavelength_range != self._global_wavelength_range:
+                molecule.wavelength_range = self._global_wavelength_range
 
             try:
                 mol_wavelengths, mol_flux = molecule.get_flux(
@@ -601,7 +607,8 @@ class MoleculeDict(dict):
             flux_workers = min(os.cpu_count() or 4, 6, len(molecules))
         else:
             flux_workers = max_workers
-
+        
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         with ThreadPoolExecutor(max_workers=flux_workers) as executor:
             futures = {executor.submit(get_molecule_flux, name): name for name in molecules}
 
@@ -678,8 +685,10 @@ class MoleculeDict(dict):
             return {'success': 0, 'failed': 0, 'molecules': [], 'errors': []}
         
         # Auto-detect parallel processing
+        # ThreadPoolExecutor is counterproductive for CPU-bound numpy work
+        # due to GIL contention. Default to sequential unless explicitly enabled.
         if use_parallel is None:
-            use_parallel = len(valid_molecules) >= 3
+            use_parallel = False
         
         # Apply parameter overrides if provided - use bulk update for efficiency
         if 'parameter_overrides' in kwargs and kwargs['parameter_overrides'] is not None:
@@ -737,6 +746,8 @@ class MoleculeDict(dict):
     def _process_molecules_parallel(self, operation: str, molecule_names: List[str], 
                                    max_workers: Optional[int] = None, **kwargs) -> Dict[str, Any]:
         """Process molecules in parallel."""
+        import multiprocessing as mp
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         if max_workers is None:
             max_workers = min(len(molecule_names), mp.cpu_count())
         
@@ -971,6 +982,8 @@ class MoleculeDict(dict):
                                 initial_molecule_parameters: Dict[str, Dict[str, Any]],
                                 max_workers: Optional[int] = None) -> Dict[str, Any]:
         """Load molecules in parallel using multiprocessing."""
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor, as_completed
         if max_workers is None:
             max_workers = min(len(molecules_data), mp.cpu_count())
         
@@ -1034,6 +1047,8 @@ class MoleculeDict(dict):
             molecule = Molecule(
                 user_save_data=mol_data if use_user_save_data else None,
                 hitran_data=mol_data.get("hitran_data"),
+                line_data_source=mol_data.get("line_data_source"),
+                line_format=mol_data.get("line_format"),
                 name=mol_name,
                 filepath=mol_data.get("file") or mol_data.get("File Path"),
                 displaylabel=mol_data.get("displaylabel") or mol_data.get("label") or mol_data.get("Molecule Label", mol_name),
@@ -1346,6 +1361,8 @@ class MoleculeDict(dict):
             molecule = Molecule(
                 user_save_data=mol_data if "Molecule Name" in mol_data else None,
                 hitran_data=mol_data.get("hitran_data"),
+                line_data_source=mol_data.get("line_data_source"),
+                line_format=mol_data.get("line_format"),
                 name=mol_name,
                 filepath=mol_data.get("file") or mol_data.get("File Path"),
                 displaylabel=mol_data.get("label") or mol_data.get("Molecule Label", mol_name),
@@ -1377,7 +1394,9 @@ class MoleculeDict(dict):
         # Estimate workload based on file sizes
         total_estimated_lines = 0
         for mol_data in molecules_data:
-            file_path = mol_data.get("hitran_data") or mol_data.get("File Path")
+            file_path = (mol_data.get("line_data_source")
+                         or mol_data.get("hitran_data")
+                         or mol_data.get("File Path"))
             if file_path and os.path.exists(file_path):
                 try:
                     file_size = os.path.getsize(file_path)
@@ -1388,15 +1407,15 @@ class MoleculeDict(dict):
         return total_estimated_lines > 100000 and num_molecules > 3
     
     # Global parameter management
+    # add_callback / remove_callback provided by ObservableMixin
+    # Backward-compatible aliases:
     def add_global_parameter_change_callback(self, callback: Callable) -> None:
         """Add a callback for global parameter changes."""
-        if callback not in self._global_parameter_change_callbacks:
-            self._global_parameter_change_callbacks.append(callback)
+        self.add_callback(callback)
     
     def remove_global_parameter_change_callback(self, callback: Callable) -> None:
         """Remove a callback for global parameter changes."""
-        if callback in self._global_parameter_change_callbacks:
-            self._global_parameter_change_callbacks.remove(callback)
+        self.remove_callback(callback)
 
     def _notify_global_parameter_change(self, parameter_name: str, old_value: Any, new_value: Any) -> None:
         """Notify callbacks of global parameter changes.
@@ -1407,11 +1426,7 @@ class MoleculeDict(dict):
         """
         if self._suppress_global_callbacks:
             return
-        for callback in self._global_parameter_change_callbacks:
-            try:
-                callback(parameter_name, old_value, new_value)
-            except Exception as e:
-                print(f"Error in global parameter change callback: {e}")
+        self.notify_callbacks(parameter_name, old_value, new_value)
 
     # Simplified global parameter properties
     @property
@@ -1434,13 +1449,21 @@ class MoleculeDict(dict):
         old_value = self._global_wavelength_range
         if value != old_value:
             self._global_wavelength_range = value
-            # Update all molecules to use new range
+            # Propagate to every molecule *without* firing per-molecule
+            # class callbacks (which would trigger intermediate plot
+            # refreshes before all molecules are consistent).  The lazy
+            # _ensure_*_calculated() methods inside Molecule.get_flux()
+            # will pick up the new _wavelength_range and propagate it to
+            # the MoleculeLineList / Intensity objects on next access.
             for molecule in self.values():
-                molecule._wavelength_range = value
-                if hasattr(molecule, '_dirty_flags'):
+                if molecule._wavelength_range != value:
+                    molecule._wavelength_range = value
+                    molecule._dirty_flags['intensity'] = True
                     molecule._dirty_flags['spectrum'] = True
+                    molecule._dirty_flags['flux'] = True
+                    molecule._flux_cache.clear()
             
-            self.bulk_update_parameters({'wavelength_range': value})
+            self._summed_flux_cache.clear()
             self._notify_global_parameter_change('wavelength_range', old_value, value)
     
     @property

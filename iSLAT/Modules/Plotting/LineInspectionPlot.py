@@ -13,16 +13,20 @@ import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from .BasePlot import BasePlot
+from .SpectralPanel import SpectralPanel
 
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
 
-class LineInspectionPlot(BasePlot):
+class LineInspectionPlot(SpectralPanel):
     """
     Plot a narrow wavelength region with observed data and molecule models.
+
+    Implements the :class:`SpectralPanel` abstract interface for a single
+    zoomed-in wavelength region with optional molecule model overlays and
+    individual line markers with energy / A-coefficient labels.
 
     Parameters
     ----------
@@ -58,7 +62,6 @@ class LineInspectionPlot(BasePlot):
         error_data: Optional[np.ndarray] = None,
         molecule: Optional["Molecule"] = None,
         molecules: Optional["MoleculeDict"] = None,
-        comparison_molecules: Optional[List["Molecule"]] = None,
         line_data: Optional[List[Tuple["MoleculeLine", float, Optional[float]]]] = None,
         line_threshold: float = 0.0,
         figsize: Optional[Tuple[float, float]] = None,
@@ -67,18 +70,20 @@ class LineInspectionPlot(BasePlot):
         render_all_visible: bool = True,
         **kwargs,
     ):
-        super().__init__(figsize=figsize or (10, 4), **kwargs)
-        self.wave_data = wave_data
-        self.flux_data = flux_data
-        self.xmin = xmin
-        self.xmax = xmax
-        self.error_data = error_data
+        super().__init__(
+            wave_data=wave_data,
+            flux_data=flux_data,
+            xmin=xmin,
+            xmax=xmax,
+            error_data=error_data,
+            molecules=molecules,
+            figsize=figsize or (10, 4),
+            ax=ax,
+            **kwargs,
+        )
         self.molecule = molecule
-        self.molecules = molecules
-        self.comparison_molecules: List["Molecule"] = comparison_molecules or []
         self.line_data = line_data
         self.line_threshold = line_threshold
-        self._external_ax = ax
         # When True (default), all visible molecules from *molecules* are
         # rendered.  When False, only *molecule* (singular) is rendered;
         # *molecules* is still used for matched-spectral-sampling queries.
@@ -91,25 +96,9 @@ class LineInspectionPlot(BasePlot):
         )
 
     # ------------------------------------------------------------------
-    @property
-    def ax(self) -> Axes:
-        """The axes used for this plot."""
-        return self._ax
-
-    # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:  # noqa: D401
         """Generate (or regenerate) the line inspection plot."""
-        # Resolve axes
-        if self._external_ax is not None:
-            self._ax = self._external_ax
-        else:
-            self._ensure_figure()
-            # Clear previous axes so regeneration doesn't stack on top
-            self.fig.clf()
-            self._ax = self.fig.add_subplot(111)
-
-        ax = self._ax
-        ax.clear()
+        ax = self._resolve_axes()
 
         fg = self._get_theme_value("foreground", "black")
 
@@ -149,21 +138,6 @@ class LineInspectionPlot(BasePlot):
             if mol_max is not None and len(obs_flux) == 0:
                 max_y = max(max_y, mol_max)
 
-        # -- comparison molecules (shift-click secondary selections) ----
-        if self.comparison_molecules:
-            for comp_mol in self.comparison_molecules:
-                # Skip the active molecule if it somehow ended up in the
-                # comparison list.
-                if self.molecule is not None and getattr(comp_mol, 'name', None) == getattr(self.molecule, 'name', None):
-                    continue
-                comp_max = self._overlay_molecule(
-                    ax, comp_mol, use_interp, target_wave,
-                    color_override=self._comparison_color(comp_mol),
-                    linestyle_override="-.",
-                )
-                if comp_max is not None and len(obs_flux) == 0:
-                    max_y = max(max_y, comp_max)
-
         # -- individual line markers ------------------------------------
         if self.line_data:
             max_y = self._plot_line_markers(ax, self.line_data, max_y)
@@ -190,17 +164,8 @@ class LineInspectionPlot(BasePlot):
         molecule: "Molecule",
         interpolate_to_input: bool = False,
         target_wavelengths: Optional[np.ndarray] = None,
-        color_override: Optional[str] = None,
-        linestyle_override: Optional[str] = None,
     ) -> Optional[float]:
         """Plot one molecule model in the inspection range.
-
-        Parameters
-        ----------
-        color_override : str, optional
-            If given, use this colour instead of the molecule's own colour.
-        linestyle_override : str, optional
-            If given, use this linestyle instead of the default ``"--"``.
 
         Returns the max flux value in the range, or *None* if nothing was plotted.
         """
@@ -228,31 +193,12 @@ class LineInspectionPlot(BasePlot):
         ax.plot(
             model_wave_range,
             model_flux_range,
-            color=color_override or self.get_molecule_color(molecule),
-            linestyle=linestyle_override or "--",
+            color=self.get_molecule_color(molecule),
+            linestyle="--",
             linewidth=2,
             label=self.get_molecule_display_name(molecule),
         )
         return float(np.nanmax(model_flux_range))
-
-    @staticmethod
-    def _comparison_color(molecule: "Molecule") -> str:
-        """Return a distinguishable colour for a comparison molecule.
-
-        Uses the molecule's own colour but lightened / desaturated so it
-        contrasts with the active molecule's full-saturation dashed line.
-        Falls back to a salmon colour when the molecule has no colour or
-        if colour manipulation fails.
-        """
-        import matplotlib.colors as mcolors
-        base = getattr(molecule, "color", None) or "blue"
-        try:
-            rgba = mcolors.to_rgba(base)
-            # Lighten: blend 50 % toward white
-            lightened = tuple(c + (1.0 - c) * 0.40 for c in rgba[:3]) + (rgba[3],)
-            return mcolors.to_hex(lightened)
-        except Exception:
-            return "#FA8072"  # salmon fallback
 
     def _plot_line_markers(
         self,
@@ -426,12 +372,3 @@ class LineInspectionPlot(BasePlot):
         if not df.empty:
             df = df.sort_values("wavelength_um", ignore_index=True)
         return df
-
-    # ------------------------------------------------------------------
-    # Convenience: update the wavelength range without rebuilding
-    # ------------------------------------------------------------------
-    def set_range(self, xmin: float, xmax: float) -> None:
-        """Change the inspection range and regenerate."""
-        self.xmin = xmin
-        self.xmax = xmax
-        self.generate_plot()

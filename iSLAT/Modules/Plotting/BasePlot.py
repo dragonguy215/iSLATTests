@@ -21,6 +21,12 @@ from matplotlib.lines import Line2D
 
 import iSLAT.Constants as c
 
+from iSLAT.Modules.Plotting.LegendStrategy import (
+    LegendStrategy,
+    MoleculeColorLegend,
+    StandardLegend,
+)
+
 # Import display config to ensure rcParams are set early and to access the savefig DPI default.
 try:
     from iSLAT.Modules.GUI.DisplayConfig import display_config as _display_config
@@ -31,7 +37,6 @@ if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
-
 
 def _detect_system_theme() -> str:
     """Return ``'DarkTheme'`` or ``'LightTheme'`` based on the OS appearance.
@@ -67,7 +72,6 @@ def _detect_system_theme() -> str:
             return "LightTheme"
     except Exception:
         return "LightTheme"
-
 
 # ---------------------------------------------------------------------------
 # Default theme (used when no GUI theme is supplied)
@@ -117,12 +121,16 @@ class BasePlot(ABC):
         figsize: Optional[Tuple[float, float]] = None,
         theme: Optional[Dict[str, Any]] = None,
         fig: Optional[MplFigure] = None,
+        legend_strategy: Optional[LegendStrategy] = None,
         **kwargs,
     ):
         self._figsize = figsize
         self.theme: Dict[str, Any] = theme if theme is not None else DEFAULT_THEME.copy()
         self.fig: Optional[MplFigure] = fig
         self._owns_figure = fig is None  # True when we create the figure ourselves
+        self.legend_strategy: LegendStrategy = (
+            legend_strategy if legend_strategy is not None else StandardLegend()
+        )
 
     # ------------------------------------------------------------------
     # Theme helpers
@@ -171,17 +179,8 @@ class BasePlot(ABC):
                     artist.set_facecolor(summed_color)
                     artist.set_edgecolor(summed_color)
 
-            # Theme the legend text if one exists
-            legend = ax.get_legend()
-            if legend is not None:
-                frame = legend.get_frame()
-                if legend.get_visible() and frame.get_visible():
-                    frame.set_facecolor(graph_bg)
-                    frame.set_edgecolor(fg)
-                for text in legend.get_texts():
-                    # Skip texts that carry per-molecule colour
-                    if not getattr(text, '_islat_mol_color', False):
-                        text.set_color(fg)
+            # Theme the legend via the strategy if one exists
+            self.legend_strategy.apply_theme(ax, self.theme)
 
     @staticmethod
     def load_theme(name: str = "auto") -> Dict[str, Any]:
@@ -235,9 +234,10 @@ class BasePlot(ABC):
         mol_labels: List[str],
         mol_colors: List[str],
         *,
-        ncols: int = 12,
+        ncols: Optional[int] = None,
         fontsize: int = 10,
-        bbox_to_anchor: Tuple[float, float] = (0.5, 1.4),
+        bbox_to_anchor: Tuple[float, float] = (0.5, 0.99),
+        use_figure_transform: bool = True,
     ) -> None:
         """Create (or replace) a text-only, per-molecule-coloured legend.
 
@@ -247,8 +247,18 @@ class BasePlot(ABC):
         :meth:`apply_theme_to_figure` will not overwrite them with the
         foreground colour.
 
+        When *ncols* is ``None`` (the default), the number of columns is
+        auto-computed so that the legend does not exceed the width of the
+        axes.  If the labels are long, items wrap into multiple rows.
+
         When *mol_labels* is empty the existing legend (if any) is
         removed and no new one is created.
+
+        Parameters
+        ----------
+        use_figure_transform : bool
+            When True (default), *bbox_to_anchor* is interpreted in
+            figure coordinates.  When False, it uses axes coordinates.
         """
         old = ax.get_legend()
         if old is not None:
@@ -258,7 +268,28 @@ class BasePlot(ABC):
             return
 
         from matplotlib.patches import Patch
+
+        # --- Auto-compute ncols to fit within the axes width ----------
+        if ncols is None:
+            fig = ax.get_figure()
+            fig_w_in = fig.get_figwidth()
+
+            # Estimate average label width in inches (approx 0.085 in
+            # per character at the given fontsize, scaled from 10pt base)
+            char_w_in = 0.085 * (fontsize / 10.0)
+            avg_label_w = sum(len(lbl) for lbl in mol_labels) / len(mol_labels)
+            col_w_in = avg_label_w * char_w_in + 0.3  # extra for padding
+
+            # Maximum columns that fit within the figure width
+            max_cols = max(int(fig_w_in / col_w_in), 1)
+            ncols = min(max_cols, len(mol_labels))
+
         handles = [Patch(facecolor='none', edgecolor='none') for _ in mol_colors]
+
+        # Place the legend centred on the full figure width, pinned
+        # near the top of the figure so it sits above all panels.
+        fig = ax.get_figure()
+        transform = fig.transFigure if use_figure_transform else ax.transAxes
         leg = ax.legend(
             handles,
             mol_labels,
@@ -267,6 +298,7 @@ class BasePlot(ABC):
             handlelength=0,
             handletextpad=0,
             bbox_to_anchor=bbox_to_anchor,
+            bbox_transform=transform,
             fontsize=fontsize,
             prop={"weight": "bold"},
             frameon=False,
@@ -326,11 +358,69 @@ class BasePlot(ABC):
             return None, None
 
     @staticmethod
-    def get_intensity_data(molecule: "Molecule") -> Optional[pd.DataFrame]:
+    def get_molecule_tau_data(
+        molecule: "Molecule",
+        wave_data: Optional[np.ndarray] = None,
+        interpolate_to_input: bool = False,
+        target_wavelengths: Optional[np.ndarray] = None,
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """Retrieve ``(wavelength, tau)`` from a *Molecule* object.
+
+        Mirrors :meth:`get_molecule_spectrum_data` but returns the
+        convolved optical-depth profile instead of flux.
+
+        Parameters
+        ----------
+        molecule : Molecule
+            The molecule to query.
+        wave_data : np.ndarray, optional
+            Wavelength array passed through to ``get_tau``.
+        interpolate_to_input : bool, default False
+            When True the model tau is resampled onto *target_wavelengths*
+            (or *wave_data* when *target_wavelengths* is None).
+        target_wavelengths : np.ndarray, optional
+            Rest-frame wavelength grid to interpolate onto.
         """
-        Return the Intensity table (DataFrame) from *molecule*.
+        if molecule is None:
+            return None, None
+        try:
+            interp_wave = target_wavelengths if target_wavelengths is not None else wave_data
+            lam, tau = molecule.get_tau(
+                wavelength_array=interp_wave,
+                return_wavelengths=True,
+                interpolate_to_input=interpolate_to_input,
+            )
+            if interpolate_to_input and target_wavelengths is not None and wave_data is not None:
+                lam = wave_data
+            return lam, tau
+        except Exception as exc:
+            print(f"[BasePlot] Could not get tau for "
+                  f"{BasePlot.get_molecule_display_name(molecule)}: {exc}")
+            return None, None
+
+    @staticmethod
+    def get_intensity_data(
+        molecule: "Molecule",
+        *,
+        full_range: bool = False,
+    ) -> Optional[pd.DataFrame]:
+        """Return the Intensity table (DataFrame) from *molecule*.
 
         Triggers calculation if needed.
+
+        Parameters
+        ----------
+        molecule : Molecule
+            Molecule object whose intensity data is requested.
+        full_range : bool, optional
+            If ``True``, return all lines in the underlying HITRAN
+            file with intensity computed for each.  Defaults to
+            ``False`` (active wavelength range only).
+
+        Returns
+        -------
+        Optional[pd.DataFrame]
+            Intensity table, or ``None`` when no data is available.
         """
         try:
             if molecule is None:
@@ -341,13 +431,20 @@ class BasePlot(ABC):
             intensity_obj = getattr(molecule, "intensity", None)
             if intensity_obj is None:
                 return None
-            table = getattr(intensity_obj, "get_table", None)
-            if table is not None:
+
+            # Prefer the new build_table() API when available
+            if hasattr(intensity_obj, "build_table"):
+                df = intensity_obj.build_table(full_range=full_range)
+            else:
+                # Fallback for older Intensity implementations
+                table = getattr(intensity_obj, "get_table", None)
+                if table is None:
+                    return None
                 df = table if isinstance(table, pd.DataFrame) else table
-                if hasattr(df, "index"):
-                    df.index = range(len(df.index))
-                return df
-            return None
+
+            if df is not None and hasattr(df, "index"):
+                df.index = range(len(df.index))
+            return df
         except Exception as exc:
             print(f"[BasePlot] Error getting intensity data: {exc}")
             return None
@@ -355,14 +452,47 @@ class BasePlot(ABC):
     # ------------------------------------------------------------------
     # Figure lifecycle helpers
     # ------------------------------------------------------------------
-    def _ensure_figure(self, **subplot_kw) -> MplFigure:
+    @staticmethod
+    def create_three_panel_axes(fig: MplFigure):
+        """Create the standard iSLAT 3-panel layout on *fig*.
+
+        Layout (GridSpec 2 by 2):
+            Row 0, spanning both columns : full spectrum overview
+            Row 1, left column           : line inspection zoom
+            Row 1, right column          : population / rotation diagram
+
+        Returns
+        -------
+        tuple[Axes, Axes, Axes]
+            ``(ax_spectrum, ax_inspection, ax_popdiagram)``
+        """
+        from matplotlib.gridspec import GridSpec
+        gs = GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1.5], figure=fig)
+        ax1 = fig.add_subplot(gs[0, :])
+        ax2 = fig.add_subplot(gs[1, 0])
+        ax3 = fig.add_subplot(gs[1, 1])
+        return ax1, ax2, ax3
+
+    def _ensure_figure(self, silent: bool = False, **subplot_kw) -> MplFigure:
         """Create the figure if it doesn't already exist.
 
-        Uses :class:`matplotlib.figure.Figure` directly (not
-        ``plt.figure()``) so the figure is **not** registered with the
-        pyplot state machine.  This prevents the TkAgg backend from
-        creating a hidden figure-manager window that would steal the
-        application's taskbar icon.
+        The figure is **always** created via
+        :class:`~matplotlib.figure.Figure` — it is *not* registered
+        with the pyplot state machine at creation time.  This prevents
+        "leaked" figure widgets in Jupyter notebooks when plot objects
+        are used as intermediate data sources (e.g. the two source
+        plots inside a :class:`CompositeStackedPanel`).
+
+        When the user calls :meth:`show`, the figure is registered
+        with pyplot **on demand** so that the active interactive
+        backend (ipympl ``%matplotlib widget``, inline, TkAgg, …)
+        can display it properly.
+
+        Parameters
+        ----------
+        silent : bool
+            Kept for backward compatibility.  Has no effect — all
+            figures are now created without pyplot registration.
         """
         if self.fig is None:
             kw: Dict[str, Any] = {"layout": "constrained"}
@@ -565,28 +695,15 @@ class BasePlot(ABC):
 
     @staticmethod
     def _update_legend(ax: Axes) -> None:
-        """Add or update the legend on *ax*, excluding invisible artists."""
-        handles, labels = ax.get_legend_handles_labels()
-        # Filter to only visible artists
-        visible_handles = []
-        visible_labels = []
-        for h, l in zip(handles, labels):
-            # ErrorbarContainer and similar containers don't have get_visible()
-            # directly — check the first child artist (the data line) instead.
-            try:
-                is_visible = h.get_visible()
-            except AttributeError:
-                is_visible = h[0].get_visible() if len(h) > 0 else True
-            if is_visible:
-                visible_handles.append(h)
-                visible_labels.append(l)
-        if visible_handles:
-            ncols = 2 if len(visible_handles) > 8 else 1
-            ax.legend(visible_handles, visible_labels, ncols=ncols)
-        else:
-            legend = ax.get_legend()
-            if legend is not None:
-                legend.remove()
+        """Add or update the legend on *ax*, excluding invisible artists.
+
+        This static method is kept for backward compatibility with
+        :class:`PlotRenderer` and other callers that invoke it directly.
+        It delegates to :class:`StandardLegend`.
+        """
+        _fallback = StandardLegend()
+        fig = ax.get_figure()
+        _fallback.build_legend(ax, fig, [], [])
 
     @staticmethod
     def _clear_tagged_artists(
@@ -846,33 +963,68 @@ class BasePlot(ABC):
     def show(self, block: bool = False) -> None:
         """Display the plot interactively.
 
-        In a Jupyter notebook the figure is rendered inline via
-        ``IPython.display.display``.  Outside of a notebook, the figure
-        is temporarily registered with pyplot so ``plt.show()`` can
-        display it in a window.
+        Figures are created without pyplot registration (see
+        :meth:`_ensure_figure`), so this method registers the figure
+        with pyplot **on demand** before displaying.  In a Jupyter
+        notebook this lets the active interactive backend (ipympl,
+        inline, …) create the proper widget or image.  Outside of a
+        notebook the figure is registered with the GUI backend so
+        ``plt.show()`` opens a window.
         """
         if self.fig is None:
             self.generate_plot()
 
+        # Register the figure with pyplot if it isn't already.
+        self._register_with_pyplot()
+
         if self._in_notebook():
-            try:
-                from IPython.display import display as ipy_display  # noqa: F811
-                ipy_display(self.fig)
-            except ImportError:
-                plt.show(block=block)
+            plt.show(block=block)
             return
 
-        # Non-notebook: register the figure with pyplot so plt.show()
-        # can display it in a GUI window.
+        # Non-notebook: plt.show() opens a GUI window.
+        plt.show(block=block)
+
+    def _register_with_pyplot(self) -> None:
+        """Ensure *self.fig* is known to pyplot's figure manager.
+
+        If the figure was created via :class:`MplFigure` (which is
+        always the case now), it has no ``number`` attribute and is
+        unknown to pyplot.  This method registers it so the active
+        backend (ipympl widget, inline, TkAgg, …) can display it.
+
+        Calling this more than once is safe — it's a no-op when the
+        figure is already registered.
+        """
+        if self.fig is None:
+            return
+
+        # Already registered?
+        try:
+            fig_num = self.fig.number
+        except AttributeError:
+            fig_num = None
+
+        if fig_num is not None and fig_num in plt.get_fignums():
+            return
+
+        # Register with the backend's figure manager.
         try:
             num = id(self.fig)
-            if num not in [m.num for m in plt._pylab_helpers.Gcf.get_all_fig_managers()]:
-                manager = plt._backend_mod.new_figure_manager_given_figure(num, self.fig)
-                plt._pylab_helpers.Gcf.set_active(manager)
-            plt.show(block=block)
+            manager = plt._backend_mod.new_figure_manager_given_figure(
+                num, self.fig,
+            )
+            # Use _set_new_active_manager (not set_active) so the
+            # manager gets its _cidgcf callback registered.  Without
+            # this, Gcf.destroy_all() crashes because it expects
+            # manager._cidgcf to exist for mpl_disconnect().
+            plt._pylab_helpers.Gcf._set_new_active_manager(manager)
         except Exception:
-            # Last-resort fallback
-            plt.show(block=block)
+            # Fallback for backends that don't support this.
+            try:
+                from IPython.display import display as ipy_display
+                ipy_display(self.fig)
+            except ImportError:
+                pass
 
     def save(
         self,
@@ -914,3 +1066,50 @@ class BasePlot(ABC):
     def get_figure(self) -> Optional[MplFigure]:
         """Return the underlying matplotlib *Figure*."""
         return self.fig
+
+    # ------------------------------------------------------------------
+    # Notebook / IPython rich-display integration
+    # ------------------------------------------------------------------
+    def _repr_png_(self) -> Optional[bytes]:
+        """Return a PNG rendering of the figure for IPython/Jupyter.
+
+        When an iSLAT plot object is the last expression in a notebook
+        cell, Jupyter calls this method automatically so the figure
+        renders inline — just like a plain matplotlib ``Figure``.
+        """
+        if self.fig is None:
+            self.generate_plot()
+        if self.fig is None:
+            return None
+        try:
+            import io
+            buf = io.BytesIO()
+            dpi = _display_config.savefig_dpi if _display_config else 150
+            self.fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
+            buf.seek(0)
+            return buf.getvalue()
+        except Exception:
+            return None
+
+    def _repr_html_(self) -> Optional[str]:
+        """Return an HTML ``<img>`` tag embedding the figure as base-64.
+
+        Provides a second rich-display path for IPython/Jupyter frontends
+        that prefer HTML over raw PNG.
+        """
+        png = self._repr_png_()
+        if png is None:
+            return None
+        try:
+            import base64
+            b64 = base64.b64encode(png).decode("ascii")
+            return f'<img src="data:image/png;base64,{b64}" />'
+        except Exception:
+            return None
+
+    def _repr_mimebundle_(self, **kwargs) -> Optional[dict]:
+        """IPython rich-display mimebundle for notebook rendering."""
+        png = self._repr_png_()
+        if png is None:
+            return None
+        return {"image/png": png}

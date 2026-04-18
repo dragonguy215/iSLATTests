@@ -10,7 +10,7 @@ forwarded to the active view's implementation, eliminating scattered
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -95,6 +95,86 @@ class PlotView(ABC):
             molecule was hidden).  Implementations should remove the stale
             artists and create fresh ones instead of just toggling
             visibility.
+        """
+        ...
+
+    # ------------------------------------------------------------------
+    # Selection & line-inspection
+    # ------------------------------------------------------------------
+    @abstractmethod
+    def on_selection(self, xmin: float, xmax: float) -> None:
+        """Handle a wavelength-range selection (span selector drag).
+
+        The view should render the line inspection panel, populate the
+        population diagram scatter points, and highlight the strongest
+        line.  Views that do not support interactive selection (e.g.
+        :class:`FullSpectrumView`) should implement this as a no-op or
+        as a deferred switch back to the three-panel view.
+        """
+        ...
+
+    @abstractmethod
+    def clear_selection(self) -> None:
+        """Clear the current line-inspection selection and reset panels."""
+        ...
+
+    @abstractmethod
+    def clear_active_lines(self) -> None:
+        """Remove all active-line artists (vlines, text, scatter) from the view."""
+        ...
+
+    # ------------------------------------------------------------------
+    # Molecule lifecycle callbacks
+    # ------------------------------------------------------------------
+    @abstractmethod
+    def on_active_molecule_changed(
+        self,
+        new_molecule: Optional["Molecule"] = None,
+        current_selection: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        """The user selected a different active molecule.
+
+        If a selection is active the view should re-run the line
+        inspection / population diagram for the new molecule.  Otherwise
+        only the population-diagram title and base diagram need updating.
+        """
+        ...
+
+    @abstractmethod
+    def on_molecule_parameter_changed(
+        self,
+        molecule_name: str,
+        parameter_name: str,
+        current_selection: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        """A single molecule's parameter changed (not visibility).
+
+        The view should update the spectrum if the molecule is visible,
+        and refresh the line-inspection / population diagram if the
+        molecule is the active one.
+        """
+        ...
+
+    @abstractmethod
+    def on_molecule_deleted(self, molecule_name: str) -> None:
+        """A molecule was removed from the dict — update all panels."""
+        ...
+
+    # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+    @abstractmethod
+    def apply_theme(self, theme: dict) -> None:
+        """
+        Apply a new theme dictionary to this view.
+
+        Implementations must propagate the theme to every owned figure,
+        axes, canvas widget, and sub-plot delegate so that switching
+        between views always reflects the current theme.
+
+        Called by the controller's :meth:`iSLATPlot.apply_theme` and
+        automatically on :meth:`activate` when the theme has changed
+        since the view was last visible.
         """
         ...
 
@@ -221,3 +301,37 @@ class PlotView(ABC):
     def get_figure(self) -> "Figure":
         """Return the matplotlib Figure for this view."""
         ...
+
+    # ------------------------------------------------------------------
+    # View-specific field provider protocol
+    # ------------------------------------------------------------------
+    def get_view_fields(self) -> List[Dict[str, Any]]:
+        """Return descriptors for extra fields this view wants in the ControlPanel.
+
+        Each dict contains:
+          - ``key``      : unique identifier string
+          - ``label``    : display label for the entry
+          - ``default``  : initial value
+          - ``tip``      : tooltip text (or *None*)
+          - ``datatype`` : ``"float"`` or ``"int"``
+          - ``width``    : entry widget width (optional, default 7)
+          - ``getter``   : ``Callable[[], <value>]`` returning the current value
+          - ``setter``   : ``Callable[[<value>], None]`` to apply a new value
+
+        The default implementation returns an empty list (no extra fields).
+        """
+        return []
+
+    def get_display_range_binding(self) -> Optional[Dict[str, Any]]:
+        """Return a binding for the Plot Start / Plot Range controls, or *None*.
+
+        When *None* is returned the ControlPanel uses its default behaviour
+        (read/write ``islat.display_range``).  When a dict is returned it
+        must contain:
+          - ``getter`` : ``Callable[[], Tuple[float, float]]`` → ``(start, end)``
+          - ``setter`` : ``Callable[[float, float], None]``  → set start, end
+
+        The ControlPanel will route display-range reads/writes through
+        these callables instead of touching ``islat.display_range``.
+        """
+        return None

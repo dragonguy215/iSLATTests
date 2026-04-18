@@ -73,6 +73,13 @@ class ControlPanel(ttk.Frame):
         self._create_wavelength_controls(gen_config_frame, 1, 0)  
         self._create_global_parameter_controls(gen_config_frame, 2, 0)  
 
+        # Dynamic view-specific fields section (populated on view switch)
+        # Row 5 — global params (start_row=2, row_offset=1) occupy rows 3-4
+        self._view_fields_frame = ttk.Frame(gen_config_frame)
+        self._view_fields_frame.grid(row=5, column=0, columnspan=4, sticky="nsew")
+        self._view_field_entries = {}
+        self._current_display_range_binding = None
+
         self._create_molecule_specific_controls(molecule_param_frame, 0, 0)  # All other params here
 
         self._build_color_and_vis_controls(self.color_vis_frame) # my implementation
@@ -220,7 +227,7 @@ class ControlPanel(ttk.Frame):
         self.plot_start_entry, self.plot_start_var = self._create_simple_entry(parent,
             "Plot start:", initial_start, start_row, start_col, lambda _: self._update_display_range(), param_name="display_range_start", tip_text=plot_start_tip)
         
-        # Plot range  
+        # Plot range
         display_range = getattr(self.islat, 'display_range', [4.5, 5.5])
         initial_range = round(display_range[1] - display_range[0], 2) # round to 2 decimal places
         self.plot_range_entry, self.plot_range_var = self._create_simple_entry(parent,
@@ -517,15 +524,10 @@ class ControlPanel(ttk.Frame):
 
         self.mol_frames.pop(mol_name, None)
         self.mol_visibility.pop(mol_name, None)
-        self.plot.plot_renderer.remove_molecule_lines(mol_name)
         del self.islat.molecules_dict[mol_name]
 
-        # Update summed spectrum to reflect molecule removal
-        self.plot.plot_renderer._update_summed_spectrum_with_molecules(
-            self.islat.molecules_dict, self.islat.wave_data
-        )
-
-        self.plot.canvas.draw_idle()
+        # Delegate visual cleanup and rebuild to the plot controller
+        self.plot.on_molecule_deleted(mol_name)
 
     def _create_molecule_parameter_entry(self, parent, label_text, param_name, row, col, width=7, tip_text = None):
         """Create an entry bound to the active molecule's parameter"""
@@ -615,10 +617,17 @@ class ControlPanel(ttk.Frame):
                 self.islat.molecules_dict.add_global_parameter_change_callback(self._on_global_parameter_change)
             
             Molecule.add_molecule_parameter_change_callback(self._on_molecule_parameter_change)
-            
+
+            # Listen for view changes so we can rebuild dynamic fields
+            if hasattr(self.plot, 'add_view_change_callback'):
+                self.plot.add_view_change_callback(self._on_view_changed)
+
         except Exception as e:
             print(f"ControlPanel: Error registering callbacks: {e}")
-            # self.data_field.insert_text(f"ControlPanel: Error registering callbacks: {e}")
+
+    def _on_view_changed(self, old_view, new_view):
+        """Handle active PlotView changes — rebuild dynamic fields."""
+        self._rebuild_view_fields(new_view)
 
     def _on_active_molecule_change(self, old_molecule, new_molecule):
         """Handle active molecule changes from the iSLAT callback system"""
@@ -832,12 +841,137 @@ class ControlPanel(ttk.Frame):
 
         self.selected_label.config(text=f"Selected Molecule: {self.selected_name}\nThermal Broadening: {active_mol.thermal_broad:.2g} km/s")
 
+    # ------------------------------------------------------------------
+    # Dynamic view-specific fields
+    # ------------------------------------------------------------------
+    def _rebuild_view_fields(self, view):
+        """Destroy and recreate the dynamic fields section for *view*.
+
+        Called whenever the active PlotView changes.  Reads the view's
+        ``get_view_fields()`` descriptors and builds matching entry widgets
+        inside ``_view_fields_frame``.  Also stores the view's display-range
+        binding so that Plot Start / Plot Range can be routed accordingly.
+        """
+        # Tear down previous fields
+        for child in self._view_fields_frame.winfo_children():
+            child.destroy()
+        self._view_field_entries.clear()
+
+        self._current_display_range_binding = None
+
+        if view is None:
+            return
+
+        # Build new fields from the view's descriptors
+        field_descs = view.get_view_fields()
+        for idx, desc in enumerate(field_descs):
+            key = desc["key"]
+            label_text = desc.get("label", key)
+            default = desc.get("default", 0)
+            tip = desc.get("tip", None)
+            datatype = desc.get("datatype", "float")
+            width = desc.get("width", 7)
+            getter = desc.get("getter")
+            setter = desc.get("setter")
+
+            current_val = getter() if getter else default
+
+            entry, var = self._create_view_field_entry(
+                self._view_fields_frame, label_text, current_val,
+                row=idx, col=0, getter=getter, setter=setter,
+                datatype=datatype, width=width, tip_text=tip,
+            )
+            self._view_field_entries[key] = (entry, var, getter, setter, datatype)
+
+        # Store display-range binding
+        self._current_display_range_binding = view.get_display_range_binding()
+
+        # Sync the Plot Start / Plot Range fields from the binding,
+        # or restore them from islat.display_range when no binding is active.
+        if self._current_display_range_binding is not None:
+            self._sync_display_range_from_binding()
+        else:
+            self._restore_display_range_from_islat()
+
+    def _create_view_field_entry(self, parent, label_text, initial_value,
+                                 row, col, getter, setter, datatype="float",
+                                 width=7, tip_text=None):
+        """Create an entry for a view-specific field with int/float support."""
+        label = ttk.Label(parent, text=label_text)
+        label.grid(row=row, column=col, padx=_ENTRY_LABEL_PADX, pady=5)
+
+        if tip_text:
+            CreateToolTip(label, tip_text)
+
+        var = tk.StringVar()
+        if datatype == "int":
+            var.set(str(int(initial_value)))
+        else:
+            var.set(self._format_value(initial_value))
+
+        entry = tk.Entry(parent, textvariable=var, width=width, justify="left")
+        entry.grid(row=row, column=col + 1, padx=_ENTRY_FIELD_PADX, sticky="w")
+
+        def on_change(*args):
+            self.updating = True
+            try:
+                raw = var.get()
+                if datatype == "int":
+                    value = int(float(raw))
+                else:
+                    value = float(raw)
+                if setter:
+                    setter(value)
+                # Refresh the display with the canonical value from getter
+                if getter:
+                    canonical = getter()
+                    if datatype == "int":
+                        var.set(str(int(canonical)))
+                    else:
+                        var.set(self._format_value(canonical))
+                entry.configure(fg=self.fg_color,
+                                font=(self.font.cget("family"), self.font.cget("size"), "roman"))
+            except (ValueError, TypeError) as e:
+                self.data_field.insert_text(f"Error with new value: {e}")
+            finally:
+                self.updating = False
+
+        entry.bind("<Return>", on_change)
+        return entry, var
+
+    def _sync_display_range_from_binding(self):
+        """Read the current view's display-range binding and update fields."""
+        binding = self._current_display_range_binding
+        if binding is None:
+            return
+        try:
+            start, end = binding["getter"]()
+            range_val = round(end - start, 2)
+            self._set_var(self.plot_start_var, self._format_value(start, "display_range_start"))
+            self._set_var(self.plot_range_var, self._format_value(range_val, "display_range_range"))
+        except Exception:
+            pass
+
+    def _restore_display_range_from_islat(self):
+        """Restore Plot Start / Plot Range fields from islat.display_range."""
+        try:
+            start, end = self.islat.display_range
+            range_val = round(end - start, 2)
+            self._set_var(self.plot_start_var, self._format_value(start, "display_range_start"))
+            self._set_var(self.plot_range_var, self._format_value(range_val, "display_range_range"))
+        except Exception:
+            pass
+
     def _update_display_range(self, value_str=None):
-        """Update display range bidirectionally between GUI and iSLAT class"""
+        """Update display range bidirectionally between GUI and iSLAT class.
+
+        When a view-specific display-range binding is active, reads/writes
+        are routed through the binding's getter/setter instead of
+        ``islat.display_range``.
+        """
         # If value_str is a tuple, it's being called from iSLAT to update GUI
         if isinstance(value_str, tuple) and len(value_str) == 2:
             try:
-
                 # Update GUI fields from iSLAT display_range (iSLAT -> GUI)
                 start, end = value_str
                 range_val = round(end - start, 2)
@@ -849,20 +983,42 @@ class ControlPanel(ttk.Frame):
                 print(f"Error updating display range GUI from iSLAT: {e}")
         else:
             try:
-                
-                # Update iSLAT from GUI fields (GUI -> iSLAT)
                 start = float(self.plot_start_var.get())
                 range_val = float(self.plot_range_var.get())
-                
-                if hasattr(self.islat, 'display_range'):
-                    # Temporarily disable the updating flag to allow normal iSLAT property setter
+
+                binding = getattr(self, '_current_display_range_binding', None)
+                if binding is not None:
+                    # Route through the active view's binding
+                    binding["setter"](start, start + range_val)
+                elif hasattr(self.islat, 'display_range'):
                     new_display_range = (start, start + range_val)
-                    # Only update if the values are actually different to avoid unnecessary callbacks
                     if not hasattr(self.islat, '_display_range') or self.islat._display_range != new_display_range:
                         self.islat.display_range = new_display_range
                         self.islat.GUI.plot.match_display_range(match_y = True)
             except (ValueError, AttributeError):
                 pass
+
+    def advance_plot_start(self):
+        """Add the current plot range to the plot start value."""
+        try:
+            start = float(self.plot_start_var.get())
+            range_val = float(self.plot_range_var.get())
+            new_start = round(start + range_val, 6)
+            self._set_var(self.plot_start_var, self._format_value(new_start, "display_range_start"))
+            self._update_display_range()
+        except (ValueError, AttributeError):
+            pass
+
+    def retreat_plot_start(self):
+        """Subtract the current plot range from the plot start value."""
+        try:
+            start = float(self.plot_start_var.get())
+            range_val = float(self.plot_range_var.get())
+            new_start = round(start - range_val, 6)
+            self._set_var(self.plot_start_var, self._format_value(new_start, "display_range_start"))
+            self._update_display_range()
+        except (ValueError, AttributeError):
+            pass
 
     def _update_wavelength_range(self, value_str=None):
         """Update wavelength range for model calculations (not display)"""

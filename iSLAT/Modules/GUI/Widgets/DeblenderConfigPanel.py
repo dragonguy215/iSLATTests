@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Optional, List, Dict, Any, Tuple, Union, TYPE_CHECKING
 from matplotlib import lines
 import matplotlib.pyplot as plt

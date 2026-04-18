@@ -461,15 +461,18 @@ class InteractionHandler:
                 self._toggle_saved_lines()
             return 'break'
         
-        # Handle Ctrl+L for load parameters, plain 'l' for toggle legend
+        # Handle Ctrl+Shift+L for load parameters from file, Ctrl+L for load parameters, plain 'l' for toggle legend
         elif keysym == 'l':
             ctrl_pressed = False
+            shift_pressed = bool(event.state & 0x1)
             if platform.system() == "Darwin":
                 ctrl_pressed = bool(event.state & 0x8) or bool(event.state & 0x4)
             else:
                 ctrl_pressed = bool(event.state & 0x4)
             
-            if ctrl_pressed:
+            if ctrl_pressed and shift_pressed:
+                self._load_parameters_from_file()
+            elif ctrl_pressed:
                 self._load_parameters()
             else:
                 self._toggle_legend()
@@ -501,6 +504,21 @@ class InteractionHandler:
                 self._toggle_all_molecule_visibility()
             else:
                 self._toggle_active_molecule_visibility()
+            return 'break'
+
+        # Handle 'r' key for toggling residual sub-panels
+        elif keysym == 'r':
+            self._toggle_residuals()
+            return 'break'
+
+        # Handle 'n' key for advancing plot start by the current range
+        # Shift+N = retreat (subtract range), plain N = advance (add range)
+        elif keysym == 'n':
+            shift_pressed = bool(event.state & 0x1)
+            if shift_pressed:
+                self._retreat_plot_start()
+            else:
+                self._advance_plot_start()
             return 'break'
 
     def _cycle_spectrum_previous(self):
@@ -590,7 +608,22 @@ class InteractionHandler:
         """Toggle summed spectrum visibility on the main plot"""
         if hasattr(self.plot_manager, 'toggle_summed_spectrum'):
             self.plot_manager.toggle_summed_spectrum()
-    
+
+    def _toggle_residuals(self):
+        """Toggle residual sub-panels in the full spectrum view."""
+        if hasattr(self.plot_manager, 'toggle_residuals'):
+            self.plot_manager.toggle_residuals()
+
+    def _advance_plot_start(self):
+        """Advance the plot start by the current plot range value."""
+        if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'control_panel'):
+            self.islat.GUI.control_panel.advance_plot_start()
+
+    def _retreat_plot_start(self):
+        """Retreat the plot start by the current plot range value."""
+        if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'control_panel'):
+            self.islat.GUI.control_panel.retreat_plot_start()
+
     def _toggle_atomic_lines(self):
         """Toggle atomic lines visibility"""
         if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'top_bar'):
@@ -683,6 +716,12 @@ class InteractionHandler:
         if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'top_bar'):
             if hasattr(self.islat.GUI.top_bar, 'load_parameters'):
                 self.islat.GUI.top_bar.load_parameters()
+    
+    def _load_parameters_from_file(self):
+        """Load parameters from a user-selected file in the SAVES folder"""
+        if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'top_bar'):
+            if hasattr(self.islat.GUI.top_bar, 'load_parameters_from_file'):
+                self.islat.GUI.top_bar.load_parameters_from_file()
     
     # Callback management
     def add_selection_callback(self, name: str, callback: Callable):

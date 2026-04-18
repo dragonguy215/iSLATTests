@@ -133,7 +133,8 @@ class FullSpectrumWindow(tk.Toplevel):
         self.settings_frame.pack(side=tk.LEFT, padx=(5, 0))
 
         ttk.Label(self.settings_frame, text="Step:").grid(row=0, column=0, padx=2, sticky="w")
-        self.step_var = tk.DoubleVar(value=self.spectrum_plot._step)
+        _init_step = self.spectrum_plot._step if self.spectrum_plot._step is not None else 1.0
+        self.step_var = tk.DoubleVar(value=_init_step)
         self.step_spinbox = ttk.Spinbox(
             self.settings_frame, from_=0.5, to=5.0, increment=0.1,
             textvariable=self.step_var, width=8, command=self.update_step,
@@ -201,6 +202,10 @@ class FullSpectrumWindow(tk.Toplevel):
             self.spectrum_plot._xlim_start,
             self.spectrum_plot._xlim_end,
             self.spectrum_plot._step,
+        )
+        self.spectrum_plot._panel_ends = np.append(
+            self.spectrum_plot._panel_edges[1:],
+            self.spectrum_plot._xlim_end,
         )
 
     def update_ymax_factor(self):
