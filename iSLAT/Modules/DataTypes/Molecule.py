@@ -378,7 +378,7 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
             spectrum_lam_max = self.wavelength_range[1]
         
         # Always compute the internal spectrum on a fine grid that properly
-        # Nyquist-samples the instrumental line spread function.  The user's
+        # Nyquist-samples the instrumental line spread function. The user's
         # model_pixel_res is applied later via flux-conserving resampling
         # (_spectres) in get_flux(), ensuring that changing pixel resolution
         # does not alter the total flux.

@@ -13,6 +13,17 @@ from .Molecule import Molecule
 import iSLAT.Constants as default_parms
 from ._mixins import ObservableMixin
 
+_spectral_utils_cache = None
+
+def _get_spectral_utils():
+    """Lazy accessor for spectres — avoids circular import at module load."""
+    global _spectral_utils_cache
+    if _spectral_utils_cache is None:
+        from iSLAT.Modules.DataProcessing.spectral_utils import make_bins, spectres
+        _spectral_utils_cache = (make_bins, spectres)
+    return _spectral_utils_cache
+
+
 def _ci_get(data: dict, key: str):
     """Look up *key* in *data* with a case-insensitive fallback.
 
@@ -279,6 +290,21 @@ class MoleculeDict(ObservableMixin, dict):
         # ---- determine interpolation settings ---------------------------
         use_interpolation, target_wave = self.get_matched_sampling_wavelengths(wave_data)
 
+        # ---- canonical output grid (Step 1) -----------------------------
+        # When matched-sampling is off, each molecule's get_flux returns its
+        # own Nyquist-sampled internal grid whose size depends on that
+        # molecule's FWHM. This produces different grid lengths per molecule
+        # and causes the ValueError below.  Fix: always force a single shared
+        # grid defined by the global wavelength range and pixel resolution so
+        # that every molecule is resampled to identical pixel positions via
+        # spectres before being accumulated.
+        if not use_interpolation and self._global_wavelength_range and self._global_model_pixel_res:
+            lam_min, lam_max = self._global_wavelength_range
+            canonical_grid = np.arange(lam_min, lam_max, self._global_model_pixel_res)
+            if len(canonical_grid) >= 2:
+                use_interpolation = True
+                target_wave = canonical_grid
+
         # ---- accumulate flux from each molecule -------------------------
         combined_wavelengths: Optional[np.ndarray] = None
         combined_flux: Optional[np.ndarray] = None
@@ -315,10 +341,12 @@ class MoleculeDict(ObservableMixin, dict):
                     combined_flux = mol_flux.copy()
                 else:
                     if len(mol_wavelengths) != len(combined_wavelengths):
-                        raise ValueError(
-                            f"Grid size mismatch for {mol_name}: "
-                            f"{len(mol_wavelengths)} vs {len(combined_wavelengths)}. "
-                            f"This should not happen with consistent spectrum calculation."
+                        # Step 2: defensive spectres resample instead of dropping
+                        # the molecule.  This catches any edge case (e.g. a stale
+                        # cache entry) that slips past the canonical grid above.
+                        _, _spectres = _get_spectral_utils()
+                        mol_flux = _spectres(
+                            combined_wavelengths, mol_wavelengths, mol_flux, fill=0.0
                         )
                     combined_flux += mol_flux
 
@@ -636,6 +664,14 @@ class MoleculeDict(ObservableMixin, dict):
         # ---- determine interpolation settings ---------------------------
         use_interpolation, target_wave = self.get_matched_sampling_wavelengths(wave_data)
 
+        # ---- canonical output grid (mirrors get_summed_flux fix) --------
+        if not use_interpolation and self._global_wavelength_range and self._global_model_pixel_res:
+            lam_min, lam_max = self._global_wavelength_range
+            canonical_grid = np.arange(lam_min, lam_max, self._global_model_pixel_res)
+            if len(canonical_grid) >= 2:
+                use_interpolation = True
+                target_wave = canonical_grid
+
         # ---- parallel get_flux calls ------------------------------------
         def get_molecule_flux(mol_name: str) -> Tuple[str, Optional[np.ndarray], Optional[np.ndarray], float]:
             """Get flux for a single molecule (runs in thread)."""
@@ -701,7 +737,11 @@ class MoleculeDict(ObservableMixin, dict):
                 combined_flux = mol_flux.copy()
             else:
                 if len(mol_wavelengths) != len(combined_wavelengths):
-                    raise ValueError(f"Grid size mismatch for {mol_name}")
+                    # Defensive spectres resample — same safety net as get_summed_flux
+                    _, _spectres = _get_spectral_utils()
+                    mol_flux = _spectres(
+                        combined_wavelengths, mol_wavelengths, mol_flux, fill=0.0
+                    )
                 combined_flux += mol_flux
 
         if combined_wavelengths is None:
@@ -1553,6 +1593,9 @@ class MoleculeDict(ObservableMixin, dict):
         #value = f'{value:.2e}'
         value = float(value)
         self._global_model_pixel_res = value
+        # The canonical grid in get_summed_flux is keyed on this value, so
+        # all cached sums are stale the moment the resolution changes.
+        self._summed_flux_cache.clear()
         self.bulk_update_parameters({'model_pixel_res': value})
         self._notify_global_parameter_change('model_pixel_res', old_value, value)
 

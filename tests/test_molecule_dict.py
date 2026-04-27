@@ -287,3 +287,312 @@ class TestMoleculeDictHelpers:
         from iSLAT.Modules.DataTypes.MoleculeDict import _safe_float
         d = {'Temperature': 400.0}
         assert _safe_float(d, 'temperature', case_insensitive=True) == 400.0
+
+
+# ======================================================================
+# Grid-mismatch / canonical-grid fix tests
+# ======================================================================
+
+class _FakeMolecule:
+    """Minimal molecule stub for testing MoleculeDict summing logic.
+
+    Avoids the need for real HITRAN data.  ``get_flux`` returns a
+    deterministic sine-shaped array on whatever ``wavelength_array`` is
+    passed when ``interpolate_to_input=True``, or a fixed-size internal
+    grid otherwise (size determined by ``native_n``).
+    """
+    def __init__(self, name, native_n=100, wavelength_range=(4.9, 5.1),
+                 pixel_res=0.001):
+        self.name = name
+        self.molecule_name = name
+        self.is_visible = True
+        self._wavelength_range = wavelength_range
+        self._model_pixel_res = pixel_res
+        self._native_n = native_n
+        self._rv_shift = 0.0
+        self.rv_shift = 0.0          # public alias used by _get_flux_cache_key
+        self._dirty_flags = {'intensity': False, 'spectrum': False, 'flux': False}
+        self._flux_cache = {}
+
+    @property
+    def wavelength_range(self):
+        return self._wavelength_range
+
+    @wavelength_range.setter
+    def wavelength_range(self, value):
+        self._wavelength_range = value
+
+    def get_parameter_hash(self, cache_type='full'):
+        """Deterministic hash used by _compute_molecules_parameter_hash."""
+        return hash((self.name, self._model_pixel_res, self._rv_shift,
+                     self._wavelength_range))
+
+    def get_flux(self, wavelength_array=None, return_wavelengths=False,
+                 interpolate_to_input=False):
+        if interpolate_to_input and wavelength_array is not None:
+            wave = wavelength_array
+        else:
+            lam_min, lam_max = self._wavelength_range
+            wave = np.linspace(lam_min, lam_max, self._native_n)
+        flux = np.abs(np.sin(np.linspace(0, np.pi, len(wave)))) * 1e-15
+        if return_wavelengths:
+            return wave.copy(), flux.copy()
+        return flux.copy()
+
+
+class TestGetSummedFluxCanonicalGrid:
+    """Tests for the canonical-grid fix in get_summed_flux.
+
+    The fix ensures that even when _match_spectral_sampling is False,
+    all molecules are resampled onto a single shared grid
+    (np.arange(lam_min, lam_max, model_pixel_res)) so that molecules
+    with different internal Nyquist grid sizes can be summed without a
+    ValueError.
+    """
+
+    def _make_dict(self, pixel_res=0.001, native_sizes=(80, 150)):
+        """MoleculeDict with two _FakeMolecule stubs of deliberately
+        different native grid sizes."""
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        md = MoleculeDict(
+            global_wavelength_range=(4.9, 5.1),
+            global_model_pixel_res=pixel_res,
+        )
+        md['Narrow'] = _FakeMolecule('Narrow', native_n=native_sizes[0],
+                                     wavelength_range=(4.9, 5.1),
+                                     pixel_res=pixel_res)
+        md['Wide'] = _FakeMolecule('Wide', native_n=native_sizes[1],
+                                   wavelength_range=(4.9, 5.1),
+                                   pixel_res=pixel_res)
+        md._match_spectral_sampling = False
+        return md
+
+    # ------------------------------------------------------------------
+    # canonical grid is built correctly
+    # ------------------------------------------------------------------
+
+    def test_canonical_grid_shape(self):
+        """With the fix, get_summed_flux returns a grid whose length equals
+        np.arange(lam_min, lam_max, pixel_res)."""
+        md = self._make_dict(pixel_res=0.001)
+        wave_obs = np.linspace(4.9, 5.1, 200)
+        lam_min, lam_max = md._global_wavelength_range
+        expected_len = len(np.arange(lam_min, lam_max, md._global_model_pixel_res))
+
+        wave_out, flux_out = md.get_summed_flux(wave_obs, visible_only=False)
+
+        assert len(wave_out) == expected_len, (
+            f"Expected {expected_len} grid points, got {len(wave_out)}"
+        )
+        assert len(flux_out) == expected_len
+
+    def test_no_grid_mismatch_different_native_sizes(self):
+        """Molecules with very different native grid sizes (80 vs 150 pts)
+        must produce no 'Grid size mismatch' warning."""
+        import io, contextlib
+        md = self._make_dict(pixel_res=0.001, native_sizes=(80, 150))
+        wave_obs = np.linspace(4.9, 5.1, 200)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            wave_out, flux_out = md.get_summed_flux(wave_obs, visible_only=False)
+
+        assert 'Grid size mismatch' not in buf.getvalue()
+        assert len(wave_out) > 0
+        assert len(flux_out) == len(wave_out)
+
+    def test_no_grid_mismatch_fine_pixel_res(self):
+        """Fine pixel_res (smaller than some molecules' native step) must
+        not trigger a grid size mismatch."""
+        import io, contextlib
+        md = self._make_dict(pixel_res=0.0003, native_sizes=(30, 200))
+        wave_obs = np.linspace(4.9, 5.1, 300)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            wave_out, flux_out = md.get_summed_flux(wave_obs, visible_only=False)
+
+        assert 'Grid size mismatch' not in buf.getvalue()
+        assert len(wave_out) > 0
+
+    def test_no_grid_mismatch_coarse_pixel_res(self):
+        """Coarse pixel_res must also work without mismatch errors."""
+        import io, contextlib
+        md = self._make_dict(pixel_res=0.05, native_sizes=(5, 300))
+        wave_obs = np.linspace(4.9, 5.1, 50)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            wave_out, flux_out = md.get_summed_flux(wave_obs, visible_only=False)
+
+        assert 'Grid size mismatch' not in buf.getvalue()
+        assert len(wave_out) > 0
+
+    def test_both_molecules_contribute_to_sum(self):
+        """Summed flux must be strictly positive, confirming neither
+        molecule was silently dropped."""
+        md = self._make_dict(pixel_res=0.001, native_sizes=(80, 150))
+        wave_obs = np.linspace(4.9, 5.1, 200)
+        _, flux_sum = md.get_summed_flux(wave_obs, visible_only=False)
+
+        assert np.any(flux_sum > 0), "Expected non-zero summed flux"
+
+    def test_sum_exceeds_single_molecule(self):
+        """Summed flux should be greater than either molecule alone,
+        confirming both contribute."""
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        md = self._make_dict(pixel_res=0.001, native_sizes=(80, 150))
+        wave_obs = np.linspace(4.9, 5.1, 200)
+
+        _, flux_sum = md.get_summed_flux(wave_obs, visible_only=False)
+
+        canonical = np.arange(4.9, 5.1, md._global_model_pixel_res)
+        _, flux_narrow = md['Narrow'].get_flux(
+            wavelength_array=canonical, return_wavelengths=True, interpolate_to_input=True)
+        _, flux_wide = md['Wide'].get_flux(
+            wavelength_array=canonical, return_wavelengths=True, interpolate_to_input=True)
+
+        # Sum must be >= each individual (both are non-negative)
+        assert np.all(flux_sum >= flux_narrow - 1e-30)
+        assert np.all(flux_sum >= flux_wide - 1e-30)
+
+    def test_output_grid_matches_canonical_arange(self):
+        """The output wavelength grid must be exactly np.arange(lam_min,
+        lam_max, pixel_res)."""
+        md = self._make_dict(pixel_res=0.002)
+        wave_obs = np.linspace(4.9, 5.1, 100)
+        wave_out, _ = md.get_summed_flux(wave_obs, visible_only=False)
+
+        expected = np.arange(4.9, 5.1, 0.002)
+        np.testing.assert_allclose(wave_out, expected, atol=1e-12)
+
+    # ------------------------------------------------------------------
+    # changing pixel_res clears summed flux cache
+    # ------------------------------------------------------------------
+
+    def test_pixel_res_change_clears_cache(self):
+        """After changing global_model_pixel_res the summed flux cache
+        must be empty so stale results are never served."""
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        md = MoleculeDict(
+            global_wavelength_range=(4.9, 5.1),
+            global_model_pixel_res=0.001,
+        )
+        # Manually insert a fake cache entry
+        md._summed_flux_cache['dummy_key'] = (np.array([1.0]), np.array([1.0]), 42)
+        assert len(md._summed_flux_cache) == 1
+
+        md.global_model_pixel_res = 0.0007
+        assert len(md._summed_flux_cache) == 0, (
+            "Cache should have been cleared after pixel_res change"
+        )
+
+    def test_pixel_res_change_produces_new_grid_size(self):
+        """After a pixel_res change the next call returns a grid with the
+        correct new length."""
+        md = self._make_dict(pixel_res=0.002)
+        wave_obs = np.linspace(4.9, 5.1, 100)
+        wave1, _ = md.get_summed_flux(wave_obs, visible_only=False)
+
+        # Update pixel_res on the dict and on each stub
+        md._global_model_pixel_res = 0.001
+        for mol in md.values():
+            mol._model_pixel_res = 0.001
+
+        md._summed_flux_cache.clear()
+        wave_obs2 = np.linspace(4.9, 5.1, 200)
+        wave2, _ = md.get_summed_flux(wave_obs2, visible_only=False)
+
+        expected_len1 = len(np.arange(4.9, 5.1, 0.002))
+        expected_len2 = len(np.arange(4.9, 5.1, 0.001))
+        assert len(wave1) == expected_len1
+        assert len(wave2) == expected_len2
+        assert len(wave2) > len(wave1)  # finer grid → more points
+
+    # ------------------------------------------------------------------
+    # global_model_pixel_res setter
+    # ------------------------------------------------------------------
+
+    def test_global_pixel_res_setter_clears_cache(self):
+        """Setting global_model_pixel_res must clear the summed flux cache."""
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        md = MoleculeDict(global_wavelength_range=(4.9, 5.1),
+                          global_model_pixel_res=0.001)
+        md._summed_flux_cache['key'] = (np.ones(3), np.ones(3), 0)
+        md.global_model_pixel_res = 0.002
+        assert len(md._summed_flux_cache) == 0
+
+    def test_global_pixel_res_setter_fires_callback(self):
+        """The global parameter-change callback must fire exactly once."""
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        md = MoleculeDict(global_wavelength_range=(4.9, 5.1),
+                          global_model_pixel_res=0.001)
+        calls = []
+        md.add_global_parameter_change_callback(
+            lambda p, o, n: calls.append((p, o, n))
+        )
+        md.global_model_pixel_res = 0.0007
+
+        pixel_calls = [c for c in calls if c[0] == 'model_pixel_res']
+        assert len(pixel_calls) == 1
+        assert pixel_calls[0][2] == pytest.approx(0.0007)
+
+    # ------------------------------------------------------------------
+    # defensive spectres resample (fallback safety net)
+    # ------------------------------------------------------------------
+
+    def test_defensive_resample_when_mol_returns_wrong_size(self):
+        """If a molecule's get_flux returns a different-sized grid after the
+        canonical-grid logic runs, the accumulation must still succeed via
+        the defensive spectres resample (no exception, no dropped molecule)."""
+        import io, contextlib
+
+        class _BadSizeMolecule(_FakeMolecule):
+            """Always returns a hardcoded 77-point grid regardless of input."""
+            def get_flux(self, wavelength_array=None, return_wavelengths=False,
+                         interpolate_to_input=False):
+                bad_wave = np.linspace(4.9, 5.1, 77)
+                bad_flux = np.ones(77) * 1e-16
+                if return_wavelengths:
+                    return bad_wave, bad_flux
+                return bad_flux
+
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        md = MoleculeDict(global_wavelength_range=(4.9, 5.1),
+                          global_model_pixel_res=0.001)
+        md['Normal'] = _FakeMolecule('Normal', native_n=100,
+                                     wavelength_range=(4.9, 5.1))
+        md['BadSize'] = _BadSizeMolecule('BadSize', wavelength_range=(4.9, 5.1))
+        md._match_spectral_sampling = False
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            wave_out, flux_out = md.get_summed_flux(
+                np.linspace(4.9, 5.1, 200), visible_only=False)
+
+        # Must not raise, must not print the mismatch warning
+        assert 'Grid size mismatch' not in buf.getvalue()
+        assert len(flux_out) == len(wave_out)
+        assert len(wave_out) > 0
+
+    # ------------------------------------------------------------------
+    # matched spectral sampling path is unaffected
+    # ------------------------------------------------------------------
+
+    def test_matched_sampling_uses_rv_corrected_grid(self):
+        """With _match_spectral_sampling=True the method must delegate to
+        get_matched_sampling_wavelengths and use its rest-frame grid."""
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        md = MoleculeDict(global_wavelength_range=(4.9, 5.1),
+                          global_model_pixel_res=0.001,
+                          global_stellar_rv=0.0)
+        md['M1'] = _FakeMolecule('M1', native_n=80, wavelength_range=(4.9, 5.1))
+        md['M2'] = _FakeMolecule('M2', native_n=150, wavelength_range=(4.9, 5.1))
+        md._match_spectral_sampling = True
+
+        wave_obs = np.linspace(4.9, 5.1, 200)
+        wave_out, flux_out = md.get_summed_flux(wave_obs, visible_only=False)
+
+        assert len(wave_out) > 0
+        assert len(flux_out) == len(wave_out)
+        assert np.all(np.isfinite(flux_out))
