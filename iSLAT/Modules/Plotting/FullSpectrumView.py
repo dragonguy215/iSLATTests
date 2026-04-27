@@ -327,14 +327,16 @@ class FullSpectrumView(ToggleMixin, PlotView):
     ) -> np.ndarray:
         """Return the summed model flux on the rest-frame wavelength grid.
 
-        The model is constructed from the visible molecules via
-        :meth:`MoleculeDict.get_summed_flux`.  The result is mapped
-        onto *wave_rest* so it is pixel-aligned with the observed data
-        arrays that are passed to :class:`ResidualSpectrumPlot`.
+        The model is constructed from all molecules via
+        :meth:`MoleculeDict.get_summed_flux_resampled`, which uses
+        flux-conserving resampling (spectres) to map the model onto
+        *wave_rest*.  *wave_rest* must already be in the rest frame;
+        the observer-frame array *wave_obs* is accepted for API
+        compatibility but is no longer used inside this method.
         """
         try:
-            mol_wave, mol_flux = self._islat.molecules_dict.get_summed_flux(
-                wave_obs, visible_only=False,
+            _, model_flux = self._islat.molecules_dict.get_summed_flux_resampled(
+                wave_rest, visible_only=False,
             )
         except Exception as exc:
             debug_config.warning(
@@ -343,15 +345,10 @@ class FullSpectrumView(ToggleMixin, PlotView):
             )
             return np.zeros_like(wave_rest)
 
-        if len(mol_flux) == 0:
+        if len(model_flux) == 0:
             return np.zeros_like(wave_rest)
 
-        # The returned wavelengths are in the rest frame.  If the grids
-        # match we can use them directly; otherwise interpolate.
-        if mol_wave.shape == wave_rest.shape and np.allclose(mol_wave, wave_rest, atol=1e-10):
-            return mol_flux
-
-        return np.interp(wave_rest, mol_wave, mol_flux, left=0.0, right=0.0)
+        return model_flux
 
     def _compute_interactive_figsize(
         self, wave: np.ndarray

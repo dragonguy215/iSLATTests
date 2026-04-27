@@ -331,7 +331,69 @@ class MoleculeDict(ObservableMixin, dict):
         # ---- cache & return ---------------------------------------------
         self._cache_summed_flux_result(cache_key, combined_wavelengths, combined_flux, current_param_hash)
         return combined_wavelengths, combined_flux
-    
+
+    def get_summed_flux_resampled(
+        self,
+        wave_rest: np.ndarray,
+        visible_only: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Return summed model flux resampled onto *wave_rest* via spectres.
+
+        Unlike :meth:`get_summed_flux`, this method **always** uses
+        flux-conserving resampling (spectres) regardless of the
+        ``match_spectral_sampling`` setting.  This makes it the correct
+        code path for supplying model flux to
+        :class:`~iSLAT.Modules.Plotting.ResidualSpectrumPlot`.
+
+        *wave_rest* must already be in the **rest frame** — the caller is
+        responsible for any RV correction before calling this method.
+        Passing observer-frame wavelengths here will produce a
+        double-correction bug.
+
+        Parameters
+        ----------
+        wave_rest : np.ndarray
+            Rest-frame wavelength grid onto which each molecule's flux is
+            resampled.
+        visible_only : bool, default False
+            When ``False`` (default), include all molecules so that the
+            residual reflects the complete model.
+
+        Returns
+        -------
+        Tuple[np.ndarray, np.ndarray]
+            ``(wave_rest, summed_flux)`` — the input grid and the
+            flux-conserving summed flux on that grid.
+        """
+        if wave_rest is None or len(wave_rest) == 0:
+            return np.array([]), np.array([])
+
+        molecules = list(self.get_visible_molecules() if visible_only else self.keys())
+        if not molecules:
+            return wave_rest, np.zeros_like(wave_rest, dtype=float)
+
+        combined_flux = np.zeros_like(wave_rest, dtype=float)
+        for mol_name in molecules:
+            if mol_name not in self:
+                continue
+            molecule = self[mol_name]
+            if molecule._wavelength_range != self._global_wavelength_range:
+                molecule.wavelength_range = self._global_wavelength_range
+            try:
+                _, mol_flux = molecule.get_flux(
+                    wavelength_array=wave_rest,
+                    return_wavelengths=True,
+                    interpolate_to_input=True,
+                )
+                if mol_flux is not None and len(mol_flux) == len(wave_rest):
+                    combined_flux += np.nan_to_num(
+                        mol_flux, nan=0.0, posinf=0.0, neginf=0.0
+                    )
+            except Exception as exc:
+                print(f"Warning: Failed to get flux for molecule {mol_name}: {exc}")
+
+        return wave_rest, combined_flux
+
     def _get_flux_cache_key(self, wave_data: np.ndarray, molecules: List[str]) -> int:
         """Generate cache key for flux calculations."""
         try:

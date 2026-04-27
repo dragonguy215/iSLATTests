@@ -43,6 +43,7 @@ def _make_molecules_dict(wave, flux):
     """Build a minimal mock MoleculeDict that returns valid summed flux."""
     md = MagicMock()
     md.get_summed_flux.return_value = (wave.copy(), flux.copy())
+    md.get_summed_flux_resampled.return_value = (wave.copy(), flux.copy())
     md.apply_stellar_rv.side_effect = lambda w: w.copy()
     md.get_visible_molecules.return_value = []
     md.keys.return_value = []
@@ -199,38 +200,34 @@ class TestComputeModelFlux:
         assert np.allclose(result, expected, atol=1e-10)
 
     def test_returns_zeros_on_failure(self):
-        """If get_summed_flux raises, the result should be zeros."""
+        """If get_summed_flux_resampled raises, the result should be zeros."""
         view, pm, islat, wave, flux, err = _make_view()
-        islat.molecules_dict.get_summed_flux.side_effect = RuntimeError("boom")
+        islat.molecules_dict.get_summed_flux_resampled.side_effect = RuntimeError("boom")
         result = view._compute_model_flux(wave, wave)
         assert np.allclose(result, 0.0)
 
     def test_returns_zeros_when_empty(self):
-        """If get_summed_flux returns empty arrays, the result is zeros."""
+        """If get_summed_flux_resampled returns empty arrays, the result is zeros."""
         view, pm, islat, wave, flux, err = _make_view()
-        islat.molecules_dict.get_summed_flux.return_value = (np.array([]), np.array([]))
+        islat.molecules_dict.get_summed_flux_resampled.return_value = (np.array([]), np.array([]))
         result = view._compute_model_flux(wave, wave)
         assert result.shape == wave.shape
         assert np.allclose(result, 0.0)
 
-    def test_interpolates_when_grids_differ(self):
-        """Model flux on a different grid should be interpolated."""
+    def test_resamples_via_spectres(self):
+        """get_summed_flux_resampled is called with wave_rest and visible_only=False."""
         view, pm, islat, wave, flux, err = _make_view(n=200)
-        # Model on a coarser grid
-        coarse_wave = np.linspace(wave.min(), wave.max(), 50)
-        coarse_flux = np.ones(50) * 0.05
-        islat.molecules_dict.get_summed_flux.return_value = (coarse_wave, coarse_flux)
+        dense_flux = np.ones(len(wave)) * 0.05
+        islat.molecules_dict.get_summed_flux_resampled.return_value = (wave.copy(), dense_flux)
         result = view._compute_model_flux(wave, wave)
         assert result.shape == wave.shape
-        # All interior points should be close to 0.05
-        interior = (wave > coarse_wave[1]) & (wave < coarse_wave[-2])
-        assert np.allclose(result[interior], 0.05, atol=0.01)
+        assert np.allclose(result, 0.05, atol=1e-10)
 
     def test_uses_visible_false_for_all_molecules(self):
-        """Should call get_summed_flux with visible_only=False."""
+        """Should call get_summed_flux_resampled with wave_rest and visible_only=False."""
         view, pm, islat, wave, flux, err = _make_view()
         view._compute_model_flux(wave, wave)
-        islat.molecules_dict.get_summed_flux.assert_called_once_with(
+        islat.molecules_dict.get_summed_flux_resampled.assert_called_once_with(
             wave, visible_only=False,
         )
 
@@ -379,7 +376,7 @@ class TestRebuildPlotTypeMismatch:
 
         # Change the summed-flux return
         new_model = flux * 0.5
-        islat.molecules_dict.get_summed_flux.return_value = (wave.copy(), new_model.copy())
+        islat.molecules_dict.get_summed_flux_resampled.return_value = (wave.copy(), new_model.copy())
         view._rebuild_plot()
 
         assert not np.allclose(view._plot.model_flux, old_model)
