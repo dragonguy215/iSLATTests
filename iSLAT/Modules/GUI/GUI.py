@@ -310,9 +310,12 @@ class GUI:
         # Spectrum file selector
         self.file_interaction_pane = FileInteractionPane(parent, self.islat_class, self.theme, self.data_field)
         
-        self.file_interaction_pane.grid(padx=(1,0), sticky="nsew",  pady=0)
-        self.control_panel.grid(padx=(1,0), sticky="nsew", pady=0)
-        self.data_field.grid(padx=(1,0), sticky="nsew", pady=0)
+        self.file_interaction_pane.grid(row=0, padx=(1,0), sticky="nsew", pady=0)
+        self.control_panel.grid(row=1, padx=(1,0), sticky="nsew", pady=0)
+        self.data_field.grid(row=2, padx=(1,0), sticky="nsew", pady=0)
+
+        parent.grid_rowconfigure(2, weight=1)
+        parent.grid_columnconfigure(0, weight=1)
 
     def update_frame_sizes(self):
         """Update dynamic frame sizes based on current content."""
