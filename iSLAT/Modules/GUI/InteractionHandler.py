@@ -111,9 +111,9 @@ class InteractionHandler:
             return
         
         # Don't interfere with span selector on main plot
-        if event.inaxes == self.ax1 and hasattr(self, 'span_selector') and self.span_selector.active:
+        #if event.inaxes == self.ax1 and hasattr(self, 'span_selector') and self.span_selector.active:
             # Let the span selector handle the event on main plot
-            return
+        #    return
         
         # Check for double-click on other plots
         current_time = time.time()
@@ -161,7 +161,7 @@ class InteractionHandler:
         """Handle right click events (context menu)"""
         if event.inaxes == self.ax1:
             # Show context menu for main plot
-            self._show_context_menu(event)
+            pass
     
     def _on_pick(self, event):
         """Handle pick events (clicking on plot elements)"""
