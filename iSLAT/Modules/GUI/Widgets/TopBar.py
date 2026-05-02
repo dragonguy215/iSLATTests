@@ -731,19 +731,19 @@ class TopBar(ResizableFrame):
             return
         
         try:
-            fitted_params = slab_model.fit_parameters()
+            fitted_result = slab_model.fit()
         except Exception as e:
             self.data_field.insert_text(f"Error fitting slab model: {e}\n")
             return
         
         try:
-            slab_model.update_molecule_parameters(fitted_params=fitted_params)
+            slab_model.update_source_parameters(fitted_result)
         except Exception as e:
             self.data_field.insert_text(f"Error updating molecule parameters: {e}\n")
             return
 
         try:
-            slab_model.save_results(fitted_params=fitted_params)
+            slab_model.save_results(fitted_result)
         except Exception as e:
             self.data_field.insert_text(f"Error saving slab model results: {e}\n")
             return

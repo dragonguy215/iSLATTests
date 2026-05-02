@@ -6,6 +6,7 @@ separated from GUI concerns to enable reuse and testing.
 """
 
 import os
+from pathlib import Path
 import sys
 import numpy as np
 import pandas as pd
@@ -13,7 +14,7 @@ import threading
 from datetime import datetime
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional, Tuple, Callable
+from typing import Any, Dict, List, Optional, Tuple, Callable, Union
 
 import iSLAT.Modules.FileHandling.iSLATFileHandling as ifh
 import iSLAT.Constants as c
@@ -444,7 +445,7 @@ class BatchFittingService:
         parallel: Optional[bool] = None,
         max_workers: Optional[int] = None,
         defer_plots: bool = True,
-        base_output_path: Optional[str] = None,
+        base_output_path: Union[str, Path, None] = None,
         get_mole_save_data: Optional[Callable] = None
     ) -> Tuple[List[Any], Optional[str]]:
         """
@@ -1150,7 +1151,7 @@ class BatchFittingService:
         user_settings: Dict[str, Any],
         progress_callback: Optional[Callable[[str], None]] = None,
         get_mole_save_data: Optional[Callable[[str], Optional[Dict[str, Dict[str, Any]]]]] = None,
-        base_output_path: Optional[str] = None,
+        base_output_path: str | Path | None = None,
         spectrum_files: Optional[List[str]] = None,
         molecules_dict: Optional[Any] = None,
     ) -> Tuple[List[Any], Optional[str]]:

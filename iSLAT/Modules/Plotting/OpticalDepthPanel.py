@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
 
-
 class OpticalDepthPanel(SpectralPanel):
     """
     Single-axes panel showing optical depth τ(λ).
@@ -255,7 +254,7 @@ class OpticalDepthPanel(SpectralPanel):
                 )
 
     # ------------------------------------------------------------------
-    def compute_ylim(self) -> Tuple[float, float]:
+    def compute_ylim(self, ymax_factor: float = 0.2) -> Tuple[float, float]:
         """Compute appropriate y-limits for the optical-depth panel."""
         max_tau = 0.0
 
