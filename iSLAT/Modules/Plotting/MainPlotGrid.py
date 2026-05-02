@@ -609,6 +609,8 @@ class MainPlotGrid(BasePlot):
         *,
         threshold: float = 0.0,
         color: str = "green",
+        molecule_name: str = "",
+        molecule_color: str = "",
     ) -> None:
         """Plot vertical line markers in the inspection panel.
 
@@ -632,6 +634,10 @@ class MainPlotGrid(BasePlot):
             Fraction (0-1) of max intensity below which lines are hidden.
         color : str
             Colour for the markers and labels.
+        molecule_name : str
+            Name of the molecule owning these lines (stored in info dict).
+        molecule_color : str
+            Color of the molecule (stored in info dict for pick handling).
         """
         if not line_data or self.ax_inspection is None:
             return
@@ -642,7 +648,7 @@ class MainPlotGrid(BasePlot):
             return
 
         ax = self.ax_inspection
-        for idx, (line, intensity, tau_val) in enumerate(line_data):
+        for line, intensity, tau_val in line_data:
             frac = intensity / max_intensity
             if frac < threshold:
                 continue
@@ -662,13 +668,10 @@ class MainPlotGrid(BasePlot):
             info = LineInspectionPlot.get_line_info(line, intensity, tau_val)
             info["lineheight"] = lineheight
             info["intensity_percent"] = frac * 100
+            info["molecule_name"] = molecule_name
+            info["molecule_color"] = molecule_color or color
 
-            if idx < len(active_lines):
-                active_lines[idx][0] = vline
-                active_lines[idx][1] = text
-                active_lines[idx][3].update(info)
-            else:
-                active_lines.append([vline, text, None, info])
+            active_lines.append([vline, text, None, info])
 
     def render_active_line_scatter(
         self,
@@ -786,12 +789,15 @@ class MainPlotGrid(BasePlot):
         molecules: Optional["MoleculeDict"] = None,
         wave_data_obs: Optional[np.ndarray] = None,
         legend_visible: bool = True,
+        additional_molecules: Optional[List["Molecule"]] = None,
     ) -> None:
         """Render the line-inspection panel (ax_inspection) with observed
         data and the active molecule model.
 
         Reuses an internal :class:`LineInspectionPlot` instance and
-        optionally overlays fit results.
+        optionally overlays fit results.  When *additional_molecules* are
+        provided their model spectra are overlaid after the primary
+        molecule (each in its own color).
 
         Parameters
         ----------
@@ -809,6 +815,8 @@ class MainPlotGrid(BasePlot):
             Observer-frame wavelengths.
         legend_visible : bool
             Whether the legend should be shown.
+        additional_molecules : list[Molecule], optional
+            Comparison molecules whose model spectra are also overlaid.
         """
         ax = self.ax_inspection
         if ax is None:
@@ -852,6 +860,20 @@ class MainPlotGrid(BasePlot):
             self._lip.render_all_visible = False
             self._lip.theme = self.theme
         self._lip.generate_plot()
+
+        # Overlay additional (comparison) molecules in their own colors
+        if additional_molecules:
+            use_interp = False
+            target_wave = None
+            if molecules is not None and hasattr(molecules, 'get_matched_sampling_wavelengths'):
+                use_interp, target_wave = molecules.get_matched_sampling_wavelengths(
+                    wave_data_obs if wave_data_obs is not None else wave_data
+                )
+                if not use_interp:
+                    target_wave = None
+            for mol in additional_molecules:
+                if mol is not None:
+                    self._lip._overlay_molecule(ax, mol, use_interp, target_wave)
 
         # Overlay fit results if present
         if fit_result is not None:
