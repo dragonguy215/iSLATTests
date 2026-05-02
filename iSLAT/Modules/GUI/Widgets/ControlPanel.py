@@ -1168,22 +1168,37 @@ class ControlPanel(ttk.Frame):
         self._set_active_molecule(mol_name= mol_name)
 
     def _on_molecule_shift_clicked(self, mol_name):
-        """Handle shift-click on a molecule button — toggle as comparison molecule."""
+        """Handle shift-click on a molecule button.
+
+        - Shift-click on a molecule **not** in the active list: adds it to the
+          list and makes it the new primary active molecule (the old primary is
+          preserved as a comparison molecule).
+        - Shift-click on an existing **comparison** molecule: removes it from
+          the list (toggle-off).
+        - Shift-click on the current **primary** active molecule: no-op.
+        """
         self._shift_click_consumed = True
 
-        # Cannot add active molecule as a comparison molecule
         active_mol = self._get_active_molecule_object()
         if active_mol and active_mol.name == mol_name:
-            return
+            return  # Already the primary — nothing to do
 
-        was_added = self.islat.toggle_comparison_molecule(mol_name)
+        # Check whether this molecule is already a comparison
+        comp_names = {
+            getattr(m, 'name', None)
+            for m in self.islat.comparison_molecules
+        }
 
-        # Update frame highlight
-        if mol_name in self.mol_frames:
-            if was_added:
-                self.mol_frames[mol_name].config(bg=self.comparison_color)
-            else:
+        if mol_name in comp_names:
+            # Toggle-off: remove from the comparison list
+            self.islat.toggle_comparison_molecule(mol_name)
+            if mol_name in self.mol_frames:
                 self.mol_frames[mol_name].config(bg=self.bg_color)
+        else:
+            # New molecule: promote to primary (old primary → comparison)
+            # _update_active_molecule_changes fires via the active_molecule
+            # callback and repaints all frame colours correctly.
+            self.islat.promote_to_active_molecule(mol_name)
 
     def _set_active_molecule(self, mol_name):
         selected_label = self.mol_dict[mol_name].displaylabel

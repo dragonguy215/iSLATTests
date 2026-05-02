@@ -936,6 +936,51 @@ class iSLAT:
             self._notify_comparison_molecules_change()
             return True
 
+    def promote_to_active_molecule(self, molecule) -> bool:
+        """Make *molecule* the primary active molecule in the line inspection plot.
+
+        The current primary active molecule is moved into the comparison list so
+        it remains visible in the inspection panel.  If *molecule* was already a
+        comparison molecule it is removed from that list (it is now the primary).
+        All other comparison molecules are left unchanged.
+
+        Parameters
+        ----------
+        molecule : str or Molecule
+            The molecule to promote to primary.
+
+        Returns
+        -------
+        bool
+            ``True`` if the promotion succeeded, ``False`` otherwise (e.g. the
+            molecule was already the active one or could not be resolved).
+        """
+        mol_obj = self._resolve_molecule(molecule)
+        if mol_obj is None:
+            return False
+
+        old_active = self._active_molecule
+        if mol_obj is old_active:
+            return False
+
+        # --- update the comparison list silently (no callbacks yet) ---
+        if old_active is not None and old_active not in self._comparison_molecules:
+            self._comparison_molecules.append(old_active)
+            debug_config.info("comparison", f"Moved old active to comparison: {old_active.name}")
+
+        if mol_obj in self._comparison_molecules:
+            self._comparison_molecules.remove(mol_obj)
+            debug_config.info("comparison", f"Removed from comparison (now primary): {mol_obj.name}")
+
+        # --- change the primary active molecule (fires all active-molecule callbacks) ---
+        # Comparisons are already in their final state, so callbacks see a consistent picture.
+        self.active_molecule = mol_obj
+
+        # Notify comparison-molecule listeners once (state already final).
+        self._notify_comparison_molecules_change()
+
+        return True
+
     def clear_comparison_molecules(self):
         """Remove all comparison molecules."""
         if self._comparison_molecules:

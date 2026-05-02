@@ -167,8 +167,8 @@ class ThreePanelView(ToggleMixin, PlotView):
         # Register comparison-molecule change callback once
         if not self._comparison_callback_registered:
             islat = self._islat
-            if hasattr(islat, 'register_comparison_molecules_change_callback'):
-                islat.register_comparison_molecules_change_callback(
+            if hasattr(islat, 'add_comparison_molecule_change_callback'):
+                islat.add_comparison_molecule_change_callback(
                     self._on_comparison_molecules_changed
                 )
                 self._comparison_callback_registered = True
