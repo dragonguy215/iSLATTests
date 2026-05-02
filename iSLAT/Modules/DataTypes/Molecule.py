@@ -61,7 +61,9 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         'user_save_data', 'hitran_data', 'initial_molecule_parameters',
         'lines', 'intensity', 'spectrum',
         '_temp', '_radius', '_n_mol', '_distance', '_fwhm', '_broad',
+        '_keplerian_fwhm', '_instrumental_profile_key',
         '_temp_val', '_radius_val', '_n_mol_val', '_distance_val', '_fwhm_val', '_broad_val',
+        '_keplerian_fwhm_val', '_instrumental_profile_key_val',
         '_lines_filepath',
         't_kin', 'scale_exponent', 'scale_number', 'radius_init', 'n_mol_init',
         '_wavelength_range', '_model_pixel_res', '_model_line_width',
@@ -77,7 +79,7 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
     _cache_lock = threading.Lock()
     
     INTENSITY_AFFECTING_PARAMS = {'temp', 'n_mol', 'broad', 'rv_shift', 'wavelength_range', 'intensity_calculation_method'}
-    SPECTRUM_AFFECTING_PARAMS = {'radius', 'distance', 'fwhm', 'rv_shift', 'wavelength_range'}
+    SPECTRUM_AFFECTING_PARAMS = {'radius', 'distance', 'fwhm', 'keplerian_fwhm', 'instrumental_profile_key', 'rv_shift', 'wavelength_range'}
     FLUX_AFFECTING_PARAMS = INTENSITY_AFFECTING_PARAMS | SPECTRUM_AFFECTING_PARAMS | {'model_pixel_res'}
     
     # Backward-compatible aliases for the ClassObservableMixin API
@@ -157,6 +159,8 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         self._n_mol = float(getattr(self, '_n_mol_val', None) or self.n_mol_init)
         self._distance = float(getattr(self, '_distance_val', None) or c.DEFAULT_DISTANCE)
         self._fwhm = float(getattr(self, '_fwhm_val', None) or c.DEFAULT_FWHM)
+        self._keplerian_fwhm = float(getattr(self, '_keplerian_fwhm_val', None) or 0.0)
+        self._instrumental_profile_key = str(getattr(self, '_instrumental_profile_key_val', None) or 'constant')
         self._broad = float(getattr(self, '_broad_val', 1.0) or c.INTRINSIC_LINE_WIDTH)
         self._rv_shift = float(getattr(self, '_rv_shift', None) if getattr(self, '_rv_shift', None) is not None else c.DEFAULT_MOLECULE_RV)
 
@@ -199,6 +203,8 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
             self._radius,
             self._distance,
             self._fwhm,
+            self._keplerian_fwhm,
+            self._instrumental_profile_key,
             self._rv_shift,
             wavelength_tuple,
             self._compute_intensity_hash()  # Include intensity hash for dependencies
@@ -222,6 +228,8 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         # Get instance values from user save data or kwargs
         self._distance_val = usd.get('Dist', kwargs.get('distance', c.DEFAULT_DISTANCE))
         self._fwhm_val = usd.get('FWHM', kwargs.get('fwhm', c.DEFAULT_FWHM))
+        self._keplerian_fwhm_val = usd.get('KeplerianFWHM', kwargs.get('keplerian_fwhm', 0.0))
+        self._instrumental_profile_key_val = usd.get('InstrumentalProfile', kwargs.get('instrumental_profile_key', 'constant'))
         self._broad_val = usd.get('Broad', kwargs.get('_broad', c.INTRINSIC_LINE_WIDTH))
         self._rv_shift = usd.get('RV Shift', kwargs.get('rv_shift', c.DEFAULT_MOLECULE_RV))
 
@@ -248,6 +256,8 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         # Get instance values from kwargs or defaults
         self._distance_val = kwargs.get('Dist', kwargs.get('distance', c.DEFAULT_DISTANCE))
         self._fwhm_val = kwargs.get('FWHM', kwargs.get('fwhm', c.DEFAULT_FWHM))
+        self._keplerian_fwhm_val = kwargs.get('KeplerianFWHM', kwargs.get('keplerian_fwhm', 0.0))
+        self._instrumental_profile_key_val = kwargs.get('InstrumentalProfile', kwargs.get('instrumental_profile_key', 'constant'))
         self._broad_val = kwargs.get('Broad', kwargs.get('_broad', c.INTRINSIC_LINE_WIDTH))
         self._rv_shift = kwargs.get('rv_shift', kwargs.get('RV Shift', c.DEFAULT_MOLECULE_RV))
 
@@ -363,32 +373,89 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         # Always recreate spectrum when parameters change
         Spectrum = _get_spectrum_module()
         mean_wavelength = (self.wavelength_range[0] + self.wavelength_range[1]) / 2.0
-        delta_lambda = mean_wavelength * (self._fwhm / c.SPEED_OF_LIGHT_KMS)
-        spectral_resolution = mean_wavelength / delta_lambda if delta_lambda > 0 else self.model_line_width
-        
+
+        # ------------------------------------------------------------------
+        # Build the instrumental profile and combine with Keplerian FWHM
+        # ------------------------------------------------------------------
+        from iSLAT.Modules.DataProcessing.InstrumentalProfiles import (
+            PROFILE_REGISTRY, ConstantProfile
+        )
+        profile_key = self._instrumental_profile_key or 'constant'
+        profile_cls = PROFILE_REGISTRY.get(profile_key, ConstantProfile)
+        profile = profile_cls(self._fwhm) if profile_key == 'constant' else profile_cls()
+
+        kep_fwhm_kms = self._keplerian_fwhm
+        use_constant_scalar = (profile_key == 'constant' and kep_fwhm_kms == 0.0)
+
+        if use_constant_scalar:
+            # Fast path: single scalar R — no per-line function overhead
+            delta_lambda = mean_wavelength * (self._fwhm / c.SPEED_OF_LIGHT_KMS)
+            spectral_resolution = mean_wavelength / delta_lambda if delta_lambda > 0 else self.model_line_width
+            R_func = None
+            # Representative FWHM for grid spacing
+            rep_fwhm_kms = self._fwhm
+        else:
+            # General path: build a callable R_eff(λ) that combines instrumental
+            # and Keplerian FWHM in quadrature:
+            #   FWHM_total(λ) = sqrt(FWHM_inst(λ)^2 + FWHM_kep(λ)^2)
+            #   R_eff(λ)      = λ / FWHM_total(λ)
+            _profile = profile  # capture for closure
+            _kep = kep_fwhm_kms
+            _fwhm_kms_fallback = self._fwhm  # fallback for out-of-coverage wavelengths
+
+            def R_func(lam):
+                """Effective resolving power combining instrumental + Keplerian broadening.
+
+                Wavelengths outside the instrument's coverage (R_inst = NaN) fall
+                back to the constant instrumental FWHM so that NaN never reaches
+                Spectrum._convol_flux.
+                """
+                import numpy as _np
+                lam = _np.atleast_1d(_np.asarray(lam, dtype=float))
+                R_inst = _np.asarray(_profile.get_R(lam), dtype=float)
+
+                # Fallback R for out-of-coverage wavelengths (NaN or ≤ 0)
+                R_fallback = c.SPEED_OF_LIGHT_KMS / _fwhm_kms_fallback
+                bad = ~_np.isfinite(R_inst) | (R_inst <= 0)
+                R_inst = _np.where(bad, R_fallback, R_inst)
+
+                fwhm_inst_um = lam / R_inst
+                fwhm_kep_um = lam * (_kep / c.SPEED_OF_LIGHT_KMS)
+                fwhm_total_um = _np.sqrt(fwhm_inst_um ** 2 + fwhm_kep_um ** 2)
+                # Guard against zero total FWHM (shouldn't happen in practice)
+                fwhm_total_um = _np.where(fwhm_total_um > 0, fwhm_total_um, fwhm_inst_um)
+                return lam / fwhm_total_um
+
+            # Representative scalar R at the mean wavelength (used to size the grid)
+            R_at_mean = float(np.atleast_1d(np.asarray(R_func(np.array([mean_wavelength]))))[0])
+            if not np.isfinite(R_at_mean) or R_at_mean <= 0:
+                # Fall back to constant instrumental FWHM if profile returns NaN
+                # (e.g. wavelength outside MIRI coverage)
+                R_at_mean = mean_wavelength / (mean_wavelength * self._fwhm / c.SPEED_OF_LIGHT_KMS)
+            spectral_resolution = R_at_mean
+            rep_fwhm_kms = c.SPEED_OF_LIGHT_KMS / R_at_mean
+
         # Use consistent wavelength range for all molecules to ensure identical grids
         if hasattr(self, '_wavelength_range') and self._wavelength_range is not None:
             global_min, global_max = self._wavelength_range
-            # Use the exact global range
             spectrum_lam_min = global_min
             spectrum_lam_max = global_max
         else:
-            # Fallback to standard range for backward compatibility
             spectrum_lam_min = self.wavelength_range[0]
             spectrum_lam_max = self.wavelength_range[1]
-        
+
         # Always compute the internal spectrum on a fine grid that properly
-        # Nyquist-samples the instrumental line spread function. The user's
+        # Nyquist-samples the narrowest expected line width. The user's
         # model_pixel_res is applied later via flux-conserving resampling
-        # (_spectres) in get_flux(), ensuring that changing pixel resolution
-        # does not alter the total flux.
-        fine_dlambda = (mean_wavelength / c.SPEED_OF_LIGHT_KMS * self._fwhm) / c.PIXELS_PER_FWHM
-        
+        # (_spectres) in get_flux().
+        fine_dlambda = (mean_wavelength / c.SPEED_OF_LIGHT_KMS * rep_fwhm_kms) / c.PIXELS_PER_FWHM
+
         self.spectrum = Spectrum(
             lam_min=spectrum_lam_min,
             lam_max=spectrum_lam_max,
             dlambda=fine_dlambda,
             R=spectral_resolution,
+            R_func=R_func,
             distance=self._distance,
             wavelength_range=self._wavelength_range
         )
@@ -716,8 +783,17 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
     temp = _make_property('temp', converter=float, special_setter=lambda self, value: setattr(self, 't_kin', value))
     radius = _make_property('radius', converter=float)
     distance = _make_property('distance', converter=float)
+    # fwhm — the *instrumental* FWHM constant (km/s).  Used by ConstantProfile
+    # and as the grid-sizing hint for non-constant profiles.
     fwhm = _make_property('fwhm', converter=float, special_setter=lambda self, value: setattr(self, 'spectrum', None))
+    # Alias so GUI / notebooks can use either name
+    instrumental_fwhm = fwhm
+
+    # Keplerian FWHM broadening added in quadrature with the instrumental profile
+    keplerian_fwhm = _make_property('keplerian_fwhm', converter=float, special_setter=lambda self, value: setattr(self, 'spectrum', None))
+
     model_pixel_res = _make_property('model_pixel_res', converter=float)
+    instrumental_profile_key = _make_property('instrumental_profile_key', converter=str, special_setter=lambda self, value: setattr(self, 'spectrum', None))
     broad = _make_property('broad', converter=float)
     rv_shift = _make_property('rv_shift', converter=float)
     n_mol = _make_property('n_mol', converter=float)
@@ -819,7 +895,10 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         # Properties with special setters
         special_setters = {
             'temp': lambda self, value: setattr(self, 't_kin', value),
-            'fwhm': lambda self, value: setattr(self, 'spectrum', None)
+            'fwhm': lambda self, value: setattr(self, 'spectrum', None),
+            'instrumental_fwhm': lambda self, value: setattr(self, 'spectrum', None),
+            'keplerian_fwhm': lambda self, value: setattr(self, 'spectrum', None),
+            'instrumental_profile_key': lambda self, value: setattr(self, 'spectrum', None),
         }
         
         # Batch process parameters with type conversion

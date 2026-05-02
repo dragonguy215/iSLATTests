@@ -821,7 +821,7 @@ def write_molecules_to_csv(molecules_dict, file_path=save_folder_path, file_name
     try:
         with open(csv_filename, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
-            header = ['Molecule Name', 'File Path', 'Molecule Label', 'Temp', 'Rad', 'N_Mol', 'Color', 'Vis', 'Dist', 'StellarRV', 'FWHM', 'Broad', 'RV Shift']
+            header = ['Molecule Name', 'File Path', 'Molecule Label', 'Temp', 'Rad', 'N_Mol', 'Color', 'Vis', 'Dist', 'StellarRV', 'FWHM', 'KeplerianFWHM', 'InstrumentalProfile', 'Broad', 'RV Shift']
             writer.writerow(header)
 
             if is_raw_dict:
@@ -841,6 +841,8 @@ def write_molecules_to_csv(molecules_dict, file_path=save_folder_path, file_name
                         params.get("Dist", ""),
                         params.get("StellarRV", ""),
                         params.get("FWHM", ""),
+                        params.get("KeplerianFWHM", 0.0),
+                        params.get("InstrumentalProfile", "constant"),
                         params.get("Broad", ""),
                         params.get("RV Shift", ""),
                     ]
@@ -859,9 +861,11 @@ def write_molecules_to_csv(molecules_dict, file_path=save_folder_path, file_name
                         getattr(mol_obj, 'is_visible', True),
                         getattr(molecules_dict, '_global_dist', 140),
                         getattr(molecules_dict, '_global_stellar_rv', 0),
-                        getattr(mol_obj, 'fwhm', 200),       # Default FWHM in km/s
-                        getattr(mol_obj, 'broad', 2.5),       # Default broadening
-                        getattr(mol_obj, 'rv_shift', 0),      # Default RV shift
+                        getattr(mol_obj, 'fwhm', 200),                              # Instrumental FWHM in km/s
+                        getattr(mol_obj, 'keplerian_fwhm', 0.0),                    # Keplerian FWHM in km/s
+                        getattr(mol_obj, 'instrumental_profile_key', 'constant'),  # Profile key
+                        getattr(mol_obj, 'broad', 2.5),                             # Default broadening
+                        getattr(mol_obj, 'rv_shift', 0),                            # Default RV shift
                     ]
                     writer.writerow(row)
 

@@ -477,20 +477,32 @@ class ControlPanel(ttk.Frame):
         col = 0
         row = start_row 
         for field_key, field_config in self.MOLECULE_FIELDS.items():
-             
-            entry, var = self._create_molecule_parameter_entry(
-                parameters_frame,
-                field_config['label'], 
-                field_config['attribute'], 
-                row, 
-                col, 
-                tip_text=field_config['tip']
-            )
-            
-            if entry and var:
-                self._molecule_parameter_entries[field_config['attribute']] = (entry, var)
-            row +=1
+            widget_type = field_config.get('widget_type', 'entry')
 
+            if widget_type == 'optionmenu':
+                widget, var = self._create_molecule_optionmenu(
+                    parameters_frame,
+                    field_config['label'],
+                    field_config['attribute'],
+                    row,
+                    col,
+                    options=field_config.get('options', []),
+                    option_labels=field_config.get('option_labels', {}),
+                    tip_text=field_config.get('tip'),
+                )
+            else:
+                widget, var = self._create_molecule_parameter_entry(
+                    parameters_frame,
+                    field_config['label'], 
+                    field_config['attribute'], 
+                    row, 
+                    col, 
+                    tip_text=field_config['tip']
+                )
+            
+            if widget and var:
+                self._molecule_parameter_entries[field_config['attribute']] = (widget, var)
+            row += 1
             col_offset += 1
 
         # default_btn = ttk.Button(parameters_frame, text="default parameters", command= lambda: self._update_molecule_parameter_fields(default=True))
@@ -593,6 +605,77 @@ class ControlPanel(ttk.Frame):
         initial_value = self._get_active_molecule_parameter_value(param_name)
         
         return self._create_simple_entry(parent, label_text, initial_value, row, col, update_active_molecule_parameter, width, param_name=param_name, tip_text=tip_text)
+
+    def _create_molecule_optionmenu(self, parent, label_text, param_name, row, col,
+                                     options=None, option_labels=None, tip_text=None):
+        """Create an OptionMenu bound to a string attribute of the active molecule.
+
+        Parameters
+        ----------
+        parent : tk widget
+            Parent widget.
+        label_text : str
+            Label shown to the left of the menu.
+        param_name : str
+            Name of the molecule attribute to read/write.
+        row, col : int
+            Grid position.
+        options : list[str]
+            Sequence of valid option keys.
+        option_labels : dict[str, str]
+            Optional mapping from option key to human-readable label.  When
+            provided the menu shows the label but stores/reads the key.
+        tip_text : str or None
+            Tooltip text for the label.
+        """
+        options = options or []
+        option_labels = option_labels or {}
+
+        # Build display labels (fall back to the key itself)
+        display_labels = [option_labels.get(k, k) for k in options]
+        # Reverse map: display label → key
+        label_to_key = {option_labels.get(k, k): k for k in options}
+
+        label = ttk.Label(parent, text=label_text)
+        label.grid(row=row, column=col, padx=_ENTRY_LABEL_PADX, pady=5)
+        if tip_text:
+            CreateToolTip(label, tip_text)
+
+        # Get current value
+        initial_key = self._get_active_molecule_parameter_value(param_name)
+        initial_display = option_labels.get(str(initial_key), str(initial_key))
+
+        var = tk.StringVar(value=initial_display)
+
+        def on_option_changed(*_args):
+            if not hasattr(self.islat, 'active_molecule') or not self.islat.active_molecule:
+                return
+            active_mol = None
+            if hasattr(self.islat, 'molecules_dict') and self.islat.molecules_dict:
+                if isinstance(self.islat.active_molecule, str) and self.islat.active_molecule in self.islat.molecules_dict:
+                    active_mol = self.islat.molecules_dict[self.islat.active_molecule]
+                elif hasattr(self.islat.active_molecule, 'name'):
+                    active_mol = self.islat.active_molecule
+            if not active_mol:
+                return
+            selected_display = var.get()
+            selected_key = label_to_key.get(selected_display, selected_display)
+            try:
+                old_value = getattr(active_mol, param_name, None)
+                if old_value != selected_key:
+                    setattr(active_mol, param_name, selected_key)
+            except Exception as e:
+                print(f"Error updating {param_name}: {e}")
+
+        menu = tk.OptionMenu(parent, var, *display_labels, command=lambda _: on_option_changed())
+        menu.config(width=max(len(d) for d in display_labels) if display_labels else 10)
+        menu.grid(row=row, column=col + 1, padx=_ENTRY_FIELD_PADX, sticky="w")
+
+        # Store reverse map on the var so _update_molecule_parameter_fields can sync it
+        var._label_to_key = label_to_key
+        var._key_to_label = option_labels
+
+        return menu, var
 
     def _load_field_configurations(self):
         """Load field configurations from JSON file using iSLAT file handling"""
@@ -1185,7 +1268,10 @@ class ControlPanel(ttk.Frame):
             return
         else:
             for param_name, (entry, var) in self._molecule_parameter_entries.items():
-                new_value = self._get_active_molecule_parameter_value(param_name) 
+                new_value = self._get_active_molecule_parameter_value(param_name)
+                # OptionMenu vars store display labels; convert the raw key first
+                if hasattr(var, '_key_to_label'):
+                    new_value = var._key_to_label.get(str(new_value), str(new_value))
                 current_value = var.get()
                 if current_value != new_value:
                     self._set_var(var, new_value)

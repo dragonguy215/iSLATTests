@@ -56,14 +56,34 @@
             "width": 7,
             "tip": "Column density\nunits: cm^(-2)"
         },
-        "fwhm": {
-            "label": "FWHM:",
+        "instrumental_profile": {
+            "label": "Inst. Profile:",
+            "attribute": "instrumental_profile_key",
+            "datatype": "str",
+            "widget_type": "optionmenu",
+            "options": ["constant", "miri_mrs"],
+            "option_labels": {"constant": "Constant FWHM", "miri_mrs": "JWST MIRI MRS"},
+            "default": "constant",
+            "width": 14,
+            "tip": "Instrumental line-spread\nfunction profile.\n'Constant FWHM' uses the\ninstrumental FWHM value below.\n'JWST MIRI MRS' uses a\nwavelength-dependent R(λ)."
+        },
+        "instrumental_fwhm": {
+            "label": "Inst. FWHM:",
             "attribute": "fwhm",
             "datatype": "float",
             "format": "{:.4g}",
             "default": 160.0,
             "width": 7,
-            "tip": "FWHM for convolution\nof the model spectra\nunits: km/s"
+            "tip": "Instrumental FWHM\n(used when profile = Constant FWHM)\nunits: km/s"
+        },
+        "keplerian_fwhm": {
+            "label": "Kep. FWHM:",
+            "attribute": "keplerian_fwhm",
+            "datatype": "float",
+            "format": "{:.4g}",
+            "default": 0.0,
+            "width": 7,
+            "tip": "Keplerian broadening FWHM\nadded in quadrature with\nthe instrumental profile.\nSet to 0 to disable.\nunits: km/s"
         },
         "broad": {
             "label": "Broadening:",

@@ -671,6 +671,7 @@ class ThreePanelView(ToggleMixin, PlotView):
                 tau=value.get('tau'),
                 data_flux_in_range=data_flux,
                 model_flux_in_range=model_flux,
+                molecule=getattr(islat, 'active_molecule', None),
             )
         else:
             class _Line:
@@ -690,6 +691,7 @@ class ThreePanelView(ToggleMixin, PlotView):
                 tau=value.get('tau'),
                 data_flux_in_range=data_flux,
                 model_flux_in_range=model_flux,
+                molecule=getattr(islat, 'active_molecule', None),
             )
 
         info_str = LineInspectionPlot.format_line_info(info)
