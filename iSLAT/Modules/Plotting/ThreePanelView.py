@@ -266,7 +266,7 @@ class ThreePanelView(ToggleMixin, PlotView):
             self._plot_atomic_lines()
 
         if self._pm.line_toggle:
-            self._plot_saved_lines()
+            self._add_saved_line_artists()
 
         # Respect the legend toggle state
         if not self._pm.legend_toggle:
