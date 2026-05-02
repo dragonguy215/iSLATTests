@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import iSLAT.Modules.FileHandling.iSLATFileHandling as ifh
 import iSLAT.Constants as c
 from ..GUIFunctions import create_button, create_menu_btn
-from ..Tooltips import CreateToolTip
+from ..Tooltips import CreateToolTip, MenuToolTip
 from .ResizableFrame import ResizableFrame
 from iSLAT.Modules.GUI.Widgets.ChartWindow import MoleculeSelector
 from iSLAT.Modules.GUI.PlotGridWindow import PlotGridWindow
@@ -86,23 +86,24 @@ class TopBar(ResizableFrame):
         molecule_menu.add_command(label="Default Molecules", command=self.default_molecules)
         molecule_menu.add_command(label="Add Molecules", command=self.add_molecule)
         molecule_menu.add_command(label="Export Models", command=self.export_models)
+        molecule_menu.add_separator()
+        molecule_menu.add_command(label="Save Parameters (Ctrl+S)", command=self.save_parameters)
+        molecule_menu.add_command(label="Load Parameters (Ctrl+L)", command=self.load_parameters)
+        molecule_menu.add_command(label="Load Parameters From File (Ctrl+Shift+L)", command=self.load_parameters_from_file)
+        molecule_menu.add_command(label="Save Parameters To File (Ctrl+Shift+S)", command=self.save_parameters_to_file)
         molecule_drpdwn.config(menu=molecule_menu)
+        MenuToolTip(molecule_menu, {
+            "HITRAN Query":                        "Open the HITRAN molecule selector\nto query and add molecules by species.",
+            "Default Molecules":                   "Load the default set of molecules\nfor the current spectrum.",
+            "Add Molecules":                       "Add a molecule from the available\nHITRAN files.",
+            "Export Models":                       "Export current model spectra\nto CSV files for external use.",
+            "Save Parameters (Ctrl+S)":            "Save current molecule parameters\nto the default save file\nfor this spectrum.",
+            "Load Parameters (Ctrl+L)":            "Load molecule parameters from\nthe default save file\nfor this spectrum.",
+            "Load Parameters From File (Ctrl+Shift+L)": "Load molecule parameters from\na user-selected CSV save file.",
+            "Save Parameters To File (Ctrl+Shift+S)":   "Save current molecule parameters\nto a user-selected CSV file.",
+        })
 
-        spectrum_drpdwn = create_menu_btn(self.button_frame, self.theme, "Model Parameters", 0, 1)
-        spectrum_menu = tk.Menu(spectrum_drpdwn, tearoff=0,
-            bg=btn_theme.get("background", "lightgray"),
-            fg=self.theme.get("foreground", "#F0F0F0"),
-            activebackground=btn_theme.get("active_background", "gray"),
-            activeforeground=self.theme.get("foreground", "#F0F0F0"),
-        )
-        spectrum_menu.add_command(label="Save Parameters (Ctrl+S)", command=self.save_parameters)
-        spectrum_menu.add_command(label="Load Parameters (Ctrl+L)", command=self.load_parameters)
-        spectrum_menu.add_command(label="Load Parameters From File (Ctrl+Shift+L)", command=self.load_parameters_from_file)
-        spectrum_menu.add_command(label="Output Full Spectrum (Ctrl+Shift+F)", command=lambda: output_full_spectrum(self.islat))
-        spectrum_menu.add_command(label="Display Full Spectrum (Ctrl+F)", command=lambda: FullSpectrumWindow(self.master, self.islat))
-        spectrum_drpdwn.config(menu=spectrum_menu)
-
-        spec_functions_drpwn = create_menu_btn(self.button_frame, self.theme, "Spectral Functions", 0, 2)
+        spec_functions_drpwn = create_menu_btn(self.button_frame, self.theme, "Spectral Functions", 0, 1)
         spec_functions_menu = tk.Menu(spec_functions_drpwn, tearoff=0,
             bg=btn_theme.get("background", "lightgray"),
             fg=self.theme.get("foreground", "#F0F0F0"),
@@ -119,8 +120,22 @@ class TopBar(ResizableFrame):
         spec_functions_menu.add_command(label="Line de-Blender", command=lambda: self.fit_selected_line(deblend=True))
         spec_functions_menu.add_separator()
         spec_functions_menu.add_command(label="Subtract Models from Data", command=self.subtract_models_from_data)
+        spec_functions_menu.add_separator()
+        spec_functions_menu.add_command(label="Output Full Spectrum (Ctrl+Shift+F)", command=lambda: output_full_spectrum(self.islat))
+        spec_functions_menu.add_command(label="Display Full Spectrum (Ctrl+F)", command=lambda: FullSpectrumWindow(self.master, self.islat))
         
         spec_functions_drpwn.config(menu=spec_functions_menu)
+        MenuToolTip(spec_functions_menu, {
+            "Save Line":                        "Save the currently selected line\nto the output line measurements file.",
+            "Fit Line":                         "Fit a Gaussian to the currently\nselected spectral line.",
+            "Fit Saved Lines":                  "Fit Gaussians to all lines\nin the saved line list.",
+            "Fit Saved Lines To Sample":        "Fit saved lines across a sample\nof spectrum files.",
+            "Single Slab Fit":                  "Run a single-slab LTE model fit\nusing the saved line measurements.",
+            "Line de-Blender":                  "Fit and de-blend overlapping\nspectral lines in the selection.",
+            "Subtract Models from Data":        "Subtract all visible molecule models\nfrom the observed spectrum.",
+            "Output Full Spectrum (Ctrl+Shift+F)": "Save the full combined model spectrum\nto a file.",
+            "Display Full Spectrum (Ctrl+F)":   "Open the full combined model spectrum\nin a separate window.",
+        })
 
         saved_lines_tip = "Show saved lines\nfrom the 'Input Line List'\nKeybind: S"
         atomic_lines_tip = "Show atomic lines\nusing separation threshold\nset in the 'Line Separ.\nKeybind: A"
@@ -980,6 +995,50 @@ class TopBar(ResizableFrame):
             if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
                 self.islat.GUI.data_field.insert_text(
                     f'Error loading parameters: {str(e)}',
+                    clear_after=True
+                )
+
+    def save_parameters_to_file(self):
+        """
+        Save molecule parameters to a user-selected CSV file in the SAVES folder.
+        Opens a save dialog to let the user choose the destination filename.
+        """
+        # Open save dialog starting in the SAVES folder
+        selected_file = filedialog.asksaveasfilename(
+            title="Save parameters to file",
+            initialdir=str(save_folder_path),
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+
+        if not selected_file:
+            return  # User cancelled
+
+        try:
+            file_dir = os.path.dirname(selected_file)
+            file_name = os.path.basename(selected_file)
+
+            saved_file = write_molecules_to_csv(
+                self.islat.molecules_dict,
+                file_path=file_dir,
+                file_name=file_name
+            )
+
+            if saved_file:
+                if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+                    self.islat.GUI.data_field.insert_text(
+                        f'Molecule parameters saved to: {saved_file}',
+                        clear_after=True
+                    )
+                print(f"Molecule parameters saved successfully to: {saved_file}")
+            else:
+                print("Failed to save molecule parameters")
+
+        except Exception as e:
+            print(f"Error saving parameters to file: {e}")
+            if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+                self.islat.GUI.data_field.insert_text(
+                    f'Error saving parameters: {str(e)}',
                     clear_after=True
                 )
 

@@ -1,4 +1,4 @@
-from tkinter import Toplevel, Label, LEFT, SOLID  # For ttk.Style
+from tkinter import Toplevel, Label, LEFT, SOLID, TclError
 
 # Module-level theme reference for tooltip colors.
 # Call set_tooltip_theme(theme_dict) once at GUI startup so every
@@ -81,3 +81,81 @@ def CreateToolTip(widget, text, bg=None, fg=None):
     widget.bind('<Leave>', leave)
 
     return toolTip
+
+
+class MenuToolTip:
+    """Tooltip support for individual tk.Menu entries.
+
+    Uses the ``<<MenuSelect>>`` virtual event, which Tk fires on all
+    platforms (including native Windows / macOS menus) whenever the
+    highlighted item changes.  Tooltip position follows the pointer so
+    it works even when ``winfo_rootx`` returns 0 for native menus.
+
+    Usage::
+
+        tips = {
+            "Label A": "Short description of Label A.",
+            "Label B": "Short description of Label B.",
+        }
+        MenuToolTip(some_menu, tips)
+    """
+
+    def __init__(self, menu, tips: dict) -> None:
+        self.menu = menu
+        self.tips = tips
+        self.tipwindow = None
+        self._last_index = None
+
+        menu.bind("<<MenuSelect>>", self._on_select)
+        menu.bind("<Unmap>", self._on_leave)
+
+    def _on_select(self, event) -> None:
+        try:
+            index = self.menu.index("active")
+        except TclError:
+            self._hide()
+            return
+
+        if index == self._last_index:
+            return
+        self._last_index = index
+        self._hide()
+
+        try:
+            label = self.menu.entrycget(index, "label")
+        except TclError:
+            return  # separator or other non-labelled entry
+
+        tip_text = self.tips.get(label)
+        if not tip_text:
+            return
+
+        # Use the pointer position — reliable even for native OS menus
+        x = self.menu.winfo_pointerx() + 20
+        y = self.menu.winfo_pointery()
+        self._show(tip_text, x, y)
+
+    def _on_leave(self, event=None) -> None:
+        self._last_index = None
+        self._hide()
+
+    def _show(self, text: str, x: int, y: int) -> None:
+        if self.tipwindow:
+            return
+        bg, fg = _resolve_tooltip_colors()
+        tw = Toplevel(self.menu)
+        tw.wm_overrideredirect(True)
+        tw.attributes("-topmost", True)
+        tw.wm_geometry(f"+{x}+{y}")
+        Label(
+            tw, text=text, justify=LEFT,
+            background=bg, foreground=fg,
+            relief=SOLID, borderwidth=1,
+            font=("tahoma", "12", "normal"),
+        ).pack(ipadx=1)
+        self.tipwindow = tw
+
+    def _hide(self) -> None:
+        if self.tipwindow:
+            self.tipwindow.destroy()
+            self.tipwindow = None

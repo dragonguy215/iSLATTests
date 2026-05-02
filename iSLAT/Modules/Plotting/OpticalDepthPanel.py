@@ -4,9 +4,9 @@ OpticalDepthPanel -- Concrete :class:`SpectralPanel` for optical depth display.
 Renders the convolved optical-depth profile τ(λ) for one or more
 molecules on a single axes.  Supports two display modes:
 
-* **profile** (default) – continuous Gaussian-convolved τ(λ) with
+* **profile** (default) - continuous Gaussian-convolved τ(λ) with
   stacked ``fill_between`` per molecule.
-* **stem** – vertical lines at each line-center wavelength with
+* **stem** - vertical lines at each line-center wavelength with
   height equal to the per-line τ value.
 
 Used both as a standalone single-panel plot and as the cell type
