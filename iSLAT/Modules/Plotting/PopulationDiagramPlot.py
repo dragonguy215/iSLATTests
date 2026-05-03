@@ -390,6 +390,7 @@ class PopulationDiagramPlot(BasePlot):
         lev_low = np.asarray(int_pars["lev_low"]) if "lev_low" in int_pars.columns else None
         e_low = np.asarray(int_pars["e_low"]) if "e_low" in int_pars.columns else None
         g_low = np.asarray(int_pars["g_low"]) if "g_low" in int_pars.columns else None
+        tau = np.asarray(int_pars["tau"], dtype=float) if "tau" in int_pars.columns else None
 
         radius = comp["radius"]
         distance = comp["distance"]
@@ -423,6 +424,7 @@ class PopulationDiagramPlot(BasePlot):
             "lev_up": lev_up,
             "lev_low": lev_low,
             "e_low": e_low,
+            "tau": tau,
             "valid_mask": valid_mask,
             "beam_s": beam_s,
         }
@@ -507,6 +509,7 @@ class PopulationDiagramPlot(BasePlot):
             * ``'intens'`` — model intensity
             * ``'lev_up'`` — upper quantum-state label (categorical)
             * ``'lev_low'``— lower quantum-state label (categorical)
+            * ``'tau'``     — line-center opacity
             * ``'component'`` — which molecule / component the point
               belongs to (categorical)
             * ``'molecule'`` — alias for ``'component'``; colours each
@@ -695,6 +698,7 @@ class PopulationDiagramPlot(BasePlot):
             "g_low": r"$g_{low}$",
             "wavelength": r"$\lambda$ (μm)",
             "intens": "Intensity",
+            "tau": r"Opacity ($\tau$)",
         }
         return _LABELS.get(prop, prop)
 

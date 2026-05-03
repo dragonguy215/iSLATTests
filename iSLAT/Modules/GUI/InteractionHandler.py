@@ -235,6 +235,7 @@ class InteractionHandler:
             ("Lower-state degeneracy (g_low)",  "g_low"),
             ("Wavelength (μm)",                 "wavelength"),
             ("Model intensity",                 "intens"),
+            ("Line-center opacity (tau)",       "tau"),
             ("Upper quantum label (lev_up)",    "lev_up"),
             ("Lower quantum label (lev_low)",   "lev_low"),
             ("Molecule / component",            "molecule"),
