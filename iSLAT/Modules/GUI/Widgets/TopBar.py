@@ -743,6 +743,15 @@ class TopBar(ResizableFrame):
             return
 
         try:
+            if hasattr(self.islat, 'GUI') and self.islat.GUI is not None:
+                if hasattr(self.islat.GUI, 'plot'):
+                    self.islat.GUI.plot.update_model_plot()
+            if self.control_panel is not None:
+                self.control_panel._update_molecule_parameter_fields()
+        except Exception as e:
+            print(f"single_slab_fit: GUI refresh warning — {e}")
+
+        try:
             slab_model.save_results(fitted_result)
         except Exception as e:
             self.data_field.insert_text(f"Error saving slab model results: {e}\n")
