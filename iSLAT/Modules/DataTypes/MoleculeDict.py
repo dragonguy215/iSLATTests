@@ -109,6 +109,15 @@ class MoleculeDict(ObservableMixin, dict):
         
         self._init_callbacks()  # ObservableMixin: initialises self._callbacks
         self._suppress_global_callbacks: bool = False
+
+        # --- Active molecule set -------------------------------------------
+        # Ownership of the active molecule and comparison molecules lives here
+        # so that any component that holds a MoleculeDict reference can manage
+        # and observe the active set without depending on iSLAT directly.
+        self._active_molecule: Optional["Molecule"] = None
+        self._comparison_molecules: List["Molecule"] = []
+        self._active_molecule_change_callbacks: List[Callable] = []
+        self._comparison_molecules_change_callbacks: List[Callable] = []
         
         from .Molecule import Molecule
         Molecule.add_molecule_parameter_change_callback(self._on_molecule_parameter_changed)
@@ -1723,3 +1732,176 @@ class MoleculeDict(ObservableMixin, dict):
             # Clear summed flux cache when this changes
             self._summed_flux_cache.clear()
             self._notify_global_parameter_change('match_spectral_sampling', old_value, value)
+
+    # ==================================================================
+    # Active molecule set management
+    # ==================================================================
+
+    @property
+    def active_molecule(self) -> Optional["Molecule"]:
+        """The primary active molecule in the line inspection plot."""
+        return self._active_molecule
+
+    @active_molecule.setter
+    def active_molecule(self, molecule) -> None:
+        """Set the active molecule by Molecule object or name string."""
+        old_molecule = self._active_molecule
+        if isinstance(molecule, Molecule):
+            self._active_molecule = molecule
+        elif isinstance(molecule, str):
+            if molecule in self:
+                self._active_molecule = self[molecule]
+            else:
+                raise ValueError(f"Molecule '{molecule}' not found in MoleculeDict.")
+        elif molecule is None:
+            self._active_molecule = None
+        else:
+            raise TypeError(
+                f"active_molecule must be a Molecule, str, or None — got {type(molecule)!r}"
+            )
+        self._notify_active_molecule_change(old_molecule, self._active_molecule)
+
+    @property
+    def comparison_molecules(self) -> List["Molecule"]:
+        """Secondary molecules rendered alongside the active molecule."""
+        return list(self._comparison_molecules)
+
+    def get_active_set(self) -> List["Molecule"]:
+        """Return the primary molecule followed by all comparison molecules.
+
+        The primary molecule is always first.  None values and duplicates
+        are filtered out.
+        """
+        result: List["Molecule"] = []
+        if self._active_molecule is not None:
+            result.append(self._active_molecule)
+        for mol in self._comparison_molecules:
+            if mol is not None and mol not in result:
+                result.append(mol)
+        return result
+
+    def toggle_comparison_molecule(self, molecule) -> bool:
+        """Add or remove *molecule* from the comparison list.
+
+        Parameters
+        ----------
+        molecule : str or Molecule
+            The molecule to toggle.
+
+        Returns
+        -------
+        bool
+            ``True`` if added, ``False`` if removed.
+        """
+        mol_obj = self._resolve_active_set_molecule(molecule)
+        if mol_obj is None:
+            return False
+
+        if mol_obj in self._comparison_molecules:
+            self._comparison_molecules.remove(mol_obj)
+            self._notify_comparison_molecules_change()
+            return False
+        else:
+            self._comparison_molecules.append(mol_obj)
+            self._notify_comparison_molecules_change()
+            return True
+
+    def promote_to_active_molecule(self, molecule) -> bool:
+        """Make *molecule* the primary active molecule.
+
+        The current primary is moved into the comparison list (preserving
+        multi-molecule inspection).  If *molecule* was already a comparison
+        molecule it is removed from that list.  All other comparisons are
+        unchanged.  Active-molecule callbacks fire after comparisons are
+        already in their final state.
+
+        Returns
+        -------
+        bool
+            ``True`` on success, ``False`` if molecule could not be resolved
+            or was already the active one.
+        """
+        mol_obj = self._resolve_active_set_molecule(molecule)
+        if mol_obj is None:
+            return False
+
+        old_active = self._active_molecule
+        if mol_obj is old_active:
+            return False
+
+        # Silently update comparisons before firing active-molecule callbacks
+        # so subscribers see a fully-consistent state.
+        if old_active is not None and old_active not in self._comparison_molecules:
+            self._comparison_molecules.append(old_active)
+
+        if mol_obj in self._comparison_molecules:
+            self._comparison_molecules.remove(mol_obj)
+
+        # Fire active-molecule callbacks (comparisons already final)
+        self.active_molecule = mol_obj
+
+        # Notify comparison listeners once
+        self._notify_comparison_molecules_change()
+        return True
+
+    def clear_comparison_molecules(self) -> None:
+        """Remove all comparison molecules."""
+        if self._comparison_molecules:
+            self._comparison_molecules.clear()
+            self._notify_comparison_molecules_change()
+
+    # --- Callback helpers -----------------------------------------------
+
+    def add_active_molecule_change_callback(self, callback: Callable) -> None:
+        """Register *callback* to be called when the active molecule changes.
+
+        Signature: ``callback(old_molecule, new_molecule)``
+        """
+        if callback not in self._active_molecule_change_callbacks:
+            self._active_molecule_change_callbacks.append(callback)
+
+    def remove_active_molecule_change_callback(self, callback: Callable) -> None:
+        """Deregister *callback* from active-molecule-change notifications."""
+        try:
+            self._active_molecule_change_callbacks.remove(callback)
+        except ValueError:
+            pass
+
+    def _notify_active_molecule_change(
+        self, old_molecule: Optional["Molecule"], new_molecule: Optional["Molecule"]
+    ) -> None:
+        for cb in list(self._active_molecule_change_callbacks):
+            try:
+                cb(old_molecule, new_molecule)
+            except Exception as exc:
+                print(f"Error in active-molecule callback {cb!r}: {exc}")
+
+    def add_comparison_molecule_change_callback(self, callback: Callable) -> None:
+        """Register *callback* to be called when the comparison list changes.
+
+        Signature: ``callback(comparison_molecules_list)``
+        """
+        if callback not in self._comparison_molecules_change_callbacks:
+            self._comparison_molecules_change_callbacks.append(callback)
+
+    def remove_comparison_molecule_change_callback(self, callback: Callable) -> None:
+        """Deregister *callback* from comparison-molecule-change notifications."""
+        try:
+            self._comparison_molecules_change_callbacks.remove(callback)
+        except ValueError:
+            pass
+
+    def _notify_comparison_molecules_change(self) -> None:
+        for cb in list(self._comparison_molecules_change_callbacks):
+            try:
+                cb(self._comparison_molecules)
+            except Exception as exc:
+                print(f"Error in comparison-molecule callback {cb!r}: {exc}")
+
+    def _resolve_active_set_molecule(self, molecule) -> Optional["Molecule"]:
+        """Resolve a Molecule object or name string to a Molecule in this dict."""
+        if isinstance(molecule, Molecule):
+            return molecule
+        if isinstance(molecule, str) and molecule in self:
+            return self[molecule]
+        return None

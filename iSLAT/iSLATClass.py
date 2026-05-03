@@ -42,20 +42,13 @@ class iSLAT:
         
         # === CORE STATE ===
         self._user_settings = None
-        self._active_molecule = None
         self.GUI = None
         
         # Initialize collections
         self.molecules_dict = MoleculeDict()
         self.callbacks = {}
-        
-        # === CALLBACK SYSTEM ===
-        self._active_molecule_change_callbacks = []
-        self._comparison_molecules_change_callbacks = []
-
-        # Comparison molecules — secondary molecules rendered alongside the
-        # active molecule in the line inspection plot (shift-click selection).
-        self._comparison_molecules: list = []
+        # (active_molecule, comparison_molecules, and their callbacks are
+        # owned by self.molecules_dict — see forwarding proxies below)
         
         # === LAZY LOADING FLAGS ===
         self._initial_molecule_parameters = None
@@ -111,11 +104,11 @@ class iSLAT:
         active_molecule_name = self.user_settings.get("default_active_molecule", "H2O")
         
         if active_molecule_name in self.molecules_dict:
-            self._active_molecule = self.molecules_dict[active_molecule_name]
+            self.molecules_dict.active_molecule = self.molecules_dict[active_molecule_name]
         elif len(self.molecules_dict) > 0:
             # Fall back to the first molecule in the dictionary
             first_mol_name = next(iter(self.molecules_dict))
-            self._active_molecule = self.molecules_dict[first_mol_name]
+            self.molecules_dict.active_molecule = self.molecules_dict[first_mol_name]
             print(f"Default molecule '{active_molecule_name}' not found, using '{first_mol_name}'")
 
     def init_molecules(self, mole_save_data=None, use_parallel=False):
@@ -880,106 +873,31 @@ class iSLAT:
             except Exception as e:
                 print(f"Callback error in {event_type}: {e}")
     
-    def add_active_molecule_change_callback(self, callback):
-        """Add a callback function to be called when active molecule changes"""
-        self._active_molecule_change_callbacks.append(callback)
-    
-    def remove_active_molecule_change_callback(self, callback):
-        """Remove a callback function for active molecule changes"""
-        if callback in self._active_molecule_change_callbacks:
-            self._active_molecule_change_callbacks.remove(callback)
-    
-    def _notify_active_molecule_change(self, old_molecule, new_molecule):
-        """Notify all callbacks that the active molecule has changed"""
-        debug_config.verbose("active_molecule", f"Notifying {len(self._active_molecule_change_callbacks)} callbacks")
-        for i, callback in enumerate(self._active_molecule_change_callbacks):
-            try:
-                callback_name = callback.__name__ if hasattr(callback, '__name__') else str(callback)
-                debug_config.trace("active_molecule", f"Calling callback {i+1}: {callback_name}")
-                callback(old_molecule, new_molecule)
-                debug_config.trace("active_molecule", f"Callback {i+1} completed successfully")
-            except Exception as e:
-                debug_config.error("active_molecule", f"Error in callback {i+1}: {e}")
-        debug_config.verbose("active_molecule", "All callbacks completed")
+    def add_active_molecule_change_callback(self, callback) -> None:
+        """Register a callback for active-molecule changes (forwards to MoleculeDict)."""
+        self.molecules_dict.add_active_molecule_change_callback(callback)
+
+    def remove_active_molecule_change_callback(self, callback) -> None:
+        """Deregister an active-molecule-change callback (forwards to MoleculeDict)."""
+        self.molecules_dict.remove_active_molecule_change_callback(callback)
+
+    def _notify_active_molecule_change(self, old_molecule, new_molecule) -> None:
+        """Forward to MoleculeDict (kept for any legacy direct callers)."""
+        self.molecules_dict._notify_active_molecule_change(old_molecule, new_molecule)
 
     # === COMPARISON MOLECULES ===
     @property
     def comparison_molecules(self) -> list:
         """Secondary molecules rendered in the line inspection plot."""
-        return list(self._comparison_molecules)
+        return self.molecules_dict.comparison_molecules
 
     def toggle_comparison_molecule(self, molecule) -> bool:
-        """Add or remove a molecule from the comparison list.
-
-        Parameters
-        ----------
-        molecule : str or Molecule
-            The molecule to toggle.
-
-        Returns
-        -------
-        bool
-            ``True`` if the molecule was added, ``False`` if removed.
-        """
-        mol_obj = self._resolve_molecule(molecule)
-        if mol_obj is None:
-            return False
-
-        if mol_obj in self._comparison_molecules:
-            self._comparison_molecules.remove(mol_obj)
-            debug_config.info("comparison", f"Removed comparison molecule: {mol_obj.name}")
-            self._notify_comparison_molecules_change()
-            return False
-        else:
-            self._comparison_molecules.append(mol_obj)
-            debug_config.info("comparison", f"Added comparison molecule: {mol_obj.name}")
-            self._notify_comparison_molecules_change()
-            return True
+        """Forward to MoleculeDict.toggle_comparison_molecule."""
+        return self.molecules_dict.toggle_comparison_molecule(molecule)
 
     def promote_to_active_molecule(self, molecule) -> bool:
-        """Make *molecule* the primary active molecule in the line inspection plot.
-
-        The current primary active molecule is moved into the comparison list so
-        it remains visible in the inspection panel.  If *molecule* was already a
-        comparison molecule it is removed from that list (it is now the primary).
-        All other comparison molecules are left unchanged.
-
-        Parameters
-        ----------
-        molecule : str or Molecule
-            The molecule to promote to primary.
-
-        Returns
-        -------
-        bool
-            ``True`` if the promotion succeeded, ``False`` otherwise (e.g. the
-            molecule was already the active one or could not be resolved).
-        """
-        mol_obj = self._resolve_molecule(molecule)
-        if mol_obj is None:
-            return False
-
-        old_active = self._active_molecule
-        if mol_obj is old_active:
-            return False
-
-        # --- update the comparison list silently (no callbacks yet) ---
-        if old_active is not None and old_active not in self._comparison_molecules:
-            self._comparison_molecules.append(old_active)
-            debug_config.info("comparison", f"Moved old active to comparison: {old_active.name}")
-
-        if mol_obj in self._comparison_molecules:
-            self._comparison_molecules.remove(mol_obj)
-            debug_config.info("comparison", f"Removed from comparison (now primary): {mol_obj.name}")
-
-        # --- change the primary active molecule (fires all active-molecule callbacks) ---
-        # Comparisons are already in their final state, so callbacks see a consistent picture.
-        self.active_molecule = mol_obj
-
-        # Notify comparison-molecule listeners once (state already final).
-        self._notify_comparison_molecules_change()
-
-        return True
+        """Forward to MoleculeDict.promote_to_active_molecule."""
+        return self.molecules_dict.promote_to_active_molecule(molecule)
 
     def duplicate_molecule(self, mol_name: str) -> Optional[str]:
         """Duplicate *mol_name* and make the copy the active molecule.
@@ -1002,33 +920,17 @@ class iSLAT:
 
         return new_name
 
-    def clear_comparison_molecules(self):
-        """Remove all comparison molecules."""
-        if self._comparison_molecules:
-            self._comparison_molecules.clear()
-            debug_config.info("comparison", "Cleared all comparison molecules")
-            self._notify_comparison_molecules_change()
+    def clear_comparison_molecules(self) -> None:
+        """Forward to MoleculeDict.clear_comparison_molecules."""
+        self.molecules_dict.clear_comparison_molecules()
 
-    def add_comparison_molecule_change_callback(self, callback):
-        """Register a callback for comparison molecule list changes."""
-        self._comparison_molecules_change_callbacks.append(callback)
+    def add_comparison_molecule_change_callback(self, callback) -> None:
+        """Register a callback for comparison-molecule list changes (forwards to MoleculeDict)."""
+        self.molecules_dict.add_comparison_molecule_change_callback(callback)
 
-    def _notify_comparison_molecules_change(self):
-        """Notify all callbacks that the comparison molecule list changed."""
-        for callback in self._comparison_molecules_change_callbacks:
-            try:
-                callback(self._comparison_molecules)
-            except Exception as e:
-                debug_config.error("comparison", f"Error in comparison callback: {e}")
-
-    def _resolve_molecule(self, molecule):
-        """Resolve a molecule name or object to a Molecule instance."""
-        if isinstance(molecule, Molecule):
-            return molecule
-        elif isinstance(molecule, str):
-            if hasattr(self, 'molecules_dict') and molecule in self.molecules_dict:
-                return self.molecules_dict[molecule]
-        return None
+    def _notify_comparison_molecules_change(self) -> None:
+        """Forward to MoleculeDict (kept for any legacy direct callers)."""
+        self.molecules_dict._notify_comparison_molecules_change()
 
     # === UTILITY METHODS ===
     def _safe_load_data(self, loader_func, cache_attr, error_message):
@@ -1182,40 +1084,23 @@ class iSLAT:
     
     @property
     def active_molecule(self):
-        return self._active_molecule
-    
+        """Forward to MoleculeDict — the authoritative owner of the active molecule."""
+        if hasattr(self, 'molecules_dict'):
+            return self.molecules_dict.active_molecule
+        return None
+
     @active_molecule.setter
-    def active_molecule(self, molecule):
-        """
-        Sets the active molecule based on the provided name or object.
-        """
-        old_molecule = getattr(self, '_active_molecule', None)
-        old_name = getattr(old_molecule, 'name', old_molecule)
-        new_name = getattr(molecule, 'name', molecule) if hasattr(molecule, 'name') else molecule
-        
-        debug_config.info("active_molecule", f"Setting active molecule from {old_name} to {new_name}")
-        
-        try:
-            if isinstance(molecule, Molecule):
-                self._active_molecule = molecule
-            elif isinstance(molecule, str):
-                if hasattr(self, 'molecules_dict') and molecule in self.molecules_dict:
-                    self._active_molecule = self.molecules_dict[molecule]
-                else:
-                    raise ValueError(f"Molecule '{molecule}' not found in the dictionary.")
-            else:
-                raise TypeError("Active molecule must be a Molecule object or a string representing the molecule name.")
-            
-            # Trigger callbacks using the new unified callback system
-            self._trigger_callbacks('active_molecule_changed', old_molecule, self._active_molecule)
-            
-            # Also maintain backwards compatibility with old callback system
-            debug_config.verbose("active_molecule", f"Notifying {len(self._active_molecule_change_callbacks)} callbacks of change")
-            self._notify_active_molecule_change(old_molecule, self._active_molecule)
-                
-        except Exception as e:
-            debug_config.error("active_molecule", f"Error setting active molecule: {e}")
-            # Don't change the active molecule if there's an error
+    def active_molecule(self, molecule) -> None:
+        """Forward to MoleculeDict.active_molecule (also fires unified callbacks)."""
+        if not hasattr(self, 'molecules_dict'):
+            return
+        self.molecules_dict.active_molecule = molecule
+        # Also fire the unified callback system for any subscribers on iSLAT directly.
+        self._trigger_callbacks(
+            'active_molecule_changed',
+            None,
+            self.molecules_dict.active_molecule,
+        )
     
     def subtract_models_from_data(self, visible_only: bool = True) -> Optional[str]:
         """

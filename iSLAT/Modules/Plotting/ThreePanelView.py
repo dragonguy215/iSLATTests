@@ -167,8 +167,10 @@ class ThreePanelView(ToggleMixin, PlotView):
         # Register comparison-molecule change callback once
         if not self._comparison_callback_registered:
             islat = self._islat
-            if hasattr(islat, 'add_comparison_molecule_change_callback'):
-                islat.add_comparison_molecule_change_callback(
+            mol_dict = getattr(islat, 'molecules_dict', None)
+            target = mol_dict if mol_dict is not None else islat
+            if hasattr(target, 'add_comparison_molecule_change_callback'):
+                target.add_comparison_molecule_change_callback(
                     self._on_comparison_molecules_changed
                 )
                 self._comparison_callback_registered = True
@@ -497,10 +499,15 @@ class ThreePanelView(ToggleMixin, PlotView):
         )
 
     def _get_all_active_molecules(self) -> List["Molecule"]:
-        """Return the primary active molecule plus any comparison molecules.
+        """Return the primary molecule followed by all comparison molecules.
 
-        The primary molecule is always first.  *None* entries are filtered out.
+        Delegates to MoleculeDict.get_active_set() when available, with a
+        manual fallback for test scenarios that provide a plain islat stub.
         """
+        mol_dict = getattr(self._islat, 'molecules_dict', None)
+        if mol_dict is not None and hasattr(mol_dict, 'get_active_set'):
+            return mol_dict.get_active_set()
+        # Fallback: reconstruct manually from islat attributes
         result: List["Molecule"] = []
         primary = getattr(self._islat, 'active_molecule', None)
         if primary is not None:

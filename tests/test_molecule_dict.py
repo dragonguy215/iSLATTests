@@ -235,6 +235,217 @@ class TestMoleculeDict:
         assert global_cb_calls[0] == ('wavelength_range', (4.5, 28.0), (5.0, 20.0))
 
 
+class TestMoleculeDictActiveMoleculeSet:
+    """Tests for the active molecule set managed by MoleculeDict (Phase 1)."""
+
+    def _make_molecule(self, name, **kwargs):
+        from iSLAT.Modules.DataTypes.Molecule import Molecule
+        defaults = {
+            'name': name,
+            'displaylabel': name,
+            'filepath': None,
+            'color': '#FF0000',
+            'is_visible': True,
+            'temp': 500.0,
+            'radius': 1.0,
+            'n_mol': 1e18,
+            'distance': 160.0,
+            'fwhm': 130.0,
+            'initial_molecule_parameters': {
+                't_kin': 500.0,
+                'scale_exponent': 18.0,
+                'scale_number': 1.0,
+                'radius_init': 1.0,
+            },
+        }
+        defaults.update(kwargs)
+        return Molecule(**defaults)
+
+    def _make_dict_with_molecules(self):
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        md = MoleculeDict()
+        md['H2O'] = self._make_molecule('H2O')
+        md['CO2'] = self._make_molecule('CO2')
+        md['CO']  = self._make_molecule('CO')
+        return md
+
+    # --- active_molecule property/setter -----------------------------------
+
+    def test_active_molecule_defaults_none(self):
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        md = MoleculeDict()
+        assert md.active_molecule is None
+
+    def test_active_molecule_set_by_object(self):
+        md = self._make_dict_with_molecules()
+        md.active_molecule = md['H2O']
+        assert md.active_molecule is md['H2O']
+
+    def test_active_molecule_set_by_string(self):
+        md = self._make_dict_with_molecules()
+        md.active_molecule = 'CO2'
+        assert md.active_molecule is md['CO2']
+
+    def test_active_molecule_set_none(self):
+        md = self._make_dict_with_molecules()
+        md.active_molecule = md['H2O']
+        md.active_molecule = None
+        assert md.active_molecule is None
+
+    def test_active_molecule_unknown_string_raises(self):
+        md = self._make_dict_with_molecules()
+        with pytest.raises(ValueError):
+            md.active_molecule = 'NonExistent'
+
+    def test_active_molecule_bad_type_raises(self):
+        md = self._make_dict_with_molecules()
+        with pytest.raises(TypeError):
+            md.active_molecule = 42
+
+    # --- active_molecule_change callbacks ----------------------------------
+
+    def test_active_molecule_callback_fires(self):
+        md = self._make_dict_with_molecules()
+        calls = []
+        md.add_active_molecule_change_callback(lambda old, new: calls.append((old, new)))
+        md.active_molecule = md['H2O']
+        assert len(calls) == 1
+        assert calls[0] == (None, md['H2O'])
+
+    def test_active_molecule_callback_receives_old_and_new(self):
+        md = self._make_dict_with_molecules()
+        calls = []
+        md.active_molecule = md['H2O']
+        md.add_active_molecule_change_callback(lambda old, new: calls.append((old, new)))
+        md.active_molecule = md['CO2']
+        assert calls[0] == (md['H2O'], md['CO2'])
+
+    def test_remove_active_molecule_callback(self):
+        md = self._make_dict_with_molecules()
+        calls = []
+        cb = lambda old, new: calls.append((old, new))
+        md.add_active_molecule_change_callback(cb)
+        md.remove_active_molecule_change_callback(cb)
+        md.active_molecule = md['H2O']
+        assert calls == []
+
+    # --- comparison_molecules / get_active_set ----------------------------
+
+    def test_comparison_molecules_defaults_empty(self):
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        md = MoleculeDict()
+        assert md.comparison_molecules == []
+
+    def test_toggle_comparison_adds_molecule(self):
+        md = self._make_dict_with_molecules()
+        added = md.toggle_comparison_molecule(md['CO2'])
+        assert added is True
+        assert md['CO2'] in md.comparison_molecules
+
+    def test_toggle_comparison_removes_molecule(self):
+        md = self._make_dict_with_molecules()
+        md.toggle_comparison_molecule(md['CO2'])
+        removed = md.toggle_comparison_molecule(md['CO2'])
+        assert removed is False
+        assert md['CO2'] not in md.comparison_molecules
+
+    def test_toggle_comparison_by_string(self):
+        md = self._make_dict_with_molecules()
+        md.toggle_comparison_molecule('CO')
+        assert md['CO'] in md.comparison_molecules
+
+    def test_get_active_set_primary_first(self):
+        md = self._make_dict_with_molecules()
+        md.active_molecule = md['H2O']
+        md.toggle_comparison_molecule(md['CO2'])
+        result = md.get_active_set()
+        assert result[0] is md['H2O']
+        assert md['CO2'] in result
+
+    def test_get_active_set_no_duplicates(self):
+        md = self._make_dict_with_molecules()
+        md.active_molecule = md['H2O']
+        md.toggle_comparison_molecule(md['H2O'])  # same molecule → should not duplicate
+        result = md.get_active_set()
+        assert result.count(md['H2O']) == 1
+
+    def test_get_active_set_empty_when_nothing_active(self):
+        from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
+        md = MoleculeDict()
+        assert md.get_active_set() == []
+
+    def test_comparison_molecules_returns_copy(self):
+        md = self._make_dict_with_molecules()
+        md.toggle_comparison_molecule(md['CO2'])
+        copy = md.comparison_molecules
+        copy.clear()
+        assert md['CO2'] in md.comparison_molecules  # original unchanged
+
+    # --- promote_to_active_molecule ----------------------------------------
+
+    def test_promote_moves_old_primary_to_comparison(self):
+        md = self._make_dict_with_molecules()
+        md.active_molecule = md['H2O']
+        md.promote_to_active_molecule(md['CO2'])
+        assert md.active_molecule is md['CO2']
+        assert md['H2O'] in md.comparison_molecules
+
+    def test_promote_removes_new_primary_from_comparison(self):
+        md = self._make_dict_with_molecules()
+        md.active_molecule = md['H2O']
+        md.toggle_comparison_molecule(md['CO2'])
+        md.promote_to_active_molecule(md['CO2'])
+        assert md['CO2'] not in md.comparison_molecules
+
+    def test_promote_already_active_returns_false(self):
+        md = self._make_dict_with_molecules()
+        md.active_molecule = md['H2O']
+        result = md.promote_to_active_molecule(md['H2O'])
+        assert result is False
+
+    def test_promote_by_string(self):
+        md = self._make_dict_with_molecules()
+        md.active_molecule = md['H2O']
+        result = md.promote_to_active_molecule('CO2')
+        assert result is True
+        assert md.active_molecule is md['CO2']
+
+    # --- clear_comparison_molecules ----------------------------------------
+
+    def test_clear_comparison_molecules(self):
+        md = self._make_dict_with_molecules()
+        md.toggle_comparison_molecule(md['CO2'])
+        md.toggle_comparison_molecule(md['CO'])
+        md.clear_comparison_molecules()
+        assert md.comparison_molecules == []
+
+    def test_clear_fires_comparison_callback(self):
+        md = self._make_dict_with_molecules()
+        md.toggle_comparison_molecule(md['CO2'])
+        calls = []
+        md.add_comparison_molecule_change_callback(lambda lst: calls.append(list(lst)))
+        md.clear_comparison_molecules()
+        assert len(calls) == 1
+
+    # --- comparison_molecule_change callbacks ------------------------------
+
+    def test_comparison_callback_fires_on_toggle(self):
+        md = self._make_dict_with_molecules()
+        calls = []
+        md.add_comparison_molecule_change_callback(lambda lst: calls.append(list(lst)))
+        md.toggle_comparison_molecule(md['CO2'])
+        assert len(calls) == 1
+
+    def test_remove_comparison_callback(self):
+        md = self._make_dict_with_molecules()
+        calls = []
+        cb = lambda lst: calls.append(list(lst))
+        md.add_comparison_molecule_change_callback(cb)
+        md.remove_comparison_molecule_change_callback(cb)
+        md.toggle_comparison_molecule(md['CO2'])
+        assert calls == []
+
+
 class TestMoleculeDictHelpers:
     """Tests for MoleculeDict helper functions (_ci_get, _safe_float)."""
 
