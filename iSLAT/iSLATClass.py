@@ -850,20 +850,6 @@ class iSLAT:
             print(f"Error updating model spectrum: {e}")
             self.sum_spectrum_flux = np.zeros_like(self.wave_data) if hasattr(self, 'wave_data') else np.array([])
 
-    # === CALLBACK SYSTEM ===
-    def register_callback(self, event_type, callback_func):
-        """Register a callback for specific events."""
-        if event_type not in self.callbacks:
-            self.callbacks[event_type] = []
-        
-        if callback_func not in self.callbacks[event_type]:
-            self.callbacks[event_type].append(callback_func)
-
-    def unregister_callback(self, event_type, callback_func):
-        """Remove a callback for specific events.""" 
-        if event_type in self.callbacks:
-            self.callbacks[event_type] = [cb for cb in self.callbacks[event_type] if cb != callback_func]
-
     def _trigger_callbacks(self, event_type, *args, **kwargs):
         """Trigger all callbacks for an event type."""
         for callback in self.callbacks.get(event_type, []):

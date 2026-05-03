@@ -90,9 +90,6 @@ class iSLATPlot:
         self.fig = plt.Figure(constrained_layout=True)
         # Use shared 3-panel layout helper from BasePlot
         self.ax1, self.ax2, self.ax3 = BasePlot.create_three_panel_axes(self.fig)
-        self.full_spectrum = self.ax1
-        self.line_inspection = self.ax2
-        self.population_diagram = self.ax3
 
         self.ax1.set_title("Full Spectrum with Line Inspection")
         self.ax1.set_ylabel('Flux density (Jy)')
@@ -147,7 +144,6 @@ class iSLATPlot:
         self.canvas.draw()
 
         self.selected_wave = None
-        self.selected_flux = None
         self.fit_result = None
 
         # Initial data and model computation using new data structures
@@ -296,19 +292,13 @@ class iSLATPlot:
             debug_config.error("main_plot", f"Could not apply plot theming: {e}")
     
     # ------------------------------------------------------------------
-    # Backward-compatibility properties for external code that still
-    # references full_spectrum_plot / full_spectrum_plot_canvas directly.
-    # Now the FullSpectrumView *is* the plot (no inner _fsp wrapper).
+    # Backward-compatibility property for external code that still
+    # references full_spectrum_plot directly.
     # ------------------------------------------------------------------
     @property
     def full_spectrum_plot(self):
         """Return the FullSpectrumView (replaces the old FullSpectrumPlot)."""
         return self._full_spectrum_view
-
-    @property
-    def full_spectrum_plot_canvas(self):
-        """Return the full-spectrum canvas if it exists."""
-        return self._full_spectrum_view._canvas
 
     @property
     def line_inspection_plot(self):
@@ -481,7 +471,6 @@ class iSLATPlot:
         self.fit_result = None
         mask = (self.islat.wave_data >= xmin) & (self.islat.wave_data <= xmax)
         self.selected_wave = self.islat.wave_data[mask]
-        self.selected_flux = self.islat.flux_data[mask]
 
         # Delegate rendering to the active view
         self.active_view.on_selection(xmin, xmax)

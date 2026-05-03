@@ -317,13 +317,6 @@ class GUI:
         parent.grid_rowconfigure(2, weight=1)
         parent.grid_columnconfigure(0, weight=1)
 
-    def update_frame_sizes(self):
-        """Update dynamic frame sizes based on current content."""
-        if hasattr(self, 'left_resizable'):
-            self.left_resizable.update_dynamic_sizes()
-        if hasattr(self, 'main_resizable'):
-            self.main_resizable.update_dynamic_sizes()
-
     def create_window(self):
         from iSLAT import __version__ as iSLAT_version
         from iSLAT.Modules.Plotting.MainPlot import iSLATPlot
@@ -441,9 +434,6 @@ class GUI:
         # Force-exit the process so no background threads keep it alive
         import os
         os._exit(0)
-
-    def get_plot_renderer(self):
-        return self.plot.plot_renderer
 
     # ================================
     # Async Spectrum Display
