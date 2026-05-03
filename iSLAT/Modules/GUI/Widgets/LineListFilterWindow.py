@@ -206,6 +206,7 @@ class LineListFilterWindow(tk.Toplevel):
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
         btn_frame.columnconfigure(2, weight=1)
+        btn_frame.columnconfigure(3, weight=1)
 
         ttk.Button(btn_frame, text="Apply Filters",
                    command=self._apply_filters).grid(
@@ -216,12 +217,15 @@ class LineListFilterWindow(tk.Toplevel):
         ttk.Button(btn_frame, text="Export CSV",
                    command=self._export_csv).grid(
             row=0, column=2, padx=4, pady=4, sticky="ew")
+        ttk.Button(btn_frame, text="Export PAR",
+                   command=self._export_par).grid(
+            row=0, column=3, padx=4, pady=4, sticky="ew")
 
         ttk.Separator(btn_frame, orient="horizontal").grid(
-            row=1, column=0, columnspan=3, sticky="ew", pady=(2, 0))
+            row=1, column=0, columnspan=4, sticky="ew", pady=(2, 0))
 
         apply_mol_frame = ttk.Frame(btn_frame)
-        apply_mol_frame.grid(row=2, column=0, columnspan=3, sticky="ew")
+        apply_mol_frame.grid(row=2, column=0, columnspan=4, sticky="ew")
         apply_mol_frame.columnconfigure(0, weight=1)
         apply_mol_frame.columnconfigure(1, weight=1)
 
@@ -478,5 +482,32 @@ class LineListFilterWindow(tk.Toplevel):
                 self.data_field.insert_text(msg)
             else:
                 messagebox.showinfo("Export Complete", msg, parent=self)
+        except Exception as e:
+            messagebox.showerror("Export Error", str(e), parent=self)
+
+    def _export_par(self):
+        mol_name = getattr(self.mol_obj, "name", "molecule")
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Export Filtered Line List as PAR",
+            defaultextension=".par",
+            initialfile=f"{mol_name}_filtered.par",
+            filetypes=[("PAR files", "*.par"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            out = self._maker.to_par(Path(path))
+            msg = f"Exported {len(self._maker)} lines → {out.name}"
+            if self.data_field is not None:
+                self.data_field.insert_text(msg)
+            else:
+                messagebox.showinfo("Export Complete", msg, parent=self)
+        except RuntimeError as e:
+            messagebox.showerror(
+                "Export Error",
+                f"PAR export requires a HITRAN-sourced line list:\n{e}",
+                parent=self,
+            )
         except Exception as e:
             messagebox.showerror("Export Error", str(e), parent=self)

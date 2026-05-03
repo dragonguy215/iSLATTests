@@ -108,14 +108,15 @@ def _parse_vib_band(spec: str, n_modes: int = 3):
 
     Supported formats
     -----------------
-    ``"v1"``   -> upper *and* lower both from exact v=1 states
-                  (all tuples where ``max(qi) == 1``).
+    ``"v1"``   -> upper from exact v=1 states (``max(qi) == 1``),
+                  lower from *any* state up to v=1 (``max(qi) <= 1``).
+                  Captures all lines *from* the v=1 level, including both
+                  the fundamental band (v=1 → v=0) and hot bands (v=1 → v=1).
     ``"v1-0"`` -> upper from exact v=1, lower from exact v=0.
     ``"v2-1"`` -> upper from exact v=2, lower from exact v=1.
 
-    The leading ``'v'`` is optional.  Both sides use **exact** level matching
-    (not cumulative), mirroring the transition-band convention from the
-    WaterListCombiner notebook.
+    The leading ``'v'`` is optional.  For the two-number ``"vN-M"`` form both
+    sides use **exact** level matching.
 
     Returns
     -------
@@ -134,7 +135,7 @@ def _parse_vib_band(spec: str, n_modes: int = 3):
     if len(parts) == 1:
         n_up = int(parts[0])
         up_set = _vib_perms(n_up, n_modes)
-        low_set = _vib_perms(n_up, n_modes)   # exact same level for single-number spec
+        low_set = _vib_perms_up_to(n_up, n_modes)  # cumulative: captures all bands from this level
     elif len(parts) == 2:
         n_up = int(parts[0])
         n_low = int(parts[1])
@@ -494,9 +495,10 @@ class LineListMaker:
         spec : str
             Band specification string.  The leading ``'v'`` is optional.
 
-            - ``"v1"``   — upper *and* lower both from exact v=1 states.
-            - ``"v1-0"`` — upper from v=1, lower from v=0 (exact).
-            - ``"v2-1"`` — upper from v=2, lower from v=1 (exact).
+            - ``"v1"``   — upper from exact v=1, lower from any state up to
+              v=1 (``max(qi) ≤ 1``).  Captures fundamental *and* hot bands.
+            - ``"v1-0"`` — upper from exact v=1, lower from exact v=0.
+            - ``"v2-1"`` — upper from exact v=2, lower from exact v=1.
 
         n_modes : int
             Number of vibrational modes (default 3 for H₂O, CO₂, etc.).
