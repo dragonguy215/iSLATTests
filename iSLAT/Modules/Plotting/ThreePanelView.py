@@ -717,18 +717,15 @@ class ThreePanelView(ToggleMixin, PlotView):
                     colors[picked_scatter_idx] = mcolors.to_rgba('orange')
                 sc.set_facecolors(colors)
 
-        # Switch active molecule and re-render population diagram if needed
-        if (picked_mol_name and picked_mol_name != getattr(
-                getattr(self._islat, 'active_molecule', None), 'name', None)):
-            self._islat.active_molecule = picked_mol_name
-            # Update ax3 title
+        # Update the population diagram for the picked molecule without
+        # changing islat.active_molecule (so all other active molecules
+        # remain visible in the line inspection panel).
+        if picked_mol_name is not None:
             mol_dict = getattr(self._islat, 'molecules_dict', {})
             picked_mol = mol_dict.get(picked_mol_name) if mol_dict else None
             if picked_mol is not None:
                 self.ax3.set_title(f'{picked_mol.displaylabel} Population diagram')
-            # Re-render pop-diagram for newly active molecule
-            line_data = self._mol_line_data_cache.get(picked_mol_name, [])
-            if picked_mol is not None:
+                line_data = self._mol_line_data_cache.get(picked_mol_name, [])
                 self._render_population_diagram_with_lines(line_data, picked_mol)
 
         return picked_value
