@@ -1063,8 +1063,9 @@ class iSLAT:
         import pandas as pd
         from pathlib import Path
         
-        # Import spectres function from Molecule module
-        from .Modules.DataTypes.Molecule import _spectres
+        # Import spectres via the lazy loader used throughout Molecule.py
+        from .Modules.DataTypes.Molecule import _get_spectral_utils
+        _, _spectres = _get_spectral_utils()
         
         # Validate we have the required data
         if not hasattr(self, 'wave_data') or self.wave_data is None:
