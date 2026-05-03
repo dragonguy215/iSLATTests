@@ -858,6 +858,8 @@ class MainPlotGrid(BasePlot):
             for mol in additional_molecules:
                 if mol is not None:
                     self._lip._overlay_molecule(ax, mol, use_interp, target_wave)
+            # Rebuild legend now that all molecules have been plotted
+            self._lip._update_legend(ax)
 
         # Overlay fit results if present
         if fit_result is not None:
