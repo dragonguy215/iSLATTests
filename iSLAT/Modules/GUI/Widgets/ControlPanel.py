@@ -1230,6 +1230,10 @@ class ControlPanel(ttk.Frame):
             label="Edit Label",
             command=lambda: self._edit_molecule_label(mol_name),
         )
+        menu.add_command(
+            label="Filter Line List",
+            command=lambda: self._filter_line_list_action(mol_name),
+        )
         menu.add_separator()
         menu.add_command(
             label="Copy Parameters",
@@ -1269,6 +1273,25 @@ class ControlPanel(ttk.Frame):
             )
         except Exception as e:
             print(f"ControlPanel: export failed for '{mol_name}' — {e}")
+
+    def _filter_line_list_action(self, mol_name: str) -> None:
+        """Open the LineListFilterWindow for the named molecule."""
+        mol_obj = self.islat.molecules_dict.get(mol_name)
+        if mol_obj is None:
+            return
+        try:
+            ll = mol_obj.line_list
+        except Exception:
+            ll = None
+        if ll is None:
+            msg = f"No line list loaded for '{mol_name}'."
+            if self.data_field is not None:
+                self.data_field.insert_text(msg)
+            else:
+                print(f"ControlPanel: {msg}")
+            return
+        from iSLAT.Modules.GUI.Widgets.LineListFilterWindow import LineListFilterWindow
+        LineListFilterWindow(self, mol_obj, self.data_field, islat=self.islat)
 
     def _edit_molecule_name(self, mol_name: str) -> None:
         """Prompt the user to rename a molecule (changes the dict key)."""

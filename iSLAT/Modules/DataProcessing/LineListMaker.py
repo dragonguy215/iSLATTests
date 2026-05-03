@@ -64,6 +64,87 @@ def _ensure_dataframe(df_or_linelist: Union[pd.DataFrame, MoleculeLineList],
     )
 
 
+# ---------------------------------------------------------------------------
+# Vibrational-band helpers
+# ---------------------------------------------------------------------------
+
+def _vib_part(level_str: str) -> str:
+    """Return the vibrational portion of a quantum-state label (before ``'|'``).
+
+    e.g. ``'0_0_1|16_1_15'`` -> ``'0_0_1'``.
+    Falls back to the full string when no ``'|'`` is present.
+    """
+    return level_str.split("|")[0] if "|" in level_str else level_str
+
+
+def _vib_perms(n: int, n_modes: int = 3) -> set:
+    """All underscore-joined vibrational-mode tuples where ``max(qi) == n``.
+
+    Parameters
+    ----------
+    n : int
+        Target vibrational quantum number (the maximum across all modes).
+    n_modes : int
+        Number of vibrational modes (default 3 for H₂O, CO₂, etc.).
+    """
+    from itertools import product as _product
+    combos: set = set()
+    for vals in _product(range(n + 1), repeat=n_modes):
+        if max(vals) == n:
+            combos.add("_".join(str(v) for v in vals))
+    return combos
+
+
+def _vib_perms_up_to(n: int, n_modes: int = 3) -> set:
+    """All underscore-joined vibrational-mode tuples where ``max(qi) <= n``."""
+    result: set = set()
+    for m in range(n + 1):
+        result |= _vib_perms(m, n_modes)
+    return result
+
+
+def _parse_vib_band(spec: str, n_modes: int = 3):
+    """Parse a band-spec string into ``(up_set, low_set)``.
+
+    Supported formats
+    -----------------
+    ``"v1"``   -> upper *and* lower both from exact v=1 states
+                  (all tuples where ``max(qi) == 1``).
+    ``"v1-0"`` -> upper from exact v=1, lower from exact v=0.
+    ``"v2-1"`` -> upper from exact v=2, lower from exact v=1.
+
+    The leading ``'v'`` is optional.  Both sides use **exact** level matching
+    (not cumulative), mirroring the transition-band convention from the
+    WaterListCombiner notebook.
+
+    Returns
+    -------
+    (up_set, low_set) : tuple of set of str
+        Sets of underscore-joined vibrational labels.
+
+    Raises
+    ------
+    ValueError
+        If the spec cannot be parsed.
+    """
+    spec = spec.strip().lower().lstrip("v")
+    if not spec:
+        raise ValueError("Empty band spec.")
+    parts = spec.split("-")
+    if len(parts) == 1:
+        n_up = int(parts[0])
+        up_set = _vib_perms(n_up, n_modes)
+        low_set = _vib_perms(n_up, n_modes)   # exact same level for single-number spec
+    elif len(parts) == 2:
+        n_up = int(parts[0])
+        n_low = int(parts[1])
+        up_set = _vib_perms(n_up, n_modes)
+        low_set = _vib_perms(n_low, n_modes)  # exact lower level
+    else:
+        raise ValueError(f"Cannot parse band spec: {spec!r}")
+    return up_set, low_set
+
+
 # ╭──────────────────────────────────────────────────────────────────╮
 # │  LineListMaker                                                   │
 # ╰──────────────────────────────────────────────────────────────────╯
@@ -395,6 +476,42 @@ class LineListMaker:
         """
         self._record_filter("filter_custom", label=label)
         mask = func(self._df)
+        return self._apply_mask(mask)
+
+    def filter_vib_band(
+        self,
+        spec: str,
+        n_modes: int = 3,
+    ) -> "LineListMaker":
+        """Filter to a specific vibrational band.
+
+        Uses exact vibrational-level matching on both upper and lower states
+        (the vibrational portion is the part of the quantum label before the
+        ``'|'`` delimiter).
+
+        Parameters
+        ----------
+        spec : str
+            Band specification string.  The leading ``'v'`` is optional.
+
+            - ``"v1"``   — upper *and* lower both from exact v=1 states.
+            - ``"v1-0"`` — upper from v=1, lower from v=0 (exact).
+            - ``"v2-1"`` — upper from v=2, lower from v=1 (exact).
+
+        n_modes : int
+            Number of vibrational modes (default 3 for H₂O, CO₂, etc.).
+
+        Raises
+        ------
+        ValueError
+            If *spec* cannot be parsed.
+        """
+        up_set, low_set = _parse_vib_band(spec, n_modes)
+        self._record_filter("filter_vib_band", spec=spec, n_modes=n_modes)
+        mask = (
+            self._df["lev_up"].apply(lambda x: _vib_part(x) in up_set)
+            & self._df["lev_low"].apply(lambda x: _vib_part(x) in low_set)
+        )
         return self._apply_mask(mask)
 
     # ------------------------------------------------------------------
@@ -763,6 +880,7 @@ class LineListMaker:
             "filter_glow": self.filter_glow,
             "filter_quantum": self.filter_quantum,
             "filter_species": self.filter_species,
+            "filter_vib_band": self.filter_vib_band,
         }
 
         for name, kwargs in saved:
