@@ -162,9 +162,172 @@ class InteractionHandler:
         if event.inaxes == self.ax2:
             # Show context menu for line inspection plot
             self._show_line_inspection_context_menu(event)
+        elif event.inaxes == self.ax3:
+            # Show context menu for population diagram
+            self._show_population_diagram_context_menu(event)
         elif event.inaxes == self.ax1:
             # Show context menu for main plot
             pass
+
+    def _get_population_diagram_plot(self):
+        """Return the active PopulationDiagramPlot instance, or None."""
+        try:
+            view = self.plot_manager.active_view
+            grid = getattr(view, '_grid', None)
+            if grid is not None:
+                return getattr(grid, '_pdp', None)
+            # Fallback: try the legacy plot_renderer path
+            return getattr(self.plot_manager.plot_renderer, '_population_diagram_plot', None)
+        except Exception:
+            return None
+
+    def _show_population_diagram_context_menu(self, event):
+        """Show a context menu on the population diagram (ax3)."""
+        try:
+            import tkinter as tk
+        except ImportError:
+            return
+
+        try:
+            canvas_widget = self.canvas.get_tk_widget()
+        except Exception:
+            return
+
+        menu = tk.Menu(canvas_widget, tearoff=0)
+
+        def _color_by_dialog():
+            self._open_color_by_dialog(canvas_widget)
+
+        def _clear_color_mapping():
+            pdp = self._get_population_diagram_plot()
+            if pdp is not None:
+                pdp.clear_color_mapping(regenerate=True)
+                self.canvas.draw_idle()
+
+        menu.add_command(label="Color By…", command=_color_by_dialog)
+        menu.add_command(label="Clear Color Mapping", command=_clear_color_mapping)
+
+        try:
+            x_root = canvas_widget.winfo_rootx() + int(event.x)
+            y_root = canvas_widget.winfo_rooty() + int(canvas_widget.winfo_height() - event.y)
+            menu.tk_popup(x_root, y_root)
+        except Exception:
+            pass
+        finally:
+            menu.grab_release()
+
+    def _open_color_by_dialog(self, parent_widget):
+        """Open a dialog to configure the population diagram Color By option."""
+        try:
+            import tkinter as tk
+            import tkinter.ttk as ttk
+        except ImportError:
+            return
+
+        pdp = self._get_population_diagram_plot()
+
+        # --- Property choices -----------------------------------------
+        PROP_OPTIONS = [
+            ("Upper-level energy (E_up)",      "e_up"),
+            ("Lower-level energy (E_low)",      "e_low"),
+            ("Einstein A coefficient",          "a_stein"),
+            ("Upper-state degeneracy (g_up)",   "g_up"),
+            ("Lower-state degeneracy (g_low)",  "g_low"),
+            ("Wavelength (μm)",                 "wavelength"),
+            ("Model intensity",                 "intens"),
+            ("Upper quantum label (lev_up)",    "lev_up"),
+            ("Lower quantum label (lev_low)",   "lev_low"),
+            ("Molecule / component",            "molecule"),
+        ]
+        PROP_LABELS   = [p[0] for p in PROP_OPTIONS]
+        PROP_VALUES   = [p[1] for p in PROP_OPTIONS]
+
+        CMAP_OPTIONS = [
+            "viridis", "plasma", "inferno", "magma", "cividis",
+            "coolwarm", "RdYlBu", "Spectral", "tab10", "tab20",
+        ]
+
+        # Seed the combo with the currently active mapping if any
+        current_mapping = getattr(pdp, '_color_mapping', None) if pdp else None
+        initial_prop_idx = 0
+        initial_cmap = "viridis"
+        initial_vmin = ""
+        initial_vmax = ""
+        if current_mapping:
+            prop_val = current_mapping.get("prop", "e_up")
+            if prop_val in PROP_VALUES:
+                initial_prop_idx = PROP_VALUES.index(prop_val)
+            initial_cmap = current_mapping.get("cmap", "viridis")
+            v = current_mapping.get("vmin")
+            initial_vmin = str(v) if v is not None else ""
+            v = current_mapping.get("vmax")
+            initial_vmax = str(v) if v is not None else ""
+
+        # --- Build the dialog window ----------------------------------
+        win = tk.Toplevel(parent_widget)
+        win.title("Population Diagram — Color By")
+        win.resizable(False, False)
+        win.grab_set()  # modal
+
+        pad = {"padx": 8, "pady": 4}
+
+        # Row 0: property
+        tk.Label(win, text="Color by property:").grid(row=0, column=0, sticky="w", **pad)
+        prop_var = tk.StringVar(value=PROP_LABELS[initial_prop_idx])
+        prop_combo = ttk.Combobox(win, textvariable=prop_var, values=PROP_LABELS,
+                                  state="readonly", width=32)
+        prop_combo.grid(row=0, column=1, sticky="ew", **pad)
+
+        # Row 1: colormap
+        tk.Label(win, text="Colormap:").grid(row=1, column=0, sticky="w", **pad)
+        cmap_var = tk.StringVar(value=initial_cmap)
+        cmap_combo = ttk.Combobox(win, textvariable=cmap_var, values=CMAP_OPTIONS,
+                                  state="normal", width=20)
+        cmap_combo.grid(row=1, column=1, sticky="ew", **pad)
+
+        # Row 2: vmin
+        tk.Label(win, text="vmin (optional):").grid(row=2, column=0, sticky="w", **pad)
+        vmin_var = tk.StringVar(value=initial_vmin)
+        tk.Entry(win, textvariable=vmin_var, width=12).grid(row=2, column=1, sticky="w", **pad)
+
+        # Row 3: vmax
+        tk.Label(win, text="vmax (optional):").grid(row=3, column=0, sticky="w", **pad)
+        vmax_var = tk.StringVar(value=initial_vmax)
+        tk.Entry(win, textvariable=vmax_var, width=12).grid(row=3, column=1, sticky="w", **pad)
+
+        # Row 4: buttons
+        btn_frame = tk.Frame(win)
+        btn_frame.grid(row=4, column=0, columnspan=2, pady=6)
+
+        def _apply():
+            prop_label = prop_var.get()
+            if prop_label not in PROP_LABELS:
+                return
+            prop = PROP_VALUES[PROP_LABELS.index(prop_label)]
+            cmap = cmap_var.get().strip() or "viridis"
+            try:
+                vmin = float(vmin_var.get()) if vmin_var.get().strip() else None
+            except ValueError:
+                vmin = None
+            try:
+                vmax = float(vmax_var.get()) if vmax_var.get().strip() else None
+            except ValueError:
+                vmax = None
+
+            current_pdp = self._get_population_diagram_plot()
+            if current_pdp is not None:
+                current_pdp.color_by(prop, cmap=cmap, vmin=vmin, vmax=vmax, regenerate=True)
+                self.canvas.draw_idle()
+            win.destroy()
+
+        def _cancel():
+            win.destroy()
+
+        ttk.Button(btn_frame, text="Apply",  command=_apply).pack(side="left",  padx=4)
+        ttk.Button(btn_frame, text="Cancel", command=_cancel).pack(side="left", padx=4)
+
+        win.bind("<Return>", lambda _e: _apply())
+        win.bind("<Escape>", lambda _e: _cancel())
 
     def _show_line_inspection_context_menu(self, event):
         """Show a context menu on the line inspection plot (ax2)."""

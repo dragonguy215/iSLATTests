@@ -141,6 +141,8 @@ class PopulationDiagramPlot(BasePlot):
 
         # Active colour-map state (set by color_by / clear_color_mapping)
         self._color_mapping: Optional[Dict[str, Any]] = None
+        # Tracked colorbar so it can be removed on the next regeneration
+        self._colorbar = None
 
     # ------------------------------------------------------------------
     # Public properties
@@ -165,6 +167,15 @@ class PopulationDiagramPlot(BasePlot):
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
         """Generate the population diagram."""
+        # Remove any existing colorbar before (re-)drawing so stale
+        # colorbar axes don't accumulate on the figure.
+        if self._colorbar is not None:
+            try:
+                self._colorbar.remove()
+            except Exception:
+                pass
+            self._colorbar = None
+
         if self._external_ax is not None:
             self._ax = self._external_ax
         else:
@@ -598,11 +609,11 @@ class PopulationDiagramPlot(BasePlot):
             alpha=0.8,
         )
 
-        # Add a colourbar
+        # Add a colourbar and track it for later removal
         label = self._property_label(display_prop)
         fig = ax.get_figure()
         if fig is not None:
-            fig.colorbar(sc, ax=ax, label=label, pad=0.02)
+            self._colorbar = fig.colorbar(sc, ax=ax, label=label, pad=0.02)
 
     # ------------------------------------------------------------------
     def _render_categorical_colormap(
