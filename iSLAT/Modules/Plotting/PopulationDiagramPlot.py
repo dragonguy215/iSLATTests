@@ -143,6 +143,11 @@ class PopulationDiagramPlot(BasePlot):
         self._color_mapping: Optional[Dict[str, Any]] = None
         # Tracked colorbar so it can be removed on the next regeneration
         self._colorbar = None
+        # When True, the plot is locked to all active/visible molecules in
+        # _molecules_dict_ref and regenerates automatically when the set changes.
+        self._all_molecules_mode: bool = False
+        self._molecules_dict_ref = None   # weak reference target (MoleculeDict)
+        self._molecules_change_cb = None  # registered callback handle
 
     # ------------------------------------------------------------------
     # Public properties
@@ -279,8 +284,11 @@ class PopulationDiagramPlot(BasePlot):
         # --- Multiple Molecules (list or MoleculeDict) ---
         if self._molecules_input is not None:
             mol_seq = self._molecules_input
-            # MoleculeDict → get visible molecule objects
-            if hasattr(mol_seq, "get_visible_molecules"):
+            # MoleculeDict → use active set when in all-molecules mode,
+            # otherwise fall back to visible molecules.
+            if hasattr(mol_seq, "get_active_set") and self._all_molecules_mode:
+                mol_seq = mol_seq.get_active_set()
+            elif hasattr(mol_seq, "get_visible_molecules"):
                 mol_seq = list(
                     mol_seq.get_visible_molecules(return_objects=True)
                 )
@@ -645,11 +653,29 @@ class PopulationDiagramPlot(BasePlot):
         label_cat = np.concatenate(all_labels)
 
         unique_labels = np.unique(label_cat)
-        cmap_obj = matplotlib.colormaps.get_cmap(cmap_name).resampled(max(len(unique_labels), 1))
-        label_to_color = {
-            lbl: cmap_obj(i / max(len(unique_labels) - 1, 1))
-            for i, lbl in enumerate(unique_labels)
-        }
+
+        # In all-molecules mode, use each molecule's own .color attribute
+        # so the population diagram matches the control-panel colours.
+        if self._all_molecules_mode and prop == "component":
+            label_to_color = {
+                cdata["name"]: cdata["color"]
+                for cdata in self._component_data
+            }
+            # Fall back to colormap for any label that somehow lacks a colour
+            cmap_obj = matplotlib.colormaps.get_cmap(cmap_name).resampled(
+                max(len(unique_labels), 1)
+            )
+            for i, lbl in enumerate(unique_labels):
+                if lbl not in label_to_color:
+                    label_to_color[lbl] = cmap_obj(i / max(len(unique_labels) - 1, 1))
+        else:
+            cmap_obj = matplotlib.colormaps.get_cmap(cmap_name).resampled(
+                max(len(unique_labels), 1)
+            )
+            label_to_color = {
+                lbl: cmap_obj(i / max(len(unique_labels) - 1, 1))
+                for i, lbl in enumerate(unique_labels)
+            }
 
         colors = np.array([label_to_color[lbl] for lbl in label_cat])
         ax.scatter(eu_cat, rd_cat, c=colors, s=5, alpha=0.8)
@@ -763,6 +789,7 @@ class PopulationDiagramPlot(BasePlot):
     # ------------------------------------------------------------------
     def set_molecule(self, molecule: "Molecule") -> None:
         """Switch to a single molecule and regenerate."""
+        self._exit_all_molecules_mode()
         self.molecule = molecule
         self._molecules_input = None
         self._intensity_obj = None
@@ -774,6 +801,11 @@ class PopulationDiagramPlot(BasePlot):
     ) -> None:
         """Switch to multiple molecules and regenerate.
 
+        When *molecules* is a :class:`MoleculeDict` the plot enters
+        *all-molecules mode*: it automatically colours each component by
+        its own molecule colour and re-renders whenever the active/visible
+        set changes.
+
         Parameters
         ----------
         molecules : list[Molecule] | MoleculeDict
@@ -782,7 +814,71 @@ class PopulationDiagramPlot(BasePlot):
         self.molecule = None
         self._molecules_input = molecules
         self._intensity_obj = None
-        self._color_mapping = None
+        self.generate_plot()
+
+        # If we were handed a MoleculeDict, enter persistent all-molecules mode
+        if hasattr(molecules, 'add_active_molecule_change_callback'):
+            self._enter_all_molecules_mode(molecules)
+        else:
+            # Plain list — not persistent, clear any prior mode
+            self._exit_all_molecules_mode()
+
+    # ------------------------------------------------------------------
+    # All-molecules mode helpers
+    # ------------------------------------------------------------------
+    def _enter_all_molecules_mode(self, molecules_dict) -> None:
+        """Lock the plot to a MoleculeDict and register a change callback."""
+        # Unregister any previous callback first
+        self._exit_all_molecules_mode()
+        self._all_molecules_mode = True
+        self._molecules_dict_ref = molecules_dict
+        # Automatically colour by molecule (uses each mol's own colour)
+        self._color_mapping = {"prop": "molecule", "cmap": "tab10"}
+        # Register for active-molecule and comparison-molecule changes
+        cb = self._on_molecules_changed
+        self._molecules_change_cb = cb
+        try:
+            molecules_dict.add_active_molecule_change_callback(cb)
+        except Exception:
+            pass
+        try:
+            molecules_dict.add_comparison_molecule_change_callback(
+                self._on_comparison_changed
+            )
+        except Exception:
+            pass
+
+    def _exit_all_molecules_mode(self) -> None:
+        """Unregister change callbacks and clear all-molecules mode."""
+        if self._all_molecules_mode and self._molecules_dict_ref is not None:
+            try:
+                self._molecules_dict_ref.remove_active_molecule_change_callback(
+                    self._molecules_change_cb
+                )
+            except Exception:
+                pass
+            try:
+                self._molecules_dict_ref.remove_comparison_molecule_change_callback(
+                    self._on_comparison_changed
+                )
+            except Exception:
+                pass
+        self._all_molecules_mode = False
+        self._molecules_dict_ref = None
+        self._molecules_change_cb = None
+
+    def _on_molecules_changed(self, old_molecule=None, new_molecule=None) -> None:
+        """Callback fired when the active molecule changes in all-molecules mode."""
+        if not self._all_molecules_mode or self._molecules_dict_ref is None:
+            return
+        self._molecules_input = self._molecules_dict_ref
+        self.generate_plot()
+
+    def _on_comparison_changed(self, comparison_molecules_list=None) -> None:
+        """Callback fired when comparison molecules change in all-molecules mode."""
+        if not self._all_molecules_mode or self._molecules_dict_ref is None:
+            return
+        self._molecules_input = self._molecules_dict_ref
         self.generate_plot()
 
     def set_intensity(

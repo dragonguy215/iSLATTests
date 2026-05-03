@@ -204,8 +204,50 @@ class InteractionHandler:
                 pdp.clear_color_mapping(regenerate=True)
                 self.canvas.draw_idle()
 
+        def _show_all_active_molecules():
+            """Switch the population diagram to show all active molecules."""
+            pdp = self._get_population_diagram_plot()
+            if pdp is None:
+                return
+            molecules_dict = getattr(self.islat, 'molecules_dict', None)
+            if molecules_dict is None:
+                return
+            pdp.set_molecules(molecules_dict)
+            self.canvas.draw_idle()
+
+        def _show_active_molecule_only():
+            """Switch the population diagram back to the single active molecule."""
+            pdp = self._get_population_diagram_plot()
+            if pdp is None:
+                return
+            active_mol = getattr(self.islat, 'active_molecule', None)
+            if active_mol is None:
+                return
+            # active_molecule is a name string — resolve to object
+            if isinstance(active_mol, str):
+                molecules_dict = getattr(self.islat, 'molecules_dict', None)
+                if molecules_dict is not None and active_mol in molecules_dict:
+                    active_mol = molecules_dict[active_mol]
+                else:
+                    return
+            pdp.set_molecule(active_mol)
+            self.canvas.draw_idle()
+
+        # Determine current mode for a checkmark indicator
+        pdp = self._get_population_diagram_plot()
+        _all_mode = pdp is not None and getattr(pdp, '_all_molecules_mode', False)
+
         menu.add_command(label="Color By…", command=_color_by_dialog)
         menu.add_command(label="Clear Color Mapping", command=_clear_color_mapping)
+        menu.add_separator()
+        menu.add_command(
+            label=("✓ " if _all_mode else "  ") + "Show All Active Molecules",
+            command=_show_all_active_molecules,
+        )
+        menu.add_command(
+            label=("✓ " if not _all_mode else "  ") + "Show Active Molecule Only",
+            command=_show_active_molecule_only,
+        )
 
         try:
             x_root = canvas_widget.winfo_rootx() + int(event.x)
