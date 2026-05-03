@@ -332,6 +332,46 @@ class LineListFilterWindow(tk.Toplevel):
             display = f"{name}({kw_str})" if kw_str else name
             self._filter_listbox.insert(tk.END, display)
 
+    # ------------------------------------------------------------------
+    # Line-list assignment helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _assign_line_list(mol_obj, new_ll) -> None:
+        """Replace *mol_obj*'s line list and invalidate all cached results.
+
+        Setting ``mol_obj.lines`` directly bypasses the molecule's cache
+        invalidation logic, so we must mark every dirty flag and clear the
+        flux / intensity / spectrum caches explicitly.
+        """
+        mol_obj.lines = new_ll
+        # Nullify already-computed results so they are recalculated
+        mol_obj.intensity = None
+        mol_obj.spectrum = None
+        # Mark all dirty flags
+        try:
+            mol_obj._dirty_flags['intensity'] = True
+            mol_obj._dirty_flags['spectrum'] = True
+            mol_obj._dirty_flags['flux'] = True
+        except (AttributeError, KeyError):
+            pass
+        # Clear the flux cache (dict)
+        try:
+            mol_obj._flux_cache.clear()
+        except AttributeError:
+            pass
+        # Clear intensity / spectrum caches
+        try:
+            mol_obj._intensity_cache['data'] = None
+            mol_obj._intensity_cache['hash'] = None
+        except (AttributeError, KeyError):
+            pass
+        try:
+            mol_obj._spectrum_cache['data'] = None
+            mol_obj._spectrum_cache['hash'] = None
+        except (AttributeError, KeyError):
+            pass
+
     def _apply_to_molecule(self):
         """Replace the molecule's line list with the current filtered result."""
         if len(self._maker) == 0:
@@ -351,7 +391,7 @@ class LineListFilterWindow(tk.Toplevel):
         if not confirm:
             return
         new_ll = self._maker.to_linelist()
-        self.mol_obj.lines = new_ll
+        self._assign_line_list(self.mol_obj, new_ll)
         self._total_lines = len(new_ll)
         self._trigger_refresh(full_rebuild=False)
         self._refresh_status()
@@ -390,7 +430,7 @@ class LineListFilterWindow(tk.Toplevel):
             return
         new_mol = self._islat.molecules_dict.get(new_name)
         if new_mol is not None:
-            new_mol.lines = self._maker.to_linelist()
+            self._assign_line_list(new_mol, self._maker.to_linelist())
         self._trigger_refresh(full_rebuild=True)
         msg = (
             f"Created '{new_name}' with {len(self._maker)} filtered lines."
