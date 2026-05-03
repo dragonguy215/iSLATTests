@@ -295,10 +295,6 @@ class iSLATPlot:
         except Exception as e:
             debug_config.error("main_plot", f"Could not apply plot theming: {e}")
     
-    def _get_molecule_display_name(self, molecule):
-        """Get display name for a molecule (delegates to :class:`BasePlot`)."""
-        return BasePlot.get_molecule_display_name(molecule)
-
     # ------------------------------------------------------------------
     # Backward-compatibility properties for external code that still
     # references full_spectrum_plot / full_spectrum_plot_canvas directly.
@@ -626,14 +622,6 @@ class iSLATPlot:
         """Plot atomic lines — delegates to the active view."""
         self.atomic_toggle = True
         self.active_view.toggle_atomic_lines(True)
-
-    def plot_vertical_lines(self, wavelengths, heights=None, colors=None, labels=None):
-        """
-        Plot vertical lines at specified wavelengths.
-        Delegates to PlotRenderer for efficient line plotting.
-        """
-        self.plot_renderer.plot_vertical_lines(wavelengths, heights, colors, labels)
-        self.canvas.draw_idle()
 
     def plot_fitted_saved_lines(self, fit_results_data, ax=None):
         """Plot fitted saved lines on the main spectrum axes.

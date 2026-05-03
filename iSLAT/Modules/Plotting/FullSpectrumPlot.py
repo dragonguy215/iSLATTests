@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
 
-
 class FullSpectrumPlot(StackedSpectralPanel):
     """
     Multi-panel full-spectrum plot.

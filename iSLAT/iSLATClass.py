@@ -14,7 +14,6 @@ from .Modules.FileHandling.iSLATFileHandling import load_user_settings, save_use
 from .Modules.FileHandling.iSLATFileHandling import molsave_file_name, save_folder_path, hitran_data_folder_path, hitran_data_folder_name, example_data_folder_path
 
 from . import Constants as c
-# GUI is imported lazily in init_gui() to speed up startup
 from .Modules.DataTypes.Molecule import Molecule
 from .Modules.DataTypes.MoleculeDict import MoleculeDict
 from .Modules.Debug.DebugConfig import debug_config

@@ -823,7 +823,6 @@ class StackedSpectralPanel(BasePlot):
             return NotImplemented
         return self.stack_with(other)
 
-
 # ======================================================================
 # Helper – extract the kwargs that _create_cell expects
 # ======================================================================

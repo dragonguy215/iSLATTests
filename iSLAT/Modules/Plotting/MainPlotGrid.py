@@ -385,22 +385,6 @@ class MainPlotGrid(BasePlot):
         if self.ax_inspection is not None:
             self._render_inspection_panel()
 
-    def set_active_molecule(self, molecule: "Molecule") -> None:
-        """Switch the active molecule and refresh bottom panels."""
-        self.active_molecule = molecule
-        if self.ax_inspection is not None:
-            self._render_inspection_panel()
-        if self.ax_popdiagram is not None:
-            self._render_population_panel()
-
-    def set_line_data(
-        self, line_data: List[Tuple["MoleculeLine", float, Any]]
-    ) -> None:
-        """Replace the line-data list and refresh the inspection panel."""
-        self.line_data = line_data
-        if self.ax_inspection is not None:
-            self._render_inspection_panel()
-
     def refresh(self) -> None:
         """Full refresh of all three panels."""
         if self.ax_spectrum is not None:
