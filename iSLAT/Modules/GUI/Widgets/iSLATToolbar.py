@@ -1,0 +1,242 @@
+"""
+iSLATToolbar — custom matplotlib NavigationToolbar2Tk for iSLAT.
+
+Provides ``iSLATNavigationToolbar``, which extends the standard matplotlib
+toolbar by replacing the built-in "Configure Subplots" behaviour with a
+custom dialog that:
+
+1. Embeds matplotlib's :class:`~matplotlib.widgets.SubplotTool` for the
+   standard subplot-margin sliders.
+2. Adds a dynamic lower section managed by :class:`ConfigureSubplotsSurface`
+   where views can register extra :class:`~iSLAT.Modules.GUI.ControlField`
+   instances (e.g. "N Panels" for the full-spectrum view).
+"""
+
+from __future__ import annotations
+
+import tkinter as tk
+import tkinter.ttk as ttk
+from typing import Any, Dict, Optional, TYPE_CHECKING
+
+from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
+
+from iSLAT.Modules.GUI.ControlSurface import ControlSurface
+
+if TYPE_CHECKING:
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+# ---------------------------------------------------------------------------
+# ConfigureSubplotsSurface
+# ---------------------------------------------------------------------------
+
+class ConfigureSubplotsSurface(ControlSurface):
+    """Concrete :class:`ControlSurface` for the Configure Subplots dialog.
+
+    This surface is persistent across dialog openings: fields can be
+    registered before the dialog is ever opened.  When the dialog is opened,
+    ``attach_dialog()`` is called and the surface renders its fields into
+    *field_frame*.  When the dialog is closed, ``detach_dialog()`` is called
+    and ``_rebuild()`` becomes a no-op until the next open.
+
+    Parameters
+    ----------
+    No constructor parameters required.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._field_frame: Optional[tk.Widget] = None
+
+    # ------------------------------------------------------------------
+    # Dialog lifecycle
+    # ------------------------------------------------------------------
+
+    def attach_dialog(self, field_frame: tk.Widget) -> None:
+        """Called when the dialog opens.  Supplies the frame to render into."""
+        self._field_frame = field_frame
+        self._rebuild()
+
+    def detach_dialog(self) -> None:
+        """Called when the dialog closes."""
+        self._widget_refs.clear()
+        self._field_frame = None
+
+    # ------------------------------------------------------------------
+    # Internal rebuild
+    # ------------------------------------------------------------------
+
+    def _rebuild(self) -> None:
+        if self._field_frame is None:
+            return  # Dialog not currently open
+
+        from iSLAT.Modules.GUI.ControlField import RenderContext
+
+        try:
+            for child in self._field_frame.winfo_children():
+                child.destroy()
+        except Exception:
+            pass
+        self._widget_refs.clear()
+
+        row = 0
+        for field in self._fields.values():
+            try:
+                widgets = field.build_widget(self._field_frame, RenderContext.DIALOG)
+            except Exception:
+                widgets = []
+
+            self._widget_refs[field.key] = widgets
+
+            if len(widgets) == 1:
+                widgets[0].grid(row=row, column=0, columnspan=2, sticky="w", padx=6, pady=3)
+            elif len(widgets) >= 2:
+                widgets[0].grid(row=row, column=0, sticky="w", padx=(6, 2), pady=3)
+                widgets[1].grid(row=row, column=1, sticky="w", padx=(2, 6), pady=3)
+
+            if widgets:
+                row += 1
+
+# ---------------------------------------------------------------------------
+# iSLATConfigureSubplotsDialog
+# ---------------------------------------------------------------------------
+class iSLATConfigureSubplotsDialog(tk.Toplevel):
+    """Custom "Configure Subplots" dialog for iSLAT.
+
+    Top section: the standard matplotlib subplot-margin adjustment sliders
+    (rendered via :class:`~matplotlib.widgets.SubplotTool`).
+
+    Bottom section: dynamic :class:`ControlField` widgets managed by the
+    supplied :class:`ConfigureSubplotsSurface`.
+
+    Parameters
+    ----------
+    parent:
+        The root Tk window (used as the dialog's *master*).
+    figure:
+        The matplotlib :class:`~matplotlib.figure.Figure` whose subplot
+        parameters are being adjusted.
+    configure_subplots_surface:
+        The :class:`ConfigureSubplotsSurface` instance.  May be ``None``
+        (the bottom section is then empty).
+    """
+
+    def __init__(
+        self,
+        parent: tk.Widget,
+        figure: Any,
+        configure_subplots_surface: Optional[ConfigureSubplotsSurface],
+    ) -> None:
+        super().__init__(parent)
+        self.title("Configure Subplots")
+        self.resizable(True, True)
+
+        self._surface = configure_subplots_surface
+
+        # ------------------------------------------------------------------
+        # Top section: matplotlib SubplotTool
+        # ------------------------------------------------------------------
+        tool_frame = tk.Frame(self)
+        tool_frame.pack(side="top", fill="both", expand=True)
+
+        try:
+            from matplotlib.figure import Figure as MplFigure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            from matplotlib.widgets import SubplotTool
+
+            tool_fig = MplFigure(figsize=(6, 3.5))
+            tool_canvas = FigureCanvasTkAgg(tool_fig, master=tool_frame)
+            tool_canvas.get_tk_widget().pack(fill="both", expand=True)
+            self._subplot_tool = SubplotTool(figure, tool_fig)
+            tool_canvas.draw()
+        except Exception:
+            # Graceful degradation: show a fallback label if SubplotTool fails
+            tk.Label(
+                tool_frame,
+                text="Subplot adjustment unavailable.",
+                anchor="center",
+            ).pack(expand=True)
+
+        # ------------------------------------------------------------------
+        # Separator
+        # ------------------------------------------------------------------
+        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=4, pady=(6, 0))
+
+        # ------------------------------------------------------------------
+        # Bottom section: dynamic ControlField widgets
+        # ------------------------------------------------------------------
+        self._field_frame = ttk.Frame(self)
+        self._field_frame.pack(side="top", fill="x", padx=4, pady=4)
+
+        if self._surface is not None:
+            self._surface.attach_dialog(self._field_frame)
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    # ------------------------------------------------------------------
+
+    def _on_close(self) -> None:
+        if self._surface is not None:
+            self._surface.detach_dialog()
+        self.destroy()
+
+# ---------------------------------------------------------------------------
+# iSLATNavigationToolbar
+# ---------------------------------------------------------------------------
+
+class iSLATNavigationToolbar(NavigationToolbar2Tk):
+    """matplotlib :class:`NavigationToolbar2Tk` subclass used in iSLAT.
+
+    Replaces the built-in "Configure Subplots" behaviour with
+    :class:`iSLATConfigureSubplotsDialog`, which embeds both the standard
+    subplot-margin sliders *and* a dynamic :class:`ConfigureSubplotsSurface`
+    field area.
+
+    Parameters
+    ----------
+    canvas:
+        The :class:`~matplotlib.backends.backend_tkagg.FigureCanvasTkAgg`
+        to attach the toolbar to.
+    window:
+        The Tk parent widget for the toolbar.
+    configure_subplots_surface:
+        The :class:`ConfigureSubplotsSurface` instance managed by the
+        :class:`~iSLAT.Modules.Plotting.MainPlot.iSLATPlot` controller.
+        May be ``None`` (falls back to the default matplotlib dialog).
+    """
+
+    def __init__(
+        self,
+        canvas: "FigureCanvasTkAgg",
+        window: tk.Widget,
+        configure_subplots_surface: Optional[ConfigureSubplotsSurface] = None,
+    ) -> None:
+        super().__init__(canvas, window)
+        self._configure_subplots_surface = configure_subplots_surface
+        self._configure_subplots_dialog: Optional[iSLATConfigureSubplotsDialog] = None
+
+    # ------------------------------------------------------------------
+
+    def configure_subplots(self, *args: Any) -> None:
+        """Open (or raise) the iSLAT Configure Subplots dialog."""
+        # Raise existing window if still open
+        if self._configure_subplots_dialog is not None:
+            try:
+                self._configure_subplots_dialog.lift()
+                return
+            except Exception:
+                self._configure_subplots_dialog = None
+
+        if self.canvas is None:
+            return
+
+        try:
+            root = self.canvas.get_tk_widget().winfo_toplevel()
+            dialog = iSLATConfigureSubplotsDialog(
+                root,
+                self.canvas.figure,
+                self._configure_subplots_surface,
+            )
+            self._configure_subplots_dialog = dialog
+        except Exception:
+            # Fall back to default matplotlib dialog on any error
+            super().configure_subplots(*args)

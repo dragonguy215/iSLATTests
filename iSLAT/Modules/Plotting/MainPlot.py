@@ -20,6 +20,8 @@ from iSLAT.Modules.GUI.InteractionHandler import InteractionHandler
 from iSLAT.Modules.DataProcessing.FittingEngine import FittingEngine
 from iSLAT.Modules.FileHandling.iSLATFileHandling import load_atomic_lines
 import iSLAT.Modules.FileHandling.iSLATFileHandling as ifh
+from iSLAT.Modules.GUI.ControlSurface import ControlBus
+from iSLAT.Modules.GUI.Widgets.iSLATToolbar import iSLATNavigationToolbar, ConfigureSubplotsSurface
 
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
@@ -123,6 +125,13 @@ class iSLATPlot:
         # View-change callbacks — notified when active_view switches
         self._view_change_callbacks: list = []
 
+        # --- ControlBus: central registry for surface-agnostic UI controls ---
+        # Surfaces (ControlPanelSurface, TopBarSurface) are registered by GUI.create_window()
+        # after ControlPanel and TopBar are constructed.
+        self.control_bus = ControlBus()
+        self._configure_subplots_surface = ConfigureSubplotsSurface()
+        self.control_bus.register_surface("configure_subplots", self._configure_subplots_surface)
+
         # Molecules whose parameters changed while they were hidden.
         # Consumed by on_molecule_visibility_changed to force a re-render
         # instead of simply toggling the (now stale) artists.
@@ -219,7 +228,11 @@ class iSLATPlot:
         self._data_initialized = True
 
     def create_toolbar(self, frame):
-        self.toolbar = NavigationToolbar2Tk(self.canvas, window = frame)
+        self.toolbar = iSLATNavigationToolbar(
+            self.canvas,
+            window=frame,
+            configure_subplots_surface=self._configure_subplots_surface,
+        )
         return self.toolbar
 
     def _apply_plot_theming(self):

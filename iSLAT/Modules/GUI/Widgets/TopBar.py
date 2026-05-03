@@ -24,9 +24,62 @@ from iSLAT.Modules.DataProcessing.Slabfit import SlabFit as SlabModel
 from iSLAT.Modules.DataProcessing.BatchFittingService import BatchFittingService
 from iSLAT.Modules.DataProcessing.DeblendingService import DeblendingService
 from iSLAT.Modules.DataProcessing.LineSaveService import LineSaveService
+from iSLAT.Modules.GUI.ControlSurface import ControlSurface
 
 if TYPE_CHECKING:
     from iSLAT.Modules.Plotting.MainPlot import iSLATPlot
+
+
+# ---------------------------------------------------------------------------
+# TopBarSurface — ControlSurface implementation for the TopBar dynamic area
+# ---------------------------------------------------------------------------
+
+class TopBarSurface(ControlSurface):
+    """Concrete :class:`ControlSurface` that renders :class:`ControlField` objects
+    inside the TopBar's dynamic button area.
+
+    Fields are packed left-to-right with ``side="left"``.  Typically used for
+    :class:`ToggleField` instances that should appear as push-buttons next to
+    the static TopBar buttons (e.g. "Toggle Residuals" when the full-spectrum
+    view is active).
+
+    Parameters
+    ----------
+    container:
+        The ``tk.Frame`` that acts as the widget parent.
+    """
+
+    def __init__(self, container) -> None:
+        super().__init__()
+        self._container = container
+
+    # ------------------------------------------------------------------
+    # Internal rebuild
+    # ------------------------------------------------------------------
+
+    def _rebuild(self) -> None:
+        from iSLAT.Modules.GUI.ControlField import RenderContext
+
+        try:
+            for child in self._container.winfo_children():
+                child.destroy()
+        except Exception:
+            pass
+        self._widget_refs.clear()
+
+        for field in self._fields.values():
+            try:
+                widgets = field.build_widget(self._container, RenderContext.TOP_BAR)
+            except Exception:
+                widgets = []
+
+            self._widget_refs[field.key] = widgets
+            for w in widgets:
+                try:
+                    w.pack(side="left", padx=2, pady=2)
+                except Exception:
+                    pass
+
 
 class TopBar(ResizableFrame):
     def __init__(
@@ -64,6 +117,12 @@ class TopBar(ResizableFrame):
         toolbar_frame = tk.Frame(self)
         toolbar_frame.grid(row=0, column=2, sticky="nsew")
         self.toolbar = self.main_plot.create_toolbar(toolbar_frame)
+
+        # Dynamic button area: views register ToggleFields here on activation.
+        # Placed after the matplotlib toolbar (column=3).
+        self._dynamic_toggle_frame = tk.Frame(self, bg=self.theme.get("background", "#181A1B"))
+        self._dynamic_toggle_frame.grid(row=0, column=3)
+        self._top_bar_surface = TopBarSurface(self._dynamic_toggle_frame)
 
         self.atomic_toggle: bool = False
         self.line_toggle: bool = False
@@ -143,13 +202,11 @@ class TopBar(ResizableFrame):
         toggle_legend_tip = "Turn legend on/off\nKeybind: L"
         toggle_full_spectrum_tip = "Toggle full spectrum view on/off\nKeybind: F\n\nOpen in new window: Ctrl+F"
         toggle_summed_tip = "Toggle summed model flux on/off\n(gray fill in plot)\nKeybind: M"
-        toggle_residuals_tip = "Toggle residual sub-panels on/off\nin full spectrum mode\nKeybind: R"
         create_button(self.button_frame, self.theme, "Toggle Saved Lines", self.toggle_saved_lines, 0, 3, tip_text=saved_lines_tip)
         create_button(self.button_frame, self.theme, "Toggle Atomic Lines", self.toggle_atomic_lines, 0, 4, tip_text=atomic_lines_tip)
         create_button(self.button_frame, self.theme, "Toggle Full Spectrum", self.toggle_full_spectrum, 0, 5, tip_text=toggle_full_spectrum_tip)
         create_button(self.button_frame, self.theme, "Toggle Total Model", self.toggle_summed_spectrum, 0, 6, tip_text=toggle_summed_tip)
         create_button(self.button_frame, self.theme, "Toggle Legend", self.main_plot.toggle_legend, 0, 7, tip_text=toggle_legend_tip)
-        create_button(self.button_frame, self.theme, "Toggle Residuals", self.toggle_residuals, 0, 8, tip_text=toggle_residuals_tip)
         
         # Navigate buttons - compact with minimal padding
         retreat_tip = "Retreat the plot start\nby the current range value\nShortcut: Shift+N"
@@ -814,19 +871,6 @@ class TopBar(ResizableFrame):
             self.main_plot.toggle_full_spectrum()
         except Exception as e:
             self.data_field.insert_text(f"Error toggling full spectrum: {e}\n")
-            traceback.print_exc()
-
-    def toggle_residuals(self):
-        """Toggle residual sub-panels in the full spectrum view.
-
-        If the user is not currently in full-spectrum mode the toggle is
-        stored and will take effect the next time the full-spectrum view
-        is activated.
-        """
-        try:
-            self.main_plot.toggle_residuals()
-        except Exception as e:
-            self.data_field.insert_text(f"Error toggling residuals: {e}\n")
             traceback.print_exc()
 
     def hitran_query(self):

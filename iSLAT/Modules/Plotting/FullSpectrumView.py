@@ -115,34 +115,7 @@ class FullSpectrumView(ToggleMixin, PlotView):
         self._initialised: bool = False  # True after first generate
         self._needs_refresh: bool = True  # Set True when data changes; cleared after re-render
 
-    # ==================================================================
-    # View-specific field provider protocol
-    # ==================================================================
-    def get_view_fields(self):
-        """Return a descriptor for the N-Panels field."""
-        return [
-            {
-                "key": "n_panels",
-                "label": "N Panels:",
-                "default": self._plot.n_panels if self._plot is not None else 10,
-                "tip": "Number of panels in the\nfull-spectrum stacked layout",
-                "datatype": "int",
-                "width": 5,
-                "getter": self._get_n_panels,
-                "setter": self._set_n_panels,
-            },
-        ]
-
-    def get_display_range_binding(self):
-        """Bind Plot Start / Plot Range to the stacked-panel xlim range."""
-        if self._plot is None:
-            return None
-        return {
-            "getter": self._get_display_range,
-            "setter": self._set_display_range,
-        }
-
-    # --- helpers for the field provider ---
+    # --- helpers used by _register_control_fields ---
     def _get_n_panels(self):
         if self._plot is not None:
             return self._plot.n_panels
@@ -599,12 +572,72 @@ class FullSpectrumView(ToggleMixin, PlotView):
         # Reconcile overlays with the controller's toggle dict
         self.sync_toggle_state(self._pm.toggle_state)
 
+        # Register view-specific controls with the ControlBus
+        self._register_control_fields()
+
         if self._canvas is not None:
             self._canvas.draw_idle()
+
+    def _register_control_fields(self) -> None:
+        """Register this view's :class:`ControlField` objects on the :class:`ControlBus`.
+
+        Called from :meth:`activate`.  Safe to call even when the bus is not
+        yet wired (e.g. in lightweight test environments) — missing surfaces
+        are silently ignored.
+        """
+        bus = getattr(self._pm, 'control_bus', None)
+        if bus is None:
+            return
+
+        from iSLAT.Modules.GUI.ControlField import EntryField, DisplayRangeField, ToggleField
+
+        # First unregister any stale fields from a previous activation
+        bus.unregister_owner(self)
+
+        # --- ControlPanel fields ---
+        bus.register_many([
+            EntryField(
+                "n_panels", "N Panels:", self._get_n_panels, self._set_n_panels,
+                datatype="int", width=5, owner=self,
+                tip="Number of panels in the\nfull-spectrum stacked layout",
+            ),
+            DisplayRangeField(
+                "_fsv_display_range",
+                getter=self._get_display_range,
+                setter=self._set_display_range,
+                owner=self,
+            ),
+        ], "control_panel")
+
+        # --- TopBar toggle ---
+        pm = self._pm
+
+        def _residuals_getter() -> bool:
+            return pm.toggle_state.get("show_residuals", False)
+
+        def _residuals_setter(value: bool) -> None:
+            if value != pm.toggle_state.get("show_residuals", False):
+                pm.toggle_residuals()
+
+        bus.register(
+            ToggleField(
+                "show_residuals", "Toggle Residuals",
+                getter=_residuals_getter,
+                setter=_residuals_setter,
+                owner=self,
+                tip="Toggle residual sub-panels on/off\nin full spectrum mode\nKeybind: R",
+            ),
+            "top_bar",
+        )
 
     def deactivate(self) -> None:
         if self._canvas is not None:
             self._canvas.get_tk_widget().pack_forget()
+
+        # Unregister all fields this view registered across all surfaces
+        bus = getattr(self._pm, 'control_bus', None)
+        if bus is not None:
+            bus.unregister_owner(self)
 
     # ------------------------------------------------------------------
     # Theme

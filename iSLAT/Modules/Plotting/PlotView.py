@@ -302,36 +302,4 @@ class PlotView(ABC):
         """Return the matplotlib Figure for this view."""
         ...
 
-    # ------------------------------------------------------------------
-    # View-specific field provider protocol
-    # ------------------------------------------------------------------
-    def get_view_fields(self) -> List[Dict[str, Any]]:
-        """Return descriptors for extra fields this view wants in the ControlPanel.
-
-        Each dict contains:
-          - ``key``      : unique identifier string
-          - ``label``    : display label for the entry
-          - ``default``  : initial value
-          - ``tip``      : tooltip text (or *None*)
-          - ``datatype`` : ``"float"`` or ``"int"``
-          - ``width``    : entry widget width (optional, default 7)
-          - ``getter``   : ``Callable[[], <value>]`` returning the current value
-          - ``setter``   : ``Callable[[<value>], None]`` to apply a new value
-
-        The default implementation returns an empty list (no extra fields).
-        """
-        return []
-
-    def get_display_range_binding(self) -> Optional[Dict[str, Any]]:
-        """Return a binding for the Plot Start / Plot Range controls, or *None*.
-
-        When *None* is returned the ControlPanel uses its default behaviour
-        (read/write ``islat.display_range``).  When a dict is returned it
-        must contain:
-          - ``getter`` : ``Callable[[], Tuple[float, float]]`` → ``(start, end)``
-          - ``setter`` : ``Callable[[float, float], None]``  → set start, end
-
-        The ControlPanel will route display-range reads/writes through
-        these callables instead of touching ``islat.display_range``.
-        """
-        return None
+    

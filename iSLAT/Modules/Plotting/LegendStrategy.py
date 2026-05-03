@@ -39,7 +39,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure as MplFigure
 
-
 # ======================================================================
 # Abstract base class
 # ======================================================================
@@ -95,7 +94,6 @@ class LegendStrategy(ABC):
         Implementations should **not** overwrite per-molecule colours
         (text entries tagged with ``_islat_mol_color``).
         """
-
 
 # ======================================================================
 # Concrete implementation — standard artist-based legend
@@ -168,7 +166,6 @@ class StandardLegend(LegendStrategy):
             frame.set_edgecolor(fg)
         for text in legend.get_texts():
             text.set_color(fg)
-
 
 # ======================================================================
 # Concrete implementation — molecule colour legend

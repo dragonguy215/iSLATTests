@@ -6,6 +6,7 @@ import numpy as np
 from iSLAT.Modules.DataTypes.Molecule import Molecule
 from iSLAT.Modules.FileHandling.iSLATFileHandling import load_control_panel_fields_config
 from iSLAT.Modules.Debug import debug_config
+from iSLAT.Modules.GUI.ControlSurface import ControlSurface
 from ..GUIFunctions import create_wrapper_frame, create_scrollable_frame, ColorButton
 #from .RegularFrame import RegularFrame
 from ..Tooltips import CreateToolTip
@@ -21,6 +22,92 @@ _MOL_PARAM_SCROLL_WIDTH = 200 if _IS_WINDOWS else 170
 _MATCH_BTN_PADX = 3 if _IS_WINDOWS else 1
 # Column minimum pixel sizes for molecule visibility/color grid alignment
 _VIS_COL_MINSIZES = (30, 62, 30, 32) if _IS_WINDOWS else (20, 42, 20, 22)
+
+# ---------------------------------------------------------------------------
+# ControlPanelSurface — ControlSurface implementation for the view-fields area
+# ---------------------------------------------------------------------------
+
+class ControlPanelSurface(ControlSurface):
+    """Concrete :class:`ControlSurface` that renders :class:`ControlField` objects
+    inside the ControlPanel's dynamic view-fields frame.
+
+    Fields are laid out in a two-column grid:
+
+    * Single-widget fields (e.g. :class:`ToggleField` checkbutton) span both
+      columns.
+    * Two-widget fields (label + control) place the label at column 0 and the
+      control at column 1.
+    * :class:`DisplayRangeField` produces no widgets but triggers
+      ``on_display_range_changed`` so the ControlPanel can re-route its
+      Plot Start / Plot Range inputs.
+
+    Parameters
+    ----------
+    container:
+        The ``ttk.Frame`` that acts as the widget parent (the existing
+        ``_view_fields_frame``).
+    on_display_range_changed:
+        Optional callback invoked whenever the set of registered fields
+        changes.  Receives the first :class:`DisplayRangeField` found (or
+        ``None`` when none is registered).
+    """
+
+    def __init__(
+        self,
+        container,
+        on_display_range_changed=None,
+    ) -> None:
+        super().__init__()
+        self._container = container
+        self._on_display_range_changed = on_display_range_changed
+
+    # ------------------------------------------------------------------
+    # Internal rebuild
+    # ------------------------------------------------------------------
+
+    def _rebuild(self) -> None:
+        from iSLAT.Modules.GUI.ControlField import DisplayRangeField, RenderContext
+
+        # Tear down current widgets
+        try:
+            for child in self._container.winfo_children():
+                child.destroy()
+        except Exception:
+            pass
+        self._widget_refs.clear()
+
+        display_range_field = None
+        row = 0
+
+        for field in self._fields.values():
+            if isinstance(field, DisplayRangeField):
+                display_range_field = field
+                continue  # no visual widget
+
+            try:
+                widgets = field.build_widget(self._container, RenderContext.CONTROL_PANEL)
+            except Exception:
+                widgets = []
+
+            self._widget_refs[field.key] = widgets
+
+            if len(widgets) == 1:
+                widgets[0].grid(
+                    row=row, column=0, columnspan=2,
+                    padx=_ENTRY_LABEL_PADX, pady=5, sticky="w",
+                )
+            elif len(widgets) >= 2:
+                widgets[0].grid(row=row, column=0, padx=_ENTRY_LABEL_PADX, pady=5)
+                widgets[1].grid(row=row, column=1, padx=_ENTRY_FIELD_PADX, sticky="w")
+
+            if widgets:
+                row += 1
+
+        if self._on_display_range_changed is not None:
+            try:
+                self._on_display_range_changed(display_range_field)
+            except Exception:
+                pass
 
 class ControlPanel(ttk.Frame):
     def __init__(self, master, islat, plot, data_field, font):
@@ -79,8 +166,14 @@ class ControlPanel(ttk.Frame):
         # Row 5 — global params (start_row=2, row_offset=1) occupy rows 3-4
         self._view_fields_frame = ttk.Frame(gen_config_frame)
         self._view_fields_frame.grid(row=5, column=0, columnspan=4, sticky="nsew")
-        self._view_field_entries = {}
+        self._view_field_entries = {}  # Kept for compatibility; superseded by _control_panel_surface
         self._current_display_range_binding = None
+
+        # Surface that owns the view-fields area; registered on the ControlBus in Phase 6.
+        self._control_panel_surface = ControlPanelSurface(
+            self._view_fields_frame,
+            on_display_range_changed=self._on_display_range_binding_changed,
+        )
 
         self._create_molecule_specific_controls(molecule_param_frame, 0, 0)  # All other params here
 
@@ -714,16 +807,10 @@ class ControlPanel(ttk.Frame):
             
             Molecule.add_molecule_parameter_change_callback(self._on_molecule_parameter_change)
 
-            # Listen for view changes so we can rebuild dynamic fields
-            if hasattr(self.plot, 'add_view_change_callback'):
-                self.plot.add_view_change_callback(self._on_view_changed)
+            # Views register their own fields via ControlBus in activate()/deactivate()
 
         except Exception as e:
             print(f"ControlPanel: Error registering callbacks: {e}")
-
-    def _on_view_changed(self, old_view, new_view):
-        """Handle active PlotView changes — rebuild dynamic fields."""
-        self._rebuild_view_fields(new_view)
 
     def _on_active_molecule_change(self, old_molecule, new_molecule):
         """Handle active molecule changes from the iSLAT callback system"""
@@ -938,102 +1025,21 @@ class ControlPanel(ttk.Frame):
         self.selected_label.config(text=f"Selected Molecule: {self.selected_name}\nThermal Broadening: {active_mol.thermal_broad:.2g} km/s")
 
     # ------------------------------------------------------------------
-    # Dynamic view-specific fields
-    # ------------------------------------------------------------------
-    def _rebuild_view_fields(self, view):
-        """Destroy and recreate the dynamic fields section for *view*.
+    def _on_display_range_binding_changed(self, field):
+        """Called by ``ControlPanelSurface`` when the :class:`DisplayRangeField` changes.
 
-        Called whenever the active PlotView changes.  Reads the view's
-        ``get_view_fields()`` descriptors and builds matching entry widgets
-        inside ``_view_fields_frame``.  Also stores the view's display-range
-        binding so that Plot Start / Plot Range can be routed accordingly.
+        Keeps ``_current_display_range_binding`` in sync so that
+        ``_update_display_range`` continues to route reads/writes correctly.
         """
-        # Tear down previous fields
-        for child in self._view_fields_frame.winfo_children():
-            child.destroy()
-        self._view_field_entries.clear()
-
-        self._current_display_range_binding = None
-
-        if view is None:
-            return
-
-        # Build new fields from the view's descriptors
-        field_descs = view.get_view_fields()
-        for idx, desc in enumerate(field_descs):
-            key = desc["key"]
-            label_text = desc.get("label", key)
-            default = desc.get("default", 0)
-            tip = desc.get("tip", None)
-            datatype = desc.get("datatype", "float")
-            width = desc.get("width", 7)
-            getter = desc.get("getter")
-            setter = desc.get("setter")
-
-            current_val = getter() if getter else default
-
-            entry, var = self._create_view_field_entry(
-                self._view_fields_frame, label_text, current_val,
-                row=idx, col=0, getter=getter, setter=setter,
-                datatype=datatype, width=width, tip_text=tip,
-            )
-            self._view_field_entries[key] = (entry, var, getter, setter, datatype)
-
-        # Store display-range binding
-        self._current_display_range_binding = view.get_display_range_binding()
-
-        # Sync the Plot Start / Plot Range fields from the binding,
-        # or restore them from islat.display_range when no binding is active.
-        if self._current_display_range_binding is not None:
+        if field is not None:
+            self._current_display_range_binding = {
+                "getter": field.getter,
+                "setter": field.setter,
+            }
             self._sync_display_range_from_binding()
         else:
+            self._current_display_range_binding = None
             self._restore_display_range_from_islat()
-
-    def _create_view_field_entry(self, parent, label_text, initial_value,
-                                 row, col, getter, setter, datatype="float",
-                                 width=7, tip_text=None):
-        """Create an entry for a view-specific field with int/float support."""
-        label = ttk.Label(parent, text=label_text)
-        label.grid(row=row, column=col, padx=_ENTRY_LABEL_PADX, pady=5)
-
-        if tip_text:
-            CreateToolTip(label, tip_text)
-
-        var = tk.StringVar()
-        if datatype == "int":
-            var.set(str(int(initial_value)))
-        else:
-            var.set(self._format_value(initial_value))
-
-        entry = tk.Entry(parent, textvariable=var, width=width, justify="left")
-        entry.grid(row=row, column=col + 1, padx=_ENTRY_FIELD_PADX, sticky="w")
-
-        def on_change(*args):
-            self.updating = True
-            try:
-                raw = var.get()
-                if datatype == "int":
-                    value = int(float(raw))
-                else:
-                    value = float(raw)
-                if setter:
-                    setter(value)
-                # Refresh the display with the canonical value from getter
-                if getter:
-                    canonical = getter()
-                    if datatype == "int":
-                        var.set(str(int(canonical)))
-                    else:
-                        var.set(self._format_value(canonical))
-                entry.configure(fg=self.fg_color,
-                                font=(self.font.cget("family"), self.font.cget("size"), "roman"))
-            except (ValueError, TypeError) as e:
-                self.data_field.insert_text(f"Error with new value: {e}")
-            finally:
-                self.updating = False
-
-        entry.bind("<Return>", on_change)
-        return entry, var
 
     def _sync_display_range_from_binding(self):
         """Read the current view's display-range binding and update fields."""

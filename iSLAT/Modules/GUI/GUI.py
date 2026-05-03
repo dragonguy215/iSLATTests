@@ -350,6 +350,14 @@ class GUI:
         self.top_bar = TopBar(self.window, self.islat_class, self.theme, self.plot, self.data_field, self.control_panel, self.config)
         self.top_bar.pack(side="top", fill="x", padx=0, pady=0)
 
+        # Wire ControlBus surfaces now that all widgets are constructed.
+        self.plot.control_bus.register_surface(
+            "control_panel", self.control_panel._control_panel_surface
+        )
+        self.plot.control_bus.register_surface(
+            "top_bar", self.top_bar._top_bar_surface
+        )
+
         main_container.pack(fill="both", expand=True, padx=0, pady=0)
 
         self._force_theme_update()
