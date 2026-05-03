@@ -95,6 +95,13 @@ class ThreePanelView(ToggleMixin, PlotView):
         self._comparison_callback_registered: bool = False
 
     # ------------------------------------------------------------------
+    # Line-inspection helpers
+    # ------------------------------------------------------------------
+    def get_selected_line(self) -> Optional[Dict[str, Any]]:
+        """Return the currently selected line info dict, or *None*."""
+        return self.selected_line
+
+    # ------------------------------------------------------------------
     # Helpers (private, short-hand access to controller state)
     # ------------------------------------------------------------------
     def _has_tagged_artists(self, tag: str) -> bool:

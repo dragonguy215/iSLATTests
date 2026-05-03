@@ -159,9 +159,59 @@ class InteractionHandler:
     
     def _on_right_click(self, event):
         """Handle right click events (context menu)"""
-        if event.inaxes == self.ax1:
+        if event.inaxes == self.ax2:
+            # Show context menu for line inspection plot
+            self._show_line_inspection_context_menu(event)
+        elif event.inaxes == self.ax1:
             # Show context menu for main plot
             pass
+
+    def _show_line_inspection_context_menu(self, event):
+        """Show a context menu on the line inspection plot (ax2)."""
+        try:
+            import tkinter as tk
+        except ImportError:
+            return
+
+        # We need a root/tk widget to anchor the menu.  Use the canvas widget.
+        try:
+            canvas_widget = self.canvas.get_tk_widget()
+        except Exception:
+            return
+
+        menu = tk.Menu(canvas_widget, tearoff=0)
+
+        def _save_current_line():
+            if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'top_bar'):
+                self.islat.GUI.top_bar.save_line(save_type="selected")
+
+        def _fit_current_line():
+            if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'top_bar'):
+                self.islat.GUI.top_bar.fit_selected_line(deblend=False)
+
+        def _run_deblender():
+            if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'top_bar'):
+                self.islat.GUI.top_bar.fit_selected_line(deblend=True)
+
+        def _save_all_lines_in_range():
+            if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'top_bar'):
+                self.islat.GUI.top_bar.save_all_lines_in_range()
+
+        menu.add_command(label="Save Current Line", command=_save_current_line)
+        menu.add_command(label="Fit Current Line", command=_fit_current_line)
+        menu.add_command(label="Run Deblender", command=_run_deblender)
+        menu.add_separator()
+        menu.add_command(label="Save All Lines in Range", command=_save_all_lines_in_range)
+
+        # Convert matplotlib canvas coordinates to screen coordinates
+        try:
+            x_root = canvas_widget.winfo_rootx() + int(event.x)
+            y_root = canvas_widget.winfo_rooty() + int(canvas_widget.winfo_height() - event.y)
+            menu.tk_popup(x_root, y_root)
+        except Exception:
+            pass
+        finally:
+            menu.grab_release()
     
     def _on_pick(self, event):
         """Handle pick events (clicking on plot elements)"""

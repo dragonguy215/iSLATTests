@@ -283,6 +283,17 @@ class PlotView(ABC):
         return save_path
 
     # ------------------------------------------------------------------
+    # Line-inspection helpers
+    # ------------------------------------------------------------------
+    def get_selected_line(self) -> Optional[Dict[str, Any]]:
+        """Return the currently selected line info dict, or *None*.
+
+        Views that track a selected-line (e.g. :class:`ThreePanelView`)
+        should override this.  The default returns *None*.
+        """
+        return None
+
+    # ------------------------------------------------------------------
     # Canvas / drawing
     # ------------------------------------------------------------------
     @abstractmethod

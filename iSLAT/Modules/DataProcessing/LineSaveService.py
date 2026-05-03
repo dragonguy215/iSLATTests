@@ -170,7 +170,12 @@ class LineSaveService:
                 return None, "No valid line found in selection."
                 
         elif save_type == "selected":
-            selected_line_info = main_plot.selected_line
+            # Delegate to the active view so selected_line stays on the view
+            active_view = getattr(main_plot, 'active_view', None)
+            if active_view is not None and hasattr(active_view, 'get_selected_line'):
+                selected_line_info = active_view.get_selected_line()
+            else:
+                selected_line_info = getattr(main_plot, 'selected_line', None)
             if selected_line_info is None:
                 # Fallback: create basic line info from selection bounds
                 xmin, xmax = main_plot.current_selection

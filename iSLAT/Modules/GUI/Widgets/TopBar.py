@@ -259,6 +259,64 @@ class TopBar(ResizableFrame):
         except Exception as e:
             self.data_field.insert_text(f"Error saving line: {e}\n")
 
+    def save_all_lines_in_range(self):
+        """Save all lines of the active molecule within the current selected range."""
+        if not hasattr(self.main_plot, 'current_selection') or self.main_plot.current_selection is None:
+            self.data_field.insert_text("No region selected for saving.\n")
+            return
+
+        xmin, xmax = self.main_plot.current_selection
+
+        if not self.islat.output_line_measurements:
+            self.data_field.insert_text("No output line measurements file specified.\n")
+            return
+
+        # Only use the active molecule
+        molecules_to_save = []
+        if hasattr(self.islat, 'active_molecule') and self.islat.active_molecule:
+            molecules_to_save = [self.islat.active_molecule]
+
+        if not molecules_to_save:
+            self.data_field.insert_text("No active molecule to save lines from.\n")
+            return
+
+        saved_count = 0
+        for mol in molecules_to_save:
+            try:
+                line_data = mol.intensity.get_lines_in_range_with_intensity(xmin, xmax)
+            except Exception:
+                continue
+
+            for line_obj, intensity, tau in line_data:
+                try:
+                    line_info = self.line_save_service.format_line_for_save(
+                        {
+                            'lam': line_obj.lam,
+                            'up_lev': getattr(line_obj, 'lev_up', ''),
+                            'low_lev': getattr(line_obj, 'lev_low', ''),
+                            'tau': tau if tau is not None else 0.0,
+                            'intensity': intensity,
+                            'inten': intensity,
+                            'e_up': getattr(line_obj, 'e_up', 0.0),
+                            'e_low': getattr(line_obj, 'e_low', 0.0),
+                            'a_stein': getattr(line_obj, 'a_stein', 0.0),
+                            'g_up': getattr(line_obj, 'g_up', 1.0),
+                            'g_low': getattr(line_obj, 'g_low', 1.0),
+                        },
+                        mol.name,
+                        xmin,
+                        xmax,
+                    )
+                    ifh.save_line(line_info, file_name=self.islat.output_line_measurements, silent=True)
+                    saved_count += 1
+                except Exception as e:
+                    self.data_field.insert_text(f"Error saving line at {getattr(line_obj, 'lam', '?'):.4f} μm: {e}\n")
+
+        if saved_count:
+            self.data_field.insert_text(f"Saved {saved_count} line(s) in range [{xmin:.4f}, {xmax:.4f}] μm.\n")
+        else:
+            self.data_field.insert_text("No lines found in the selected range.\n")
+
     def toggle_saved_lines(self):
         """Show saved lines as vertical dashed lines on the plot."""
         loaded_lines = ifh.read_line_saves(file_name=self.islat.input_line_list)
