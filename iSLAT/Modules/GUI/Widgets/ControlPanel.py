@@ -799,7 +799,7 @@ class ControlPanel(ttk.Frame):
     def _register_callbacks(self):
         """Register callbacks for UI synchronization only"""
         try:
-            if hasattr(self.islat, 'add_active_molecule_change_callback'):
+            if hasattr(self.islat, 'molecules_dict') and self.islat.molecules_dict:
                 self.islat.molecules_dict.add_active_molecule_change_callback(self._on_active_molecule_change)
             
             if hasattr(self.islat, 'molecules_dict') and self.islat.molecules_dict:
@@ -1185,6 +1185,11 @@ class ControlPanel(ttk.Frame):
         self.islat.molecules_dict.clear_comparison_molecules()
 
         self._set_active_molecule(mol_name= mol_name)
+
+        # Explicitly refresh fields and highlighting in case the callback
+        # chain was not yet set up or fires asynchronously.
+        self._update_molecule_parameter_fields()
+        self._update_active_molecule_changes()
 
     def _on_molecule_shift_clicked(self, mol_name):
         """Handle shift-click on a molecule button.
