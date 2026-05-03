@@ -800,7 +800,7 @@ class ControlPanel(ttk.Frame):
         """Register callbacks for UI synchronization only"""
         try:
             if hasattr(self.islat, 'add_active_molecule_change_callback'):
-                self.islat.add_active_molecule_change_callback(self._on_active_molecule_change)
+                self.islat.molecules_dict.add_active_molecule_change_callback(self._on_active_molecule_change)
             
             if hasattr(self.islat, 'molecules_dict') and self.islat.molecules_dict:
                 self.islat.molecules_dict.add_global_parameter_change_callback(self._on_global_parameter_change)
@@ -1182,7 +1182,7 @@ class ControlPanel(ttk.Frame):
             comp_name = getattr(comp_mol, 'name', str(comp_mol))
             if comp_name in self.mol_frames:
                 self.mol_frames[comp_name].config(bg=self.bg_color)
-        self.islat.clear_comparison_molecules()
+        self.islat.molecules_dict.clear_comparison_molecules()
 
         self._set_active_molecule(mol_name= mol_name)
 
@@ -1210,14 +1210,14 @@ class ControlPanel(ttk.Frame):
 
         if mol_name in comp_names:
             # Toggle-off: remove from the comparison list
-            self.islat.toggle_comparison_molecule(mol_name)
+            self.islat.molecules_dict.toggle_comparison_molecule(mol_name)
             if mol_name in self.mol_frames:
                 self.mol_frames[mol_name].config(bg=self.bg_color)
         else:
             # New molecule: promote to primary (old primary → comparison)
             # _update_active_molecule_changes fires via the active_molecule
             # callback and repaints all frame colours correctly.
-            self.islat.promote_to_active_molecule(mol_name)
+            self.islat.molecules_dict.promote_to_active_molecule(mol_name)
 
     # ------------------------------------------------------------------
     # Right-click context menu — molecule rows
@@ -1438,8 +1438,8 @@ class ControlPanel(ttk.Frame):
 
     def cleanup(self):
         try:
-            if hasattr(self.islat, '2_active_molecule_change_callback'):
-                self.islat.remove_active_molecule_change_callback(self._on_active_molecule_change)
+            if hasattr(self.islat, 'molecules_dict') and self.islat.molecules_dict:
+                self.islat.molecules_dict.remove_active_molecule_change_callback(self._on_active_molecule_change)
         except Exception as e:
             print(f"Error during ControlPanel cleanup: {e}")
 

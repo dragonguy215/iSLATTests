@@ -45,9 +45,8 @@ class iSLAT:
         
         # Initialize collections
         self.molecules_dict = MoleculeDict()
-        self.callbacks = {}
         # (active_molecule, comparison_molecules, and their callbacks are
-        # owned by self.molecules_dict — see forwarding proxies below)
+        # owned by self.molecules_dict)
         
         # === LAZY LOADING FLAGS ===
         self._initial_molecule_parameters = None
@@ -850,39 +849,11 @@ class iSLAT:
             print(f"Error updating model spectrum: {e}")
             self.sum_spectrum_flux = np.zeros_like(self.wave_data) if hasattr(self, 'wave_data') else np.array([])
 
-    def _trigger_callbacks(self, event_type, *args, **kwargs):
-        """Trigger all callbacks for an event type."""
-        for callback in self.callbacks.get(event_type, []):
-            try:
-                callback(*args, **kwargs)
-            except Exception as e:
-                print(f"Callback error in {event_type}: {e}")
-    
-    def add_active_molecule_change_callback(self, callback) -> None:
-        """Register a callback for active-molecule changes (forwards to MoleculeDict)."""
-        self.molecules_dict.add_active_molecule_change_callback(callback)
-
-    def remove_active_molecule_change_callback(self, callback) -> None:
-        """Deregister an active-molecule-change callback (forwards to MoleculeDict)."""
-        self.molecules_dict.remove_active_molecule_change_callback(callback)
-
-    def _notify_active_molecule_change(self, old_molecule, new_molecule) -> None:
-        """Forward to MoleculeDict (kept for any legacy direct callers)."""
-        self.molecules_dict._notify_active_molecule_change(old_molecule, new_molecule)
-
     # === COMPARISON MOLECULES ===
     @property
     def comparison_molecules(self) -> list:
         """Secondary molecules rendered in the line inspection plot."""
         return self.molecules_dict.comparison_molecules
-
-    def toggle_comparison_molecule(self, molecule) -> bool:
-        """Forward to MoleculeDict.toggle_comparison_molecule."""
-        return self.molecules_dict.toggle_comparison_molecule(molecule)
-
-    def promote_to_active_molecule(self, molecule) -> bool:
-        """Forward to MoleculeDict.promote_to_active_molecule."""
-        return self.molecules_dict.promote_to_active_molecule(molecule)
 
     def duplicate_molecule(self, mol_name: str) -> Optional[str]:
         """Duplicate *mol_name* and make the copy the active molecule.
@@ -904,18 +875,6 @@ class iSLAT:
                 print(f"duplicate_molecule: GUI refresh warning — {e}")
 
         return new_name
-
-    def clear_comparison_molecules(self) -> None:
-        """Forward to MoleculeDict.clear_comparison_molecules."""
-        self.molecules_dict.clear_comparison_molecules()
-
-    def add_comparison_molecule_change_callback(self, callback) -> None:
-        """Register a callback for comparison-molecule list changes (forwards to MoleculeDict)."""
-        self.molecules_dict.add_comparison_molecule_change_callback(callback)
-
-    def _notify_comparison_molecules_change(self) -> None:
-        """Forward to MoleculeDict (kept for any legacy direct callers)."""
-        self.molecules_dict._notify_comparison_molecules_change()
 
     # === UTILITY METHODS ===
     def _safe_load_data(self, loader_func, cache_attr, error_message):
@@ -1080,12 +1039,6 @@ class iSLAT:
         if not hasattr(self, 'molecules_dict'):
             return
         self.molecules_dict.active_molecule = molecule
-        # Also fire the unified callback system for any subscribers on iSLAT directly.
-        self._trigger_callbacks(
-            'active_molecule_changed',
-            None,
-            self.molecules_dict.active_molecule,
-        )
     
     def subtract_models_from_data(self, visible_only: bool = True) -> Optional[str]:
         """

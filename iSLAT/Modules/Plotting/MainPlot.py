@@ -319,7 +319,7 @@ class iSLATPlot:
             self.islat.molecules_dict.add_global_parameter_change_callback(self._on_global_parameter_changed)
 
         # Register for active molecule changes
-        self.islat.add_active_molecule_change_callback(self._on_active_molecule_changed)
+        self.islat.molecules_dict.add_active_molecule_change_callback(self._on_active_molecule_changed)
     
     def _on_active_molecule_changed(self, old_molecule, new_molecule):
         """Handle active molecule changes"""
