@@ -357,14 +357,16 @@ class ControlPanel(ttk.Frame):
                 lambda e, name=mol_name: self._on_molecule_shift_clicked(mol_name=name),
             )
             # Right-click opens the context menu
-            mol_btn.bind(
-                "<Button-3>",
-                lambda e, name=mol_name: self._show_molecule_context_menu(name, e),
-            )
-            mol_frame.bind(
-                "<Button-3>",
-                lambda e, name=mol_name: self._show_molecule_context_menu(name, e),
-            )
+            # Button-3 = right-click on Windows/Linux; Button-2 and Control-Button-1 for macOS
+            for _seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
+                mol_btn.bind(
+                    _seq,
+                    lambda e, name=mol_name: self._show_molecule_context_menu(name, e),
+                )
+                mol_frame.bind(
+                    _seq,
+                    lambda e, name=mol_name: self._show_molecule_context_menu(name, e),
+                )
             if len(mol_name) > self.max_name_len:
                 CreateToolTip(mol_btn, mol_name, bg=self.bg_color)
 
@@ -1251,7 +1253,7 @@ class ControlPanel(ttk.Frame):
             command=lambda: self._export_molecule_action(mol_name),
         )
         try:
-            menu.tk_popup(event.x_root, event.y_root)
+            menu.tk_popup(event.x_root, event.y_root, 0)
         finally:
             menu.grab_release()
 
