@@ -83,6 +83,7 @@ class FileInteractionPane(ttk.Frame):
             bg =self.bg
         )
         self.file_label.grid(row=0, column=0, sticky="ew", padx=(5, 5), pady=2)
+        self.file_label.bind('<Button-1>', self._on_file_label_click)
 
         if self.file_label.trimmed:
             self.file_label.tooltip = CreateToolTip(self.file_label, self.islat_class.loaded_spectrum_name)
@@ -221,11 +222,14 @@ class FileInteractionPane(ttk.Frame):
         idx = getattr(self.islat_class, 'sample_spectra_index', 0)
         
         if len(sample) > 1 and filename:
-            display_text = f"{filename} ({idx + 1}/{len(sample)})"
+            display_text = f"\u25be {filename} ({idx + 1}/{len(sample)})"
+            self.file_label.config(cursor="hand2")
         elif filename:
             display_text = f"{filename}"
+            self.file_label.config(cursor="")
         else:
             display_text = "No file loaded"
+            self.file_label.config(cursor="")
 
         self.update_label(self.file_label, text=display_text)
     
@@ -354,6 +358,34 @@ class FileInteractionPane(ttk.Frame):
             self.islat_class.GUI.plot.remove_saved_lines()
         self.data_field.insert_text("Cleared input line list")
     
+    def _on_file_label_click(self, event):
+        """Show a dropdown to select from sample spectra when more than one is loaded."""
+        sample = getattr(self.islat_class, 'sample_spectra', [])
+        if len(sample) <= 1:
+            return
+        self._show_sample_dropdown(event)
+
+    def _show_sample_dropdown(self, event):
+        """Create and post a popup menu listing all spectra in the current sample."""
+        sample = getattr(self.islat_class, 'sample_spectra', [])
+        current_idx = getattr(self.islat_class, 'sample_spectra_index', 0)
+
+        menu = tk.Menu(self, tearoff=0)
+        for idx, path in enumerate(sample):
+            name = os.path.basename(path)
+            label = f"\u2713 {name}" if idx == current_idx else f"   {name}"
+            menu.add_command(
+                label=label,
+                command=lambda i=idx: self.islat_class.switch_to_spectrum(i)
+            )
+
+        x = event.widget.winfo_rootx()
+        y = event.widget.winfo_rooty() + event.widget.winfo_height()
+        try:
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+
     def _add_sample_spectra(self):
         """Open file dialog to add spectra to the sample list."""
         self.islat_class.add_sample_spectra()
