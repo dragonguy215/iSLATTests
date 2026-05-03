@@ -1241,6 +1241,11 @@ class ControlPanel(ttk.Frame):
             state=paste_state,
             command=lambda: self._paste_molecule_parameters(mol_name),
         )
+        menu.add_separator()
+        menu.add_command(
+            label="Export Model",
+            command=lambda: self._export_molecule_action(mol_name),
+        )
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -1251,6 +1256,19 @@ class ControlPanel(ttk.Frame):
         result = self.islat.duplicate_molecule(mol_name)
         if result is None:
             print(f"ControlPanel: failed to duplicate '{mol_name}'.")
+
+    def _export_molecule_action(self, mol_name: str) -> None:
+        """Export the named molecule's model spectrum to a CSV file."""
+        try:
+            from iSLAT.Modules.FileHandling.iSLATFileHandling import generate_csv
+            generate_csv(
+                molecules_data=self.islat.molecules_dict,
+                mol_name=mol_name,
+                data_field=self.data_field,
+                wave_data=getattr(self.islat, 'wave_data_original', None),
+            )
+        except Exception as e:
+            print(f"ControlPanel: export failed for '{mol_name}' — {e}")
 
     def _edit_molecule_name(self, mol_name: str) -> None:
         """Prompt the user to rename a molecule (changes the dict key)."""
