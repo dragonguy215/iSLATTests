@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 from iSLAT.Modules.DataProcessing.LineListMaker import LineListMaker
+from iSLAT.Modules.GUI.Tooltips import CreateToolTip
 
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
@@ -103,22 +104,25 @@ class LineListFilterWindow(tk.Toplevel):
         self._entries = {}  # name -> (min_var, max_var) or special
 
         numeric_fields = [
-            ("Wavelength (µm)",   "wavelength"),
-            ("E_up (K)",          "eup"),
-            ("E_low (K)",         "elow"),
-            ("Einstein A (s⁻¹)", "astein"),
-            ("g_up",              "gup"),
-            ("g_low",             "glow"),
+            ("Wavelength (µm)",   "wavelength", "Filter lines by wavelength (µm).\nLeave Min or Max blank to apply a one-sided bound."),
+            ("E_up (K)",          "eup",        "Filter by upper-level energy (in Kelvin).\nLeave Min or Max blank to apply a one-sided bound."),
+            ("E_low (K)",         "elow",       "Filter by lower-level energy (in Kelvin).\nLeave Min or Max blank to apply a one-sided bound."),
+            ("Einstein A (s⁻¹)", "astein",     "Filter by Einstein A coefficient (spontaneous emission rate, s⁻¹).\nLeave Min or Max blank to apply a one-sided bound."),
+            ("g_up",              "gup",        "Filter by upper-level statistical weight (degeneracy).\nLeave Min or Max blank to apply a one-sided bound."),
+            ("g_low",             "glow",       "Filter by lower-level statistical weight (degeneracy).\nLeave Min or Max blank to apply a one-sided bound."),
         ]
-        for r, (label, key) in enumerate(numeric_fields, start=2):
-            ttk.Label(ctrl_lf, text=label).grid(
-                row=r, column=0, sticky="w", padx=4, pady=2)
+        for r, (label, key, tip) in enumerate(numeric_fields, start=2):
+            lbl = ttk.Label(ctrl_lf, text=label)
+            lbl.grid(row=r, column=0, sticky="w", padx=4, pady=2)
+            CreateToolTip(lbl, tip)
             min_var = tk.StringVar()
             max_var = tk.StringVar()
-            ttk.Entry(ctrl_lf, textvariable=min_var, width=10).grid(
-                row=r, column=1, padx=4, pady=2, sticky="ew")
-            ttk.Entry(ctrl_lf, textvariable=max_var, width=10).grid(
-                row=r, column=2, padx=4, pady=2, sticky="ew")
+            min_entry = ttk.Entry(ctrl_lf, textvariable=min_var, width=10)
+            min_entry.grid(row=r, column=1, padx=4, pady=2, sticky="ew")
+            CreateToolTip(min_entry, f"{tip}\n\nMinimum value (inclusive).")
+            max_entry = ttk.Entry(ctrl_lf, textvariable=max_var, width=10)
+            max_entry.grid(row=r, column=2, padx=4, pady=2, sticky="ew")
+            CreateToolTip(max_entry, f"{tip}\n\nMaximum value (inclusive).")
             self._entries[key] = (min_var, max_var)
 
         sep_row = len(numeric_fields) + 2
@@ -126,19 +130,34 @@ class LineListFilterWindow(tk.Toplevel):
             row=sep_row, column=0, columnspan=3, sticky="ew", pady=4)
 
         # Quantum label rows
+        _quantum_tips = {
+            "lev_up":  "Filter by upper quantum level label.\n"
+                       "Enter a substring to match against the level string.\n"
+                       "Check 'contains' to keep lines whose label contains the value;\n"
+                       "uncheck to keep lines whose label does NOT contain the value.",
+            "lev_low": "Filter by lower quantum level label.\n"
+                       "Enter a substring to match against the level string.\n"
+                       "Check 'contains' to keep lines whose label contains the value;\n"
+                       "uncheck to keep lines whose label does NOT contain the value.",
+        }
         for r_offset, (label, key) in enumerate([
             ("Quantum lev_up",  "lev_up"),
             ("Quantum lev_low", "lev_low"),
         ], start=sep_row + 1):
-            ttk.Label(ctrl_lf, text=label).grid(
-                row=r_offset, column=0, sticky="w", padx=4, pady=2)
+            lbl = ttk.Label(ctrl_lf, text=label)
+            lbl.grid(row=r_offset, column=0, sticky="w", padx=4, pady=2)
+            CreateToolTip(lbl, _quantum_tips[key])
             text_var = tk.StringVar()
             contains_var = tk.BooleanVar(value=True)
-            ttk.Entry(ctrl_lf, textvariable=text_var, width=14).grid(
-                row=r_offset, column=1, padx=4, pady=2, sticky="ew")
-            ttk.Checkbutton(
+            q_entry = ttk.Entry(ctrl_lf, textvariable=text_var, width=14)
+            q_entry.grid(row=r_offset, column=1, padx=4, pady=2, sticky="ew")
+            CreateToolTip(q_entry, _quantum_tips[key])
+            chk = ttk.Checkbutton(
                 ctrl_lf, text="contains", variable=contains_var,
-            ).grid(row=r_offset, column=2, padx=4, pady=2, sticky="w")
+            )
+            chk.grid(row=r_offset, column=2, padx=4, pady=2, sticky="w")
+            CreateToolTip(chk, "When checked: keep lines whose quantum label CONTAINS the entered text.\n"
+                               "When unchecked: keep lines whose quantum label does NOT contain the text.")
             self._entries[key] = (text_var, contains_var)
 
         vib_sep_row = sep_row + 3
@@ -146,11 +165,17 @@ class LineListFilterWindow(tk.Toplevel):
             row=vib_sep_row, column=0, columnspan=3, sticky="ew", pady=4)
 
         # Vibrational band row
-        ttk.Label(ctrl_lf, text="Vib. Band").grid(
-            row=vib_sep_row + 1, column=0, sticky="w", padx=4, pady=2)
+        _vib_tip = ("Filter lines belonging to a specific vibrational band.\n"
+                    "Examples: 'v1' (any band of mode 1), 'v1-0',\n"
+                    "'v2-1'.\n"
+                    "Leave blank to skip this filter.")
+        vib_lbl = ttk.Label(ctrl_lf, text="Vib. Band")
+        vib_lbl.grid(row=vib_sep_row + 1, column=0, sticky="w", padx=4, pady=2)
+        CreateToolTip(vib_lbl, _vib_tip)
         vib_var = tk.StringVar()
         vib_entry = ttk.Entry(ctrl_lf, textvariable=vib_var, width=10)
         vib_entry.grid(row=vib_sep_row + 1, column=1, padx=4, pady=2, sticky="ew")
+        CreateToolTip(vib_entry, _vib_tip)
         # Tooltip-style placeholder hint via focus events
         _hint = "e.g. v1, v1-0, v2-1"
         vib_entry.insert(0, _hint)
@@ -169,12 +194,16 @@ class LineListFilterWindow(tk.Toplevel):
         vib_entry.bind("<FocusIn>", _on_focus_in)
         vib_entry.bind("<FocusOut>", _on_focus_out)
 
-        ttk.Label(ctrl_lf, text="# modes").grid(
-            row=vib_sep_row + 1, column=2, sticky="w", padx=(4, 0), pady=2)
+        _modes_tip = ("Number of vibrational modes in the molecule.\n"
+                      "Used when parsing the vibrational band string.\n"
+                      "Typical values: 2 (linear/diatomic), 3, 4, or 6.")
+        modes_lbl = ttk.Label(ctrl_lf, text="# modes")
+        modes_lbl.grid(row=vib_sep_row + 1, column=2, sticky="w", padx=(4, 0), pady=2)
+        CreateToolTip(modes_lbl, _modes_tip)
         n_modes_var = tk.IntVar(value=3)
-        ttk.Spinbox(ctrl_lf, from_=2, to=6, textvariable=n_modes_var,
-                    width=4).grid(row=vib_sep_row + 1, column=2,
-                                  padx=(52, 4), pady=2, sticky="w")
+        modes_spin = ttk.Spinbox(ctrl_lf, from_=2, to=6, textvariable=n_modes_var, width=4)
+        modes_spin.grid(row=vib_sep_row + 1, column=2, padx=(52, 4), pady=2, sticky="w")
+        CreateToolTip(modes_spin, _modes_tip)
         self._entries["vib_band"] = (vib_var, n_modes_var)
         self._vib_hint = _hint
 
@@ -186,14 +215,18 @@ class LineListFilterWindow(tk.Toplevel):
 
         self._filter_listbox = tk.Listbox(af_lf, height=6, selectmode=tk.SINGLE)
         self._filter_listbox.grid(row=0, column=0, sticky="nsew")
+        CreateToolTip(self._filter_listbox,
+                      "Lists all filters that will be applied when you click 'Apply Filters'.\n"
+                      "Select a filter and click 'Remove Selected' to delete it.")
         af_scroll = ttk.Scrollbar(af_lf, orient="vertical",
                                    command=self._filter_listbox.yview)
         af_scroll.grid(row=0, column=1, sticky="ns")
         self._filter_listbox.configure(yscrollcommand=af_scroll.set)
 
-        ttk.Button(af_lf, text="Remove Selected",
-                   command=self._remove_selected_filter).grid(
-            row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        rm_btn = ttk.Button(af_lf, text="Remove Selected",
+                   command=self._remove_selected_filter)
+        rm_btn.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        CreateToolTip(rm_btn, "Remove the currently selected filter from the active filter list.")
 
         # ── Status bar ───────────────────────────────────────────────
         self._status_var = tk.StringVar()
@@ -208,18 +241,27 @@ class LineListFilterWindow(tk.Toplevel):
         btn_frame.columnconfigure(2, weight=1)
         btn_frame.columnconfigure(3, weight=1)
 
-        ttk.Button(btn_frame, text="Apply Filters",
-                   command=self._apply_filters).grid(
-            row=0, column=0, padx=4, pady=4, sticky="ew")
-        ttk.Button(btn_frame, text="Reset",
-                   command=self._reset_all).grid(
-            row=0, column=1, padx=4, pady=4, sticky="ew")
-        ttk.Button(btn_frame, text="Export CSV",
-                   command=self._export_csv).grid(
-            row=0, column=2, padx=4, pady=4, sticky="ew")
-        ttk.Button(btn_frame, text="Export PAR",
-                   command=self._export_par).grid(
-            row=0, column=3, padx=4, pady=4, sticky="ew")
+        apply_btn = ttk.Button(btn_frame, text="Apply Filters",
+                   command=self._apply_filters)
+        apply_btn.grid(row=0, column=0, padx=4, pady=4, sticky="ew")
+        CreateToolTip(apply_btn,
+                      "Read all non-empty fields above and add corresponding filters\n"
+                      "to the Active Filters list, then update the filtered line count.")
+        reset_btn = ttk.Button(btn_frame, text="Reset",
+                   command=self._reset_all)
+        reset_btn.grid(row=0, column=1, padx=4, pady=4, sticky="ew")
+        CreateToolTip(reset_btn,
+                      "Clear all active filters and reset the line list to its original state.")
+        csv_btn = ttk.Button(btn_frame, text="Export CSV",
+                   command=self._export_csv)
+        csv_btn.grid(row=0, column=2, padx=4, pady=4, sticky="ew")
+        CreateToolTip(csv_btn,
+                      "Export the currently filtered line list to a CSV file.")
+        par_btn = ttk.Button(btn_frame, text="Export PAR",
+                   command=self._export_par)
+        par_btn.grid(row=0, column=3, padx=4, pady=4, sticky="ew")
+        CreateToolTip(par_btn,
+                      "Export the currently filtered line list in HITRAN .par format.")
 
         ttk.Separator(btn_frame, orient="horizontal").grid(
             row=1, column=0, columnspan=4, sticky="ew", pady=(2, 0))
@@ -229,12 +271,18 @@ class LineListFilterWindow(tk.Toplevel):
         apply_mol_frame.columnconfigure(0, weight=1)
         apply_mol_frame.columnconfigure(1, weight=1)
 
-        ttk.Button(apply_mol_frame, text="Apply to Molecule",
-                   command=self._apply_to_molecule).grid(
-            row=0, column=0, padx=4, pady=4, sticky="ew")
-        ttk.Button(apply_mol_frame, text="Duplicate & Apply",
-                   command=self._duplicate_and_apply).grid(
-            row=0, column=1, padx=4, pady=4, sticky="ew")
+        apply_mol_btn = ttk.Button(apply_mol_frame, text="Apply to Molecule",
+                   command=self._apply_to_molecule)
+        apply_mol_btn.grid(row=0, column=0, padx=4, pady=4, sticky="ew")
+        CreateToolTip(apply_mol_btn,
+                      "Replace this molecule's line list with the filtered result in-place.\n"
+                      "The original line list will be lost for this session.")
+        dup_btn = ttk.Button(apply_mol_frame, text="Duplicate & Apply",
+                   command=self._duplicate_and_apply)
+        dup_btn.grid(row=0, column=1, padx=4, pady=4, sticky="ew")
+        CreateToolTip(dup_btn,
+                      "Create a copy of this molecule with the filtered line list applied,\n"
+                      "leaving the original molecule unchanged.")
 
     # ------------------------------------------------------------------
     # Logic
