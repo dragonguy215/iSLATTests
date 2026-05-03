@@ -1240,6 +1240,101 @@ class MoleculeDict(ObservableMixin, dict):
 
         return resolved
 
+    def rename_molecule(self, old_name: str, new_name: str) -> bool:
+        """Rename a molecule's dict key and its ``name`` attribute.
+
+        Parameters
+        ----------
+        old_name : str
+            Current key in this dict.
+        new_name : str
+            Desired new key. Must be non-empty and not already present.
+
+        Returns
+        -------
+        bool
+            ``True`` on success, ``False`` if validation failed.
+        """
+        new_name = new_name.strip()
+        if not new_name:
+            print("MoleculeDict.rename_molecule: new name is empty.")
+            return False
+        if old_name not in self:
+            print(f"MoleculeDict.rename_molecule: '{old_name}' not found.")
+            return False
+        if new_name in self:
+            print(f"MoleculeDict.rename_molecule: '{new_name}' already exists.")
+            return False
+
+        mol = self.pop(old_name)
+        mol.name = new_name
+        self[new_name] = mol
+        print(f"MoleculeDict: renamed '{old_name}' → '{new_name}'")
+        return True
+
+    def duplicate(self, mol_name: str) -> Optional[str]:
+        """Duplicate an existing molecule entry, preserving its physics parameters.
+
+        Generates a unique name, loads a new :class:`Molecule` from the same
+        line-list / HITRAN file as the source, then transfers all
+        :attr:`Molecule.COPY_PARAMS` values to the new entry.
+
+        Parameters
+        ----------
+        mol_name : str
+            Key of the molecule to duplicate.
+
+        Returns
+        -------
+        Optional[str]
+            The key of the new duplicate molecule, or ``None`` on failure.
+        """
+        if mol_name not in self:
+            print(f"MoleculeDict.duplicate: '{mol_name}' not found.")
+            return None
+
+        src: Molecule = self[mol_name]
+
+        # --- unique name ---
+        base = f"{mol_name}_copy"
+        new_name = base
+        counter = 2
+        while new_name in self:
+            new_name = f"{base}{counter}"
+            counter += 1
+
+        new_label = f"{src.displaylabel} (copy)"
+
+        mol_data = {
+            "name": new_name,
+            "Molecule Name": new_name,
+            "Molecule Label": new_label,
+            "label": new_label,
+            "file": src.filepath,
+            "hitran_data": src.hitran_data,
+        }
+
+        try:
+            results = self.load_molecules(
+                [mol_data],
+                {},
+                update_global_parameters=False,
+            )
+        except Exception as e:
+            print(f"MoleculeDict.duplicate: load failed — {e}")
+            return None
+
+        if results.get("success", 0) == 0:
+            print(f"MoleculeDict.duplicate: load returned no successes — {results.get('errors')}")
+            return None
+
+        new_mol = self.get(new_name)
+        if new_mol is not None:
+            new_mol.bulk_update_parameters(src.copy_parameters(), skip_notification=True)
+
+        print(f"MoleculeDict: duplicated '{mol_name}' → '{new_name}'")
+        return new_name
+
     def bulk_update_parameters(
         self,
         parameter_dict: Dict[str, Any],

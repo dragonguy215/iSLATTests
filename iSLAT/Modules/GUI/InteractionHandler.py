@@ -407,7 +407,11 @@ class InteractionHandler:
         keysym = event.keysym.lower()
         
         # Check if focus is on an entry widget - don't interfere with typing
-        widget_class = event.widget.winfo_class()
+        # event.widget may be a string path if the widget was destroyed or during dialogs
+        try:
+            widget_class = event.widget.winfo_class()
+        except AttributeError:
+            return
         if widget_class in ('Entry', 'Text', 'TEntry', 'TCombobox'):
             return  # Don't consume event, let typing work
         

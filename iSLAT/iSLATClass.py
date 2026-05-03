@@ -981,6 +981,27 @@ class iSLAT:
 
         return True
 
+    def duplicate_molecule(self, mol_name: str) -> Optional[str]:
+        """Duplicate *mol_name* and make the copy the active molecule.
+
+        The data work (name generation, loading, parameter transfer) is
+        delegated to :meth:`MoleculeDict.duplicate`.
+        """
+        new_name = self.molecules_dict.duplicate(mol_name)
+        if new_name is None:
+            return None
+
+        self.active_molecule = new_name
+
+        if hasattr(self, 'GUI') and self.GUI is not None:
+            try:
+                self.GUI.plot.update_model_plot()
+                self.GUI.control_panel.refresh_from_molecules_dict()
+            except Exception as e:
+                print(f"duplicate_molecule: GUI refresh warning — {e}")
+
+        return new_name
+
     def clear_comparison_molecules(self):
         """Remove all comparison molecules."""
         if self._comparison_molecules:

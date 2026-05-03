@@ -81,6 +81,12 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
     INTENSITY_AFFECTING_PARAMS = {'temp', 'n_mol', 'broad', 'rv_shift', 'wavelength_range', 'intensity_calculation_method'}
     SPECTRUM_AFFECTING_PARAMS = {'radius', 'distance', 'fwhm', 'keplerian_fwhm', 'instrumental_profile_key', 'rv_shift', 'wavelength_range'}
     FLUX_AFFECTING_PARAMS = INTENSITY_AFFECTING_PARAMS | SPECTRUM_AFFECTING_PARAMS | {'model_pixel_res'}
+
+    # Parameters transferred by Copy/Paste Parameters and Duplicate.
+    COPY_PARAMS: Tuple[str, ...] = (
+        "temp", "n_mol", "radius", "fwhm", "broad",
+        "rv_shift", "keplerian_fwhm", "instrumental_profile_key",
+    )
     
     # Backward-compatible aliases for the ClassObservableMixin API
     @classmethod
@@ -961,6 +967,10 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
                 if old_value != new_value:
                     self._notify_my_parameter_change(param_name, old_value, new_value)
     
+    def copy_parameters(self) -> Dict[str, Any]:
+        """Return a snapshot dict of this molecule's ``COPY_PARAMS`` values."""
+        return {p: getattr(self, p) for p in self.COPY_PARAMS if hasattr(self, p)}
+
     def force_recalculate(self):
         self.clear_all_caches()
         self._ensure_intensity_calculated()

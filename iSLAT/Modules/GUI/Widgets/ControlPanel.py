@@ -1,7 +1,7 @@
 #import traceback
 import platform
 import tkinter as tk
-from tkinter import ttk, colorchooser
+from tkinter import ttk, colorchooser, simpledialog, messagebox
 import numpy as np
 from iSLAT.Modules.DataTypes.Molecule import Molecule
 from iSLAT.Modules.FileHandling.iSLATFileHandling import load_control_panel_fields_config
@@ -12,6 +12,7 @@ from ..Tooltips import CreateToolTip
 
 # Platform-specific layout constants — Windows uses larger font metrics than macOS
 _IS_WINDOWS = platform.system() == "Windows"
+
 _ENTRY_LABEL_PADX = 3 if _IS_WINDOWS else 1
 _ENTRY_FIELD_PADX = 3 if _IS_WINDOWS else 1
 _MOL_BTN_WIDTH = 6 if _IS_WINDOWS else 4
@@ -54,6 +55,7 @@ class ControlPanel(ttk.Frame):
         self.selected_color = "#007BFF"
         self.comparison_color = "#66B2FF"  # Lighter blue for comparison molecules
         self._shift_click_consumed = False  # Flag to prevent command firing on shift-click
+        self._parameter_clipboard = None  # Stores {param: value} for Copy/Paste Parameters
         
         self.max_name_len = 4
         # Load field configurations from JSON file using iSLAT file handling
@@ -354,6 +356,15 @@ class ControlPanel(ttk.Frame):
                 "<Shift-Button-1>",
                 lambda e, name=mol_name: self._on_molecule_shift_clicked(mol_name=name),
             )
+            # Right-click opens the context menu
+            mol_btn.bind(
+                "<Button-3>",
+                lambda e, name=mol_name: self._show_molecule_context_menu(name, e),
+            )
+            mol_frame.bind(
+                "<Button-3>",
+                lambda e, name=mol_name: self._show_molecule_context_menu(name, e),
+            )
             if len(mol_name) > self.max_name_len:
                 CreateToolTip(mol_btn, mol_name, bg=self.bg_color)
 
@@ -368,7 +379,7 @@ class ControlPanel(ttk.Frame):
 
             color_button = ColorButton(
                 mol_frame,
-                color=getattr(current_mol, 'color', "Blue"),
+                color=getattr(current_mol, 'color', None) or "blue",
             )
             color_button.add_command(command=lambda btn=color_button, name=mol_name: self._on_color_button_clicked(name, btn))
             color_button.grid(row=0, column=3, sticky="nsew")
@@ -1199,6 +1210,123 @@ class ControlPanel(ttk.Frame):
             # _update_active_molecule_changes fires via the active_molecule
             # callback and repaints all frame colours correctly.
             self.islat.promote_to_active_molecule(mol_name)
+
+    # ------------------------------------------------------------------
+    # Right-click context menu — molecule rows
+    # ------------------------------------------------------------------
+    def _show_molecule_context_menu(self, mol_name: str, event) -> None:
+        """Post a right-click context menu for a molecule row."""
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(
+            label="Duplicate",
+            command=lambda: self._duplicate_molecule_action(mol_name),
+        )
+        menu.add_separator()
+        menu.add_command(
+            label="Edit Name",
+            command=lambda: self._edit_molecule_name(mol_name),
+        )
+        menu.add_command(
+            label="Edit Label",
+            command=lambda: self._edit_molecule_label(mol_name),
+        )
+        menu.add_separator()
+        menu.add_command(
+            label="Copy Parameters",
+            command=lambda: self._copy_molecule_parameters(mol_name),
+        )
+        paste_state = tk.NORMAL if self._parameter_clipboard is not None else tk.DISABLED
+        menu.add_command(
+            label="Paste Parameters",
+            state=paste_state,
+            command=lambda: self._paste_molecule_parameters(mol_name),
+        )
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _duplicate_molecule_action(self, mol_name: str) -> None:
+        """Wrapper: call iSLAT.duplicate_molecule and report any failure."""
+        result = self.islat.duplicate_molecule(mol_name)
+        if result is None:
+            print(f"ControlPanel: failed to duplicate '{mol_name}'.")
+
+    def _edit_molecule_name(self, mol_name: str) -> None:
+        """Prompt the user to rename a molecule (changes the dict key)."""
+        new_name = simpledialog.askstring(
+            "Edit Name",
+            "Enter new molecule name:",
+            initialvalue=mol_name,
+            parent=self,
+        )
+        if not new_name or new_name.strip() == mol_name:
+            return
+        mol_dict = self.islat.molecules_dict
+        ok = mol_dict.rename_molecule(mol_name, new_name.strip())
+        if not ok:
+            messagebox.showerror(
+                "Rename Failed",
+                f"Could not rename '{mol_name}' to '{new_name.strip()}'.\n"
+                "The name may already be in use or is invalid.",
+                parent=self,
+            )
+            return
+        # If this was the active molecule, update the reference by name
+        if hasattr(self.islat, 'active_molecule'):
+            am = self.islat.active_molecule
+            if hasattr(am, 'name') and am.name == new_name.strip():
+                self.islat.active_molecule = new_name.strip()
+        try:
+            self.plot.update_model_plot()
+            self._rebuild_color_and_vis_controls()
+        except Exception as e:
+            print(f"_edit_molecule_name: refresh warning — {e}")
+
+    def _edit_molecule_label(self, mol_name: str) -> None:
+        """Prompt the user to change a molecule's display label."""
+        mol_dict = self.islat.molecules_dict
+        if mol_name not in mol_dict:
+            return
+        mol_obj = mol_dict[mol_name]
+        new_label = simpledialog.askstring(
+            "Edit Label",
+            "Enter new display label (supports LaTeX, e.g. $H_2O$):",
+            initialvalue=getattr(mol_obj, 'displaylabel', mol_name),
+            parent=self,
+        )
+        if not new_label or new_label == getattr(mol_obj, 'displaylabel', mol_name):
+            return
+        mol_obj.displaylabel = new_label
+        try:
+            self.plot.update_model_plot()
+        except Exception as e:
+            print(f"_edit_molecule_label: plot refresh warning — {e}")
+
+    def _copy_molecule_parameters(self, mol_name: str) -> None:
+        """Copy physics parameters from *mol_name* to the in-memory clipboard."""
+        mol_dict = getattr(self.islat, 'molecules_dict', {})
+        if mol_name not in mol_dict:
+            return
+        self._parameter_clipboard = mol_dict[mol_name].copy_parameters()
+        print(f"Copied parameters from '{mol_name}'.")
+
+    def _paste_molecule_parameters(self, mol_name: str) -> None:
+        """Apply the clipboard parameters to *mol_name* and refresh the UI."""
+        if self._parameter_clipboard is None:
+            return
+        mol_dict = getattr(self.islat, 'molecules_dict', {})
+        if mol_name not in mol_dict:
+            return
+        mol_obj = mol_dict[mol_name]
+        mol_obj.bulk_update_parameters(self._parameter_clipboard)
+        # Refresh the parameter entry fields if this is (or becomes) the active mol
+        self._update_molecule_parameter_fields()
+        try:
+            self.plot.update_model_plot()
+        except Exception as e:
+            print(f"_paste_molecule_parameters: plot refresh warning — {e}")
+        print(f"Pasted parameters to '{mol_name}'.")
 
     def _set_active_molecule(self, mol_name):
         selected_label = self.mol_dict[mol_name].displaylabel
