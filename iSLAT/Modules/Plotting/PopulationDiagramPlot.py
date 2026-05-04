@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, LogNorm
 import matplotlib
 
 from .BasePlot import BasePlot
@@ -499,6 +499,9 @@ class PopulationDiagramPlot(BasePlot):
         cmap: str = "viridis",
         vmin: Optional[float] = None,
         vmax: Optional[float] = None,
+        pmin: Optional[float] = None,
+        pmax: Optional[float] = None,
+        log_scale: bool = False,
         regenerate: bool = True,
     ) -> None:
         """Re-colour the scatter points by a molecular property.
@@ -527,7 +530,18 @@ class PopulationDiagramPlot(BasePlot):
             Matplotlib colourmap name (default ``'viridis'``).
         vmin, vmax : float, optional
             Explicit colour-scale limits for continuous properties.
-            Ignored for categorical properties.
+            Ignored when *pmin* / *pmax* are set.  Ignored for
+            categorical properties.
+        pmin, pmax : float, optional
+            Percentile cutoffs (0-100) for the colour-scale limits.
+            When set, the colour scale minimum / maximum is computed
+            as the *pmin*-th / *pmax*-th percentile of the plotted
+            values, overriding *vmin* / *vmax*.  For example,
+            ``pmax=75`` caps the top colour at the 75th-percentile
+            value so that the upper 25 % of the distribution all
+            receive the maximum colour.
+        log_scale : bool
+            Use a logarithmic colour-norm (default ``False``).
         regenerate : bool
             If ``True`` (default) the plot is regenerated immediately.
         """
@@ -536,6 +550,9 @@ class PopulationDiagramPlot(BasePlot):
             "cmap": cmap,
             "vmin": vmin,
             "vmax": vmax,
+            "pmin": pmin,
+            "pmax": pmax,
+            "log_scale": log_scale,
         }
         if regenerate:
             self.generate_plot()
@@ -564,6 +581,9 @@ class PopulationDiagramPlot(BasePlot):
         cmap_name = mapping["cmap"]
         vmin = mapping.get("vmin")
         vmax = mapping.get("vmax")
+        pmin = mapping.get("pmin")
+        pmax = mapping.get("pmax")
+        log_scale = mapping.get("log_scale", False)
 
         # Resolve aliases between user-facing names and internal keys
         _ALIASES = {
@@ -602,12 +622,23 @@ class PopulationDiagramPlot(BasePlot):
         rd_cat = np.concatenate(all_rd)
         val_cat = np.concatenate(all_vals)
 
-        if vmin is None:
+        # Percentile cutoffs override explicit vmin/vmax when set
+        if pmin is not None:
+            vmin = float(np.nanpercentile(val_cat, float(pmin)))
+        elif vmin is None:
             vmin = float(np.nanmin(val_cat))
-        if vmax is None:
+        if pmax is not None:
+            vmax = float(np.nanpercentile(val_cat, float(pmax)))
+        elif vmax is None:
             vmax = float(np.nanmax(val_cat))
 
-        norm = Normalize(vmin=vmin, vmax=vmax)
+        if log_scale:
+            # LogNorm requires strictly positive limits
+            safe_vmin = max(vmin, 1e-30) if vmin is not None else max(float(np.nanmin(val_cat[val_cat > 0])), 1e-30)
+            safe_vmax = max(vmax, safe_vmin * 10)
+            norm = LogNorm(vmin=safe_vmin, vmax=safe_vmax)
+        else:
+            norm = Normalize(vmin=vmin, vmax=vmax)
         cmap_obj = matplotlib.colormaps.get_cmap(cmap_name)
 
         sc = ax.scatter(

@@ -204,6 +204,24 @@ class InteractionHandler:
                 pdp.clear_color_mapping(regenerate=True)
                 self.canvas.draw_idle()
 
+        def _toggle_log_scale():
+            pdp = self._get_population_diagram_plot()
+            if pdp is None or getattr(pdp, '_color_mapping', None) is None:
+                return
+            current = pdp._color_mapping.get("log_scale", False)
+            pdp._color_mapping["log_scale"] = not current
+            pdp.generate_plot()
+            self.canvas.draw_idle()
+
+        def _toggle_log_scale():
+            pdp = self._get_population_diagram_plot()
+            if pdp is None or pdp._color_mapping is None:
+                return
+            current = pdp._color_mapping.get("log_scale", False)
+            pdp._color_mapping["log_scale"] = not current
+            pdp.generate_plot()
+            self.canvas.draw_idle()
+
         def _show_all_active_molecules():
             """Switch the population diagram to show all active molecules."""
             pdp = self._get_population_diagram_plot()
@@ -236,9 +254,16 @@ class InteractionHandler:
         # Determine current mode for a checkmark indicator
         pdp = self._get_population_diagram_plot()
         _all_mode = pdp is not None and getattr(pdp, '_all_molecules_mode', False)
+        _has_mapping = pdp is not None and getattr(pdp, '_color_mapping', None) is not None
+        _log_scale = _has_mapping and pdp._color_mapping.get("log_scale", False)
 
-        menu.add_command(label="Color By…", command=_color_by_dialog)
+        menu.add_command(label="Color By\u2026", command=_color_by_dialog)
         menu.add_command(label="Clear Color Mapping", command=_clear_color_mapping)
+        menu.add_command(
+            label=("\u2713 " if _log_scale else "  ") + "Log Scale Colorbar",
+            command=_toggle_log_scale,
+            state="normal" if _has_mapping else "disabled",
+        )
         menu.add_separator()
         menu.add_command(
             label=("✓ " if _all_mode else "  ") + "Show All Active Molecules",
@@ -296,6 +321,9 @@ class InteractionHandler:
         initial_cmap = "viridis"
         initial_vmin = ""
         initial_vmax = ""
+        initial_pmin = ""
+        initial_pmax = ""
+        initial_log_scale = False
         if current_mapping:
             prop_val = current_mapping.get("prop", "e_up")
             if prop_val in PROP_VALUES:
@@ -305,6 +333,11 @@ class InteractionHandler:
             initial_vmin = str(v) if v is not None else ""
             v = current_mapping.get("vmax")
             initial_vmax = str(v) if v is not None else ""
+            v = current_mapping.get("pmin")
+            initial_pmin = str(v) if v is not None else ""
+            v = current_mapping.get("pmax")
+            initial_pmax = str(v) if v is not None else ""
+            initial_log_scale = bool(current_mapping.get("log_scale", False))
 
         # --- Build the dialog window ----------------------------------
         win = tk.Toplevel(parent_widget)
@@ -338,9 +371,37 @@ class InteractionHandler:
         vmax_var = tk.StringVar(value=initial_vmax)
         tk.Entry(win, textvariable=vmax_var, width=12).grid(row=3, column=1, sticky="w", **pad)
 
-        # Row 4: buttons
+        # Separator between absolute and percentile controls
+        ttk.Separator(win, orient="horizontal").grid(
+            row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=2
+        )
+        tk.Label(win, text="— or clip by percentile (overrides vmin/vmax) —",
+                 font=("TkDefaultFont", 8), foreground="gray"
+                 ).grid(row=5, column=0, columnspan=2, **pad)
+
+        # Row 6: pmin
+        tk.Label(win, text="Min percentile % (optional):").grid(row=6, column=0, sticky="w", **pad)
+        pmin_var = tk.StringVar(value=initial_pmin)
+        pmin_spin = tk.Spinbox(win, from_=0, to=100, increment=1,
+                               textvariable=pmin_var, width=8)
+        pmin_spin.grid(row=6, column=1, sticky="w", **pad)
+
+        # Row 7: pmax
+        tk.Label(win, text="Max percentile % (optional):").grid(row=7, column=0, sticky="w", **pad)
+        pmax_var = tk.StringVar(value=initial_pmax)
+        pmax_spin = tk.Spinbox(win, from_=0, to=100, increment=1,
+                               textvariable=pmax_var, width=8)
+        pmax_spin.grid(row=7, column=1, sticky="w", **pad)
+
+        # Row 8: log scale
+        log_scale_var = tk.BooleanVar(value=initial_log_scale)
+        tk.Checkbutton(
+            win, text="Log scale colorbar", variable=log_scale_var
+        ).grid(row=8, column=0, columnspan=2, sticky="w", **pad)
+
+        # Row 9: buttons
         btn_frame = tk.Frame(win)
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=6)
+        btn_frame.grid(row=9, column=0, columnspan=2, pady=6)
 
         def _apply():
             prop_label = prop_var.get()
@@ -356,10 +417,24 @@ class InteractionHandler:
                 vmax = float(vmax_var.get()) if vmax_var.get().strip() else None
             except ValueError:
                 vmax = None
+            try:
+                pmin = float(pmin_var.get()) if pmin_var.get().strip() else None
+                if pmin is not None:
+                    pmin = max(0.0, min(100.0, pmin))
+            except ValueError:
+                pmin = None
+            try:
+                pmax = float(pmax_var.get()) if pmax_var.get().strip() else None
+                if pmax is not None:
+                    pmax = max(0.0, min(100.0, pmax))
+            except ValueError:
+                pmax = None
 
             current_pdp = self._get_population_diagram_plot()
             if current_pdp is not None:
-                current_pdp.color_by(prop, cmap=cmap, vmin=vmin, vmax=vmax, regenerate=True)
+                current_pdp.color_by(prop, cmap=cmap, vmin=vmin, vmax=vmax,
+                                     pmin=pmin, pmax=pmax,
+                                     log_scale=log_scale_var.get(), regenerate=True)
                 self.canvas.draw_idle()
             win.destroy()
 
