@@ -676,9 +676,6 @@ class MainPlotGrid(CompositePlot):
         2. Recompute the summed spectrum fill.
         3. Rebuild the legend.
 
-        This is the standalone equivalent of
-        :meth:`PlotRenderer.handle_molecule_visibility_change`.
-
         Parameters
         ----------
         molecule_name : str
