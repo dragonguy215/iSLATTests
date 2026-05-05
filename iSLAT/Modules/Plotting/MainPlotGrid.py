@@ -22,6 +22,7 @@ from matplotlib.lines import Line2D
 from .BasePlot import BasePlot
 from .LineInspectionPlot import LineInspectionPlot
 from .PopulationDiagramPlot import PopulationDiagramPlot
+from .SpectrumPanel import SpectrumPanel
 
 try:
     import iSLAT.Constants as c
@@ -149,6 +150,15 @@ class MainPlotGrid(BasePlot):
         self.ax_inspection: Optional[Axes] = ax_inspection
         self.ax_popdiagram: Optional[Axes] = ax_popdiagram
 
+        # Persistent panel objects (created lazily in _render_* methods;
+        # reused across calls so artists are mutated rather than rebuilt).
+        self.spectrum_panel: Optional[SpectrumPanel] = None
+        self.inspection_panel: Optional[LineInspectionPlot] = None
+        self.pop_diagram_panel: Optional[PopulationDiagramPlot] = None
+        # Tracks the current PopulationDiagramPlot mode so we know when
+        # to recreate the panel rather than just mutating its attributes.
+        self._pdp_mode: Optional[str] = None  # 'molecule' | 'molecules'
+
     # ------------------------------------------------------------------
     @staticmethod
     def create_three_panel_axes(fig):
@@ -199,6 +209,13 @@ class MainPlotGrid(BasePlot):
         self._ensure_figure()
         self.fig.clf()
 
+        # Reset persistent panels: the axes objects are about to be
+        # recreated, so any cached _external_ax references would be stale.
+        self.spectrum_panel = None
+        self.inspection_panel = None
+        self.pop_diagram_panel = None
+        self._pdp_mode = None
+
         (self.ax_spectrum,
          self.ax_inspection,
          self.ax_popdiagram) = self.create_three_panel_axes(self.fig)
@@ -224,37 +241,88 @@ class MainPlotGrid(BasePlot):
             if _prev_xlim != (0.0, 1.0) and _prev_ylim != (0.0, 1.0):
                 _restore_lims = True
 
-        ax.clear()
-
         if self.wave_data is None or len(self.wave_data) == 0:
+            ax.clear()
             ax.set_title("No spectrum data loaded")
             return
 
-        # Observed spectrum
-        self._plot_observed_spectrum(
-            ax, self.wave_data, self.flux_data, self.error_data
-        )
+        # Resolve wavelength range for this render
+        if self.spectrum_range is not None:
+            xmin_sp, xmax_sp = self.spectrum_range
+        else:
+            xmin_sp = float(np.nanmin(self.wave_data))
+            xmax_sp = float(np.nanmax(self.wave_data))
 
-        # Molecule models + summed
+        # Build the molecule cache (list of pre-computed spectra) so that
+        # SpectrumPanel can slice into it without recomputing molecule data.
+        mol_cache: List[tuple] = []
+        summed_wave: Optional[np.ndarray] = None
+        summed_flux: Optional[np.ndarray] = None
         if self.molecules is not None:
-            self._plot_visible_molecules(ax, self.molecules, wave_data=self.wave_data,
-                                         wave_data_obs=self.wave_data_obs)
+            for mol in self.molecules.get_visible_molecules(return_objects=True):
+                try:
+                    lam, flux = self.get_molecule_spectrum_data(mol, self.wave_data)
+                    if lam is not None and flux is not None and len(flux) > 0:
+                        mol_cache.append((
+                            np.asarray(lam),
+                            np.asarray(flux),
+                            self.get_molecule_color(mol),
+                            self.get_molecule_display_name(mol),
+                            getattr(mol, "name", "unknown"),
+                        ))
+                except Exception:
+                    pass
             try:
-                s_wave, s_flux = self.molecules.get_summed_flux(
-                    self.wave_data_obs, visible_only=True
+                summed_wave, summed_flux = self.molecules.get_summed_flux(
+                    self.wave_data_obs, visible_only=True,
                 )
-                self._plot_summed_spectrum(ax, s_wave, s_flux)
             except Exception:
                 pass
 
-        # Apply spectrum_range if set, otherwise use full data range
-        if self.spectrum_range is not None:
-            ax.set_xlim(*self.spectrum_range)
-            xr = self.spectrum_range
+        # Create the SpectrumPanel on the first call; on subsequent calls
+        # mutate its data attributes so no artists are rebuilt from scratch.
+        if self.spectrum_panel is None:
+            self.spectrum_panel = SpectrumPanel(
+                wave_data=self.wave_data,
+                flux_data=self.flux_data,
+                xmin=xmin_sp,
+                xmax=xmax_sp,
+                error_data=self.error_data,
+                molecules=self.molecules,
+                mol_cache=mol_cache,
+                summed_wave=summed_wave,
+                summed_flux=summed_flux,
+                line_list=self.line_list,
+                atomic_lines=self.atomic_lines,
+                wave_data_obs=self.wave_data_obs,
+                ax=ax,
+                theme=self.theme,
+            )
         else:
-            xr = (float(np.nanmin(self.wave_data)), float(np.nanmax(self.wave_data)))
+            self.spectrum_panel.wave_data = self.wave_data
+            self.spectrum_panel.flux_data = self.flux_data
+            self.spectrum_panel.error_data = self.error_data
+            self.spectrum_panel.molecules = self.molecules
+            self.spectrum_panel.mol_cache = mol_cache
+            self.spectrum_panel.summed_wave = summed_wave
+            self.spectrum_panel.summed_flux = summed_flux
+            self.spectrum_panel.line_list = self.line_list
+            self.spectrum_panel.atomic_lines = self.atomic_lines
+            self.spectrum_panel.wave_data_obs = self.wave_data_obs
+            self.spectrum_panel.theme = self.theme
+            self.spectrum_panel.xmin = xmin_sp
+            self.spectrum_panel.xmax = xmax_sp
+            # Ensure the panel still targets the correct axes object
+            # (may change after a standalone fig.clf() + create_three_panel_axes).
+            self.spectrum_panel._external_ax = ax
 
-        # Line annotations
+        # Delegate core rendering to the SpectrumPanel (clears ax internally).
+        self.spectrum_panel.generate_plot()
+
+        # Post-render: annotations, axis labels, title and legend are NOT
+        # handled by SpectrumPanel (it defers them to _post_render_cell in
+        # stacked-panel layouts), so we apply them here.
+        xr = (xmin_sp, xmax_sp)
         ymin = float(ax.get_ylim()[0]) if ax.get_ylim()[0] != 0 else -0.005
         ymax = float(ax.get_ylim()[1])
 
@@ -276,9 +344,9 @@ class MainPlotGrid(BasePlot):
     # ------------------------------------------------------------------
     def _render_inspection_panel(self) -> None:
         ax = self.ax_inspection
-        ax.clear()
 
         if self.inspection_range is None:
+            ax.clear()
             ax.set_title("Line Inspection -- select a range")
             return
 
@@ -316,51 +384,91 @@ class MainPlotGrid(BasePlot):
             # Default (None / False): only the active molecule
             lip_molecule = self.active_molecule
 
-        # Use a temporary LineInspectionPlot (renders onto our axes)
-        lip = LineInspectionPlot(
-            wave_data=self.wave_data,
-            flux_data=self.flux_data,
-            xmin=xmin,
-            xmax=xmax,
-            error_data=self.error_data,
-            molecule=lip_molecule,
-            molecules=lip_molecules,
-            line_data=self.line_data,
-            wave_data_obs=self.wave_data_obs,
-            ax=ax,
-            theme=self.theme,
-        )
-        lip.generate_plot()
-
-    # ------------------------------------------------------------------
-    def _render_population_panel(self) -> None:
-        ax = self.ax_popdiagram
-        ax.clear()
-
-        if self.active_molecule is None and self.molecules is None:
-            ax.set_title("Population Diagram -- no molecule selected")
-            return
-
-        # Default: always show only the active molecule.
-        # Fall back to all visible molecules only when there is no active molecule to display.
-        if self.active_molecule is not None:
-            pdp = PopulationDiagramPlot(
-                molecule=self.active_molecule,
-                highlight_lines=self.line_data,
-                ax=ax,
-                theme=self.theme,
-            )
-        elif self.molecules is not None and len(self.molecules) > 0:
-            pdp = PopulationDiagramPlot(
-                molecules=self.molecules,
-                highlight_lines=self.line_data,
+        # Create the LineInspectionPlot on the first call; on subsequent
+        # calls mutate its attributes so the same panel object is reused.
+        if self.inspection_panel is None:
+            self.inspection_panel = LineInspectionPlot(
+                wave_data=self.wave_data,
+                flux_data=self.flux_data,
+                xmin=xmin,
+                xmax=xmax,
+                error_data=self.error_data,
+                molecule=lip_molecule,
+                molecules=lip_molecules,
+                line_data=self.line_data,
+                wave_data_obs=self.wave_data_obs,
                 ax=ax,
                 theme=self.theme,
             )
         else:
+            self.inspection_panel.wave_data = self.wave_data
+            self.inspection_panel.flux_data = self.flux_data
+            self.inspection_panel.xmin = xmin
+            self.inspection_panel.xmax = xmax
+            self.inspection_panel.error_data = self.error_data
+            self.inspection_panel.molecule = lip_molecule
+            self.inspection_panel.molecules = lip_molecules
+            self.inspection_panel.line_data = self.line_data
+            self.inspection_panel.wave_data_obs = (
+                np.asarray(self.wave_data_obs)
+                if self.wave_data_obs is not None
+                else self.wave_data
+            )
+            self.inspection_panel.theme = self.theme
+            # Ensure the panel targets the correct axes object.
+            self.inspection_panel._external_ax = ax
+
+        self.inspection_panel.generate_plot()
+
+    # ------------------------------------------------------------------
+    def _render_population_panel(self) -> None:
+        ax = self.ax_popdiagram
+
+        if self.active_molecule is None and self.molecules is None:
+            ax.clear()
             ax.set_title("Population Diagram -- no molecule selected")
             return
-        pdp.generate_plot()
+
+        # Determine the rendering mode and the molecule(s) to display.
+        # Default: always show only the active molecule.
+        # Fall back to all visible molecules only when there is no active
+        # molecule to display.
+        if self.active_molecule is not None:
+            new_mode = "molecule"
+            pdp_molecule = self.active_molecule
+            pdp_molecules = None
+        elif self.molecules is not None and len(self.molecules) > 0:
+            new_mode = "molecules"
+            pdp_molecule = None
+            pdp_molecules = self.molecules
+        else:
+            ax.clear()
+            ax.set_title("Population Diagram -- no molecule selected")
+            return
+
+        # Recreate the panel only when the mode switches (molecule ↔ molecules),
+        # since PopulationDiagramPlot enforces mutual exclusivity at construction.
+        # Otherwise reuse the existing instance by mutating its attributes.
+        if self.pop_diagram_panel is None or self._pdp_mode != new_mode:
+            self.pop_diagram_panel = PopulationDiagramPlot(
+                molecule=pdp_molecule,
+                molecules=pdp_molecules,
+                highlight_lines=self.line_data,
+                ax=ax,
+                theme=self.theme,
+            )
+            self._pdp_mode = new_mode
+        else:
+            if new_mode == "molecule":
+                self.pop_diagram_panel.molecule = pdp_molecule
+            else:
+                self.pop_diagram_panel.molecules = pdp_molecules
+            self.pop_diagram_panel.highlight_lines = self.line_data
+            self.pop_diagram_panel.theme = self.theme
+            # Ensure the panel targets the correct axes object.
+            self.pop_diagram_panel._external_ax = ax
+
+        self.pop_diagram_panel.generate_plot()
 
     # ------------------------------------------------------------------
     # Public update helpers
@@ -838,8 +946,8 @@ class MainPlotGrid(BasePlot):
             wave_data_obs = self.wave_data_obs
 
         # Reuse / create a LineInspectionPlot delegate
-        if not hasattr(self, '_lip') or self._lip is None:
-            self._lip = LineInspectionPlot(
+        if self.inspection_panel is None:
+            self.inspection_panel = LineInspectionPlot(
                 wave_data=wave_data,
                 flux_data=flux_data,
                 xmin=xmin,
@@ -853,19 +961,19 @@ class MainPlotGrid(BasePlot):
                 render_all_visible=False,
             )
         else:
-            self._lip.wave_data = wave_data
-            self._lip.flux_data = flux_data
-            self._lip.xmin = xmin
-            self._lip.xmax = xmax
-            self._lip.molecule = active_molecule
-            self._lip.molecules = molecules
-            self._lip.wave_data_obs = (
+            self.inspection_panel.wave_data = wave_data
+            self.inspection_panel.flux_data = flux_data
+            self.inspection_panel.xmin = xmin
+            self.inspection_panel.xmax = xmax
+            self.inspection_panel.molecule = active_molecule
+            self.inspection_panel.molecules = molecules
+            self.inspection_panel.wave_data_obs = (
                 np.asarray(wave_data_obs) if wave_data_obs is not None
                 else wave_data
             )
-            self._lip.render_all_visible = False
-            self._lip.theme = self.theme
-        self._lip.generate_plot()
+            self.inspection_panel.render_all_visible = False
+            self.inspection_panel.theme = self.theme
+        self.inspection_panel.generate_plot()
 
         # Overlay additional (comparison) molecules in their own colors
         if additional_molecules:
@@ -879,9 +987,9 @@ class MainPlotGrid(BasePlot):
                     target_wave = None
             for mol in additional_molecules:
                 if mol is not None:
-                    self._lip._overlay_molecule(ax, mol, use_interp, target_wave)
+                    self.inspection_panel._overlay_molecule(ax, mol, use_interp, target_wave)
             # Rebuild legend now that all molecules have been plotted
-            self._lip._update_legend(ax)
+            self.inspection_panel._update_legend(ax)
 
         # Overlay fit results if present
         if fit_result is not None:
@@ -911,13 +1019,12 @@ class MainPlotGrid(BasePlot):
         if ax is None:
             return
 
-        # Cache check
+        # Cache check — skip re-render if molecule and parameters unchanged.
         current_hash = None
         if molecule is not None and hasattr(molecule, '_compute_intensity_hash'):
             current_hash = (molecule.name, molecule._compute_intensity_hash())
 
-        if not hasattr(self, '_pdp'):
-            self._pdp = None
+        if not hasattr(self, '_pdp_molecule'):
             self._pdp_molecule = None
             self._pdp_cache_key = None
 
@@ -931,17 +1038,18 @@ class MainPlotGrid(BasePlot):
         self._pdp_cache_key = current_hash
 
         try:
-            if self._pdp is None:
-                self._pdp = PopulationDiagramPlot(
+            if self.pop_diagram_panel is None or self._pdp_mode != "molecule":
+                self.pop_diagram_panel = PopulationDiagramPlot(
                     molecule=molecule,
                     ax=ax,
                     fig=self.fig,
                     theme=self.theme,
                 )
+                self._pdp_mode = "molecule"
             else:
-                self._pdp.molecule = molecule
-                self._pdp.theme = self.theme
-            self._pdp.generate_plot()
+                self.pop_diagram_panel.molecule = molecule
+                self.pop_diagram_panel.theme = self.theme
+            self.pop_diagram_panel.generate_plot()
         except Exception as e:
             ax.clear()
             mol_label = (

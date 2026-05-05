@@ -13,14 +13,14 @@ import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from .SpectralPanel import SpectralPanel
+from .SpectrumPanel import SpectrumPanel
 
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
 
-class LineInspectionPlot(SpectralPanel):
+class LineInspectionPlot(SpectrumPanel):
     """
     Plot a narrow wavelength region with observed data and molecule models.
 
@@ -77,6 +77,7 @@ class LineInspectionPlot(SpectralPanel):
             xmax=xmax,
             error_data=error_data,
             molecules=molecules,
+            wave_data_obs=wave_data_obs,
             figsize=figsize or (10, 4),
             ax=ax,
             **kwargs,
@@ -89,11 +90,9 @@ class LineInspectionPlot(SpectralPanel):
         # *molecules* is still used for matched-spectral-sampling queries.
         self.render_all_visible: bool = render_all_visible
         # Observer-frame wavelengths for matched spectral sampling.
-        # Falls back to wave_data when no observer-frame array is provided.
-        self.wave_data_obs: np.ndarray = (
-            np.asarray(wave_data_obs) if wave_data_obs is not None
-            else self.wave_data
-        )
+        # SpectrumPanel stores None when not provided; fall back to wave_data.
+        if self.wave_data_obs is None:
+            self.wave_data_obs = self.wave_data
 
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:  # noqa: D401
