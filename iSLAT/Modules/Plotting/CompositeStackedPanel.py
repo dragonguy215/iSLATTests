@@ -32,7 +32,6 @@ from .SpectralPanel import SpectralPanel, GapMode
 if TYPE_CHECKING:
     from matplotlib.gridspec import SubplotSpec
 
-
 class CompositeStackedPanel(StackedSpectralPanel):
     """Concrete :class:`StackedSpectralPanel` that composites rows from
     two (or more) source stacked-spectral plots into a single figure.

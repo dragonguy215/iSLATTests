@@ -46,6 +46,7 @@ from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 from matplotlib.ticker import MaxNLocator
 
 from .BasePlot import BasePlot
+from .CompositePlot import CompositePlot
 from .SpectralPanel import SpectralPanel, GapMode, XScaling
 from .LegendStrategy import LegendStrategy, MoleculeColorLegend
 
@@ -54,7 +55,7 @@ if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from .CompositeStackedPanel import CompositeStackedPanel
 
-class StackedSpectralPanel(BasePlot):
+class StackedSpectralPanel(CompositePlot):
     """
     Abstract base for vertically stacked :class:`SpectralPanel` figures.
 
@@ -256,6 +257,34 @@ class StackedSpectralPanel(BasePlot):
         Works for both equal-width and data-density modes.
         """
         return float(self._panel_ends[idx])
+
+    # ------------------------------------------------------------------
+    # CompositePlot abstract-method implementations
+    # ------------------------------------------------------------------
+
+    def _build_layout(self) -> "GridSpec":
+        """Create the outer ``GridSpec`` for the stacked rows.
+
+        .. note::
+           :meth:`StackedSpectralPanel.generate_plot` overrides the
+           default :class:`CompositePlot` orchestration and calls the
+           equivalent logic internally.
+        """
+        active_indices, _ = self._active_panel_edges()
+        n_active = len(active_indices)
+        gs = GridSpec(
+            nrows=max(n_active, 1),
+            ncols=1,
+            figure=self.fig,
+            hspace=self.hspace,
+        )
+        self.fig.subplots_adjust(left=0.06, right=0.94, top=0.93, bottom=0.06)
+        return gs
+
+    def _create_panels(self, layout: "GridSpec") -> None:
+        """Cell creation is handled by :meth:`_create_cell` inside
+        :meth:`generate_plot`, which overrides the default
+        :class:`CompositePlot` orchestration."""
 
     # ------------------------------------------------------------------
     # Abstract factory -- subclasses produce the concrete cell contents
@@ -675,6 +704,7 @@ class StackedSpectralPanel(BasePlot):
         self._ensure_figure()
         self.fig.clf()
         self.panels.clear()
+        self.child_panels.clear()
 
         # Disable constrained_layout for uniform cell heights.
         self.fig.set_layout_engine(None)
@@ -707,6 +737,9 @@ class StackedSpectralPanel(BasePlot):
                 orig_idx, xmin, xmax, gs[row_pos, 0], **kwargs,
             )
             self.panels[orig_idx] = cell_panels
+            # Register in the CompositePlot child-panel registry.
+            for p_idx, panel in enumerate(cell_panels):
+                self._register_panel(f"cell_{orig_idx}_{p_idx}", panel)
 
             # Render each sub-panel in the cell.
             for panel in cell_panels:

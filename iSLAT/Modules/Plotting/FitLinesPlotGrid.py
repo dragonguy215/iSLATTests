@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple, Callable, Any, Union, TYPE_CHECK
 from matplotlib.ticker import MaxNLocator
 
 from .BasePlot import BasePlot
+from .CompositePlot import CompositePlot
 from .SpectrumPanel import SpectrumPanel
 
 if TYPE_CHECKING:
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
     from lmfit.model import ModelResult
 
-class FitLinesPlotGrid(BasePlot):
+class FitLinesPlotGrid(CompositePlot):
     def __init__(self, #files : List[str], 
                  #molecules_dict: 'MoleculeDict', 
                  fit_data: Dict[str, Any] = None,
@@ -45,102 +46,141 @@ class FitLinesPlotGrid(BasePlot):
         self.spectrum_name = kwargs.get('spectrum_name', 'Spectrum')
         self.figsize = kwargs.get('figsize', (2.5 * self.cols, 2 * self.rows))
 
-        # Initialize BasePlot with computed figsize
+        # Initialize CompositePlot with computed figsize
         super().__init__(figsize=self.figsize, **kwargs)
 
-        # Use _ensure_figure() from BasePlot (creates a non-pyplot Figure)
-        self._ensure_figure()
-        self.axs = self.fig.subplots(self.rows, self.cols)
-        # Ensure axs is always 2D array even for single row/column
-        if self.rows == 1 and self.cols == 1:
-            self.axs = np.array([[self.axs]])
-        elif self.rows == 1:
-            self.axs = self.axs.reshape(1, -1)
-        elif self.cols == 1:
-            self.axs = self.axs.reshape(-1, 1)
         self.plt_extra_range = kwargs.get('plt_extra_range', 0.015)  # extra range to plot for each line
         self.wave_data = kwargs.get('wave_data', None)
         self.flux_data = kwargs.get('flux_data', None)
         self.err_data = kwargs.get('err_data', None)
         self.fit_line_uncertainty = kwargs.get('fit_line_uncertainty', 3.0)
+        # axs is set by _build_layout when generate_plot is called
+        self.axs: Optional[np.ndarray] = None
 
-    def generate_plot(self):
+    # ------------------------------------------------------------------
+    # CompositePlot abstract-method implementations
+    # ------------------------------------------------------------------
+
+    def _build_layout(self) -> np.ndarray:
+        """Create the 2-D axes grid for the fit-line subplots.
+
+        Returns
+        -------
+        np.ndarray
+            2-D array of shape ``(rows, cols)`` containing the
+            :class:`~matplotlib.axes.Axes` objects.
+        """
+        axs = self.fig.subplots(self.rows, self.cols)
+        # Normalise to a 2-D array regardless of grid shape.
+        if self.rows == 1 and self.cols == 1:
+            axs = np.array([[axs]])
+        elif self.rows == 1:
+            axs = axs.reshape(1, -1)
+        elif self.cols == 1:
+            axs = axs.reshape(-1, 1)
+        self.axs = axs
+        return axs
+
+    def _create_panels(self, layout: np.ndarray) -> None:
+        """Create one :class:`SpectrumPanel` per fit entry and register it.
+
+        Each panel covers the cropped wavelength range
+        ``[xmin - extra, xmax + extra]`` for its fit.  The Gaussian
+        fit overlay and axis decoration are handled in
+        :meth:`_post_render` after all panels have been rendered.
+        """
         gauss_fits, fitted_waves, fitted_fluxes = self.fit_data_tuple_list
-        n_plots = len(list(zip(gauss_fits, fitted_waves, fitted_fluxes)))
-
-        for idx, (gauss_fit, fitted_wave, fitted_flux) in enumerate(zip(gauss_fits, fitted_waves, fitted_fluxes)):
+        for idx, _ in enumerate(zip(gauss_fits, fitted_waves, fitted_fluxes)):
             if idx >= self.rows * self.cols:
                 break
             row = idx // self.cols
             col = idx % self.cols
-            ax: Axes = self.axs[row, col]
+            ax = layout[row, col]
 
             xmin = self.fit_csv_dict[idx]['xmin']
             xmax = self.fit_csv_dict[idx]['xmax']
 
-            fit_mask = (self.wave_data >= xmin - self.plt_extra_range) & (self.wave_data <= xmax + self.plt_extra_range)
-            spectrum_wave = self.wave_data[fit_mask]
-            spectrum_flux = self.flux_data[fit_mask]
-            spectrum_err = self.err_data[fit_mask]
+            if self.wave_data is None or self.flux_data is None:
+                continue
 
-            #fit_wave = fitted_wave[fit_mask]
-            #fit_flux = fitted_flux[fit_mask]
-
-            # Plot the observed spectrum using BasePlot helper
-            self._plot_observed_spectrum(
-                ax, spectrum_wave, spectrum_flux,
-                error_data=spectrum_err, color='black', label='',
+            fit_mask = (
+                (self.wave_data >= xmin - self.plt_extra_range)
+                & (self.wave_data <= xmax + self.plt_extra_range)
             )
-            
-            # plot the fit result
+            err_slice = (
+                self.err_data[fit_mask]
+                if self.err_data is not None
+                else None
+            )
+            panel = SpectrumPanel(
+                wave_data=self.wave_data[fit_mask],
+                flux_data=self.flux_data[fit_mask],
+                xmin=xmin - self.plt_extra_range,
+                xmax=xmax + self.plt_extra_range,
+                error_data=err_slice,
+                ax=ax,
+                theme=self.theme,
+            )
+            self._register_panel(f"fit_{idx}", panel)
+
+    def _post_render(self, **kwargs) -> None:
+        """Overlay Gaussian fits; apply titles, tick settings, and hide unused subplots."""
+        gauss_fits, fitted_waves, fitted_fluxes = self.fit_data_tuple_list
+        fit_pairs = list(zip(gauss_fits, fitted_waves, fitted_fluxes))
+        n_plots = len(fit_pairs)
+
+        for idx, (gauss_fit, fitted_wave, fitted_flux) in enumerate(fit_pairs):
+            if idx >= self.rows * self.cols:
+                break
+            panel = self.get_panel(f"fit_{idx}")
+            if panel is None:
+                continue
+            ax = panel.ax  # set by SpectrumPanel._resolve_axes() during generate_plot
+
+            xmin = self.fit_csv_dict[idx]['xmin']
+            xmax = self.fit_csv_dict[idx]['xmax']
+
             if fitted_wave is None or fitted_flux is None:
                 ax.set_title(f"Line {idx+1}: Fit Error", fontsize=9, pad=2)
                 continue
 
-            # get color based on fit det
             line_color = 'lime' if self.fit_csv_dict[idx]['Fit_det'] else 'red'
             try:
-                # Plot Gaussian fit + uncertainty using SpectrumPanel helper
                 SpectrumPanel.plot_gaussian_fit(
                     ax, gauss_fit, fitted_wave, fitted_flux,
                     color=line_color, uncertainty_sigma=self.fit_line_uncertainty,
                 )
-            
-                ax.set_title(f"{self.fit_csv_dict[idx]['species']} {self.fit_csv_dict[idx]['lam']:.2f}", fontsize=9, pad=2)
-                # set y lim to 10% above and below the observed flux in the fit range
-                y_min = np.min(spectrum_flux) - 0.1 * np.abs(np.min(spectrum_flux))
-                y_max = np.max(spectrum_flux) + 0.1 * np.abs(np.max(spectrum_flux))
-                ax.set_ylim(y_min, y_max)
+                ax.set_title(
+                    f"{self.fit_csv_dict[idx]['species']} "
+                    f"{self.fit_csv_dict[idx]['lam']:.2f}",
+                    fontsize=9, pad=2,
+                )
+                # y-limits relative to the observed flux in the fit window
+                panel_flux = panel.flux_data
+                if len(panel_flux) > 0:
+                    y_min = np.min(panel_flux) - 0.1 * np.abs(np.min(panel_flux))
+                    y_max = np.max(panel_flux) + 0.1 * np.abs(np.max(panel_flux))
+                    ax.set_ylim(y_min, y_max)
             except Exception as e:
-                ax.set_title(f"Plot Error", fontsize=9, pad=2)
-                print(f"Error plotting line {idx+1}: {e}")       
+                ax.set_title("Plot Error", fontsize=9, pad=2)
+                print(f"Error plotting line {idx+1}: {e}")
 
             # Compact tick labels to prevent overlap
             ax.tick_params(axis='both', labelsize=7, pad=1)
-            # Limit number of tick marks to reduce clutter
             ax.xaxis.set_major_locator(MaxNLocator(nbins=4, prune='both'))
             ax.yaxis.set_major_locator(MaxNLocator(nbins=4, prune='both'))
 
-            # Show wavelength labels on all rows (each line has a different range)
             ax.set_xlabel("Wavelength (μm)", fontsize=7, labelpad=1)
 
-            # add a y label to only the first column
+            col = idx % self.cols
             if col == 0:
                 ax.set_ylabel("Flux (Jy)", fontsize=7, labelpad=1)
-
-            self.axs[row, col] = ax
 
         # Hide unused subplots
         for idx in range(n_plots, self.rows * self.cols):
             row = idx // self.cols
             col = idx % self.cols
             self.axs[row, col].set_visible(False)
-
-        # Note: figure uses constrained_layout (set in _ensure_figure),
-        # so no explicit tight_layout() call is needed.
-
-        # Apply full theme (backgrounds, spines, etc.) to the figure
-        self.apply_theme_to_figure()
     
     def plot(self):
         self.generate_plot()

@@ -20,6 +20,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
 from .BasePlot import BasePlot
+from .CompositePlot import CompositePlot
 from .LineInspectionPlot import LineInspectionPlot
 from .PopulationDiagramPlot import PopulationDiagramPlot
 from .SpectrumPanel import SpectrumPanel
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
 
-class MainPlotGrid(BasePlot):
+class MainPlotGrid(CompositePlot):
     """
     Three-panel composite plot mirroring the default iSLAT GUI layout.
 
@@ -209,8 +210,9 @@ class MainPlotGrid(BasePlot):
         self._ensure_figure()
         self.fig.clf()
 
-        # Reset persistent panels: the axes objects are about to be
-        # recreated, so any cached _external_ax references would be stale.
+        # Reset persistent panels and the child-panel registry: the axes
+        # objects are about to be recreated, so stale references must go.
+        self.child_panels.clear()
         self.spectrum_panel = None
         self.inspection_panel = None
         self.pop_diagram_panel = None
@@ -223,6 +225,51 @@ class MainPlotGrid(BasePlot):
         self._render_spectrum_panel()
         self._render_inspection_panel()
         self._render_population_panel()
+        self.apply_theme_to_figure()
+
+    # ------------------------------------------------------------------
+    # CompositePlot abstract-method implementations
+    # ------------------------------------------------------------------
+
+    def _build_layout(self) -> tuple:
+        """Create the three-panel GridSpec layout on ``self.fig``.
+
+        Returns
+        -------
+        tuple[Axes, Axes, Axes]
+            ``(ax_spectrum, ax_inspection, ax_popdiagram)``
+        """
+        axes = self.create_three_panel_axes(self.fig)
+        self.ax_spectrum, self.ax_inspection, self.ax_popdiagram = axes
+        return axes
+
+    def _create_panels(self, layout: tuple) -> None:
+        """Create and register the three persistent panel objects.
+
+        .. note::
+           :meth:`MainPlotGrid.generate_plot` overrides the default
+           :class:`CompositePlot` orchestration and handles rendering
+           directly via :meth:`_render_spectrum_panel` etc., so this
+           method is only called when the default base-class
+           ``generate_plot`` is explicitly invoked.
+        """
+        self._render_spectrum_panel()
+        self._render_inspection_panel()
+        self._render_population_panel()
+
+    def refresh(self) -> None:
+        """Full refresh of all three panels.
+
+        Each panel's data attributes are updated from ``self`` before
+        re-rendering, so this correctly reflects the latest molecule
+        parameters, spectrum data, etc.
+        """
+        if self.ax_spectrum is not None:
+            self._render_spectrum_panel()
+        if self.ax_inspection is not None:
+            self._render_inspection_panel()
+        if self.ax_popdiagram is not None:
+            self._render_population_panel()
         self.apply_theme_to_figure()
 
     # ------------------------------------------------------------------
@@ -298,6 +345,7 @@ class MainPlotGrid(BasePlot):
                 ax=ax,
                 theme=self.theme,
             )
+            self._register_panel("spectrum", self.spectrum_panel)
         else:
             self.spectrum_panel.wave_data = self.wave_data
             self.spectrum_panel.flux_data = self.flux_data
@@ -400,6 +448,7 @@ class MainPlotGrid(BasePlot):
                 ax=ax,
                 theme=self.theme,
             )
+            self._register_panel("inspection", self.inspection_panel)
         else:
             self.inspection_panel.wave_data = self.wave_data
             self.inspection_panel.flux_data = self.flux_data
@@ -458,6 +507,7 @@ class MainPlotGrid(BasePlot):
                 theme=self.theme,
             )
             self._pdp_mode = new_mode
+            self._register_panel("popdiagram", self.pop_diagram_panel)
         else:
             if new_mode == "molecule":
                 self.pop_diagram_panel.molecule = pdp_molecule
@@ -514,15 +564,6 @@ class MainPlotGrid(BasePlot):
         self.inspection_molecules = molecules
         if self.ax_inspection is not None:
             self._render_inspection_panel()
-
-    def refresh(self) -> None:
-        """Full refresh of all three panels."""
-        if self.ax_spectrum is not None:
-            self._render_spectrum_panel()
-        if self.ax_inspection is not None:
-            self._render_inspection_panel()
-        if self.ax_popdiagram is not None:
-            self._render_population_panel()
 
     # ==================================================================
     # Data update helpers (for GUI embedding)
@@ -888,9 +929,6 @@ class MainPlotGrid(BasePlot):
     # ==================================================================
     # GUI line-inspection & population-diagram rendering
     # ==================================================================
-    # These methods were previously on PlotRenderer but are pure
-    # rendering with no controller state, so they belong on the grid.
-    # ------------------------------------------------------------------
 
     def render_line_inspection_plot(
         self,

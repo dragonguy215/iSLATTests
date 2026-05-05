@@ -18,19 +18,20 @@ Quick-start (notebook)::
 Class hierarchy::
 
     BasePlot (ABC)
+    ├── CompositePlot (ABC)         — owns an ordered child-panel registry
+    │   ├── StackedSpectralPanel (ABC) — composer for vertically stacked panels
+    │   │   ├── FullSpectrumPlot       — multi-panel full spectrum overview
+    │   │   │   └── ResidualSpectrumPlot — ...with per-panel residuals & chi^2
+    │   │   ├── OpticalDepthSpectrumPlot — multi-panel optical depth overview
+    │   │   └── CompositeStackedPanel  — merged cells from 2 source plots
+    │   ├── MainPlotGrid               — 3-panel composite (spectrum + inspection + pop-diagram)
+    │   └── FitLinesPlotGrid           — grid of individual line-fit results
     ├── SpectralPanel (ABC)        — single panel of spectral data in a range
     │   ├── LineInspectionPlot     — zoomed wavelength region
     │   ├── SpectrumPanel          — concrete panel: spectrum + molecules
     │   ├── ResidualPanel          — concrete panel: residual + chi^2
     │   └── OpticalDepthPanel      — concrete panel: optical depth τ(λ)
-    ├── StackedSpectralPanel (ABC) — composer for vertically stacked panels
-    │   ├── FullSpectrumPlot       — multi-panel full spectrum overview
-    │   │   └── ResidualSpectrumPlot — ...with per-panel residuals & chi^2
-    │   ├── OpticalDepthSpectrumPlot — multi-panel optical depth overview
-    │   └── CompositeStackedPanel  — merged cells from 2 source plots
     ├── PopulationDiagramPlot      — Boltzmann / rotation diagram
-    ├── MainPlotGrid               — 3-panel composite (spectrum + inspection + pop-diagram)
-    └── FitLinesPlotGrid           — grid of individual line-fit results
 
     LegendStrategy (ABC)       — pluggable legend provider
     ├── StandardLegend         — standard artist-based legend (default for BasePlot)
@@ -47,6 +48,7 @@ Class hierarchy::
 from .BasePlot import BasePlot, DEFAULT_THEME, _detect_system_theme
 from .BasePlot import BasePlot as _BP
 load_theme = _BP.load_theme  # Convenience alias at package level
+from .CompositePlot import CompositePlot
 from .LegendStrategy import LegendStrategy, StandardLegend, MoleculeColorLegend
 from .SpectralPanel import SpectralPanel, GapMode, XScaling
 from .StackedSpectralPanel import StackedSpectralPanel
@@ -70,6 +72,7 @@ __all__ = [
     "BasePlot",
     "DEFAULT_THEME",
     "load_theme",
+    "CompositePlot",
     "LegendStrategy",
     "StandardLegend",
     "MoleculeColorLegend",
