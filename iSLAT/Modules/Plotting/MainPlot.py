@@ -68,10 +68,6 @@ class iSLATPlot:
     def __init__(self, parent_frame, wave_data, flux_data, theme, islat_class_ref):
         self.theme = theme
         self.islat = islat_class_ref
-        
-        # Flag to defer data-dependent operations until window is visible
-        # This prevents blocking during startup while lazy loading triggers
-        self._data_initialized = False
 
         self.atomic_lines = []
         self.saved_lines = []
@@ -152,10 +148,6 @@ class iSLATPlot:
         
         # Register callbacks for parameter and molecule changes
         self._register_update_callbacks()
-        
-        # DEFERRED: Don't set initial zoom range here - wait for initialize_data()
-        # This prevents triggering molecule calculations before window is visible
-        # self._set_initial_zoom_range()
     
     # ------------------------------------------------------------------
     # Backward-compatible properties — read / write the toggle_state dict
@@ -199,30 +191,6 @@ class iSLATPlot:
     @residual_toggle.setter
     def residual_toggle(self, value: bool) -> None:
         self.toggle_state["show_residuals"] = value
-
-    def initialize_data(self):
-        """
-        Initialize data-dependent plot elements.
-        
-        Call this AFTER the window is visible to avoid blocking during startup.
-        This triggers lazy molecule loading and intensity calculations.
-        """
-        if self._data_initialized:
-            return
-        
-        # debug print
-        #print("Initializing plot data...")
-        
-        # Update population diagram title with actual molecule name
-        if hasattr(self.islat, 'active_molecule') and self.islat.active_molecule:
-            self.ax3.set_title(f"{self.islat.active_molecule.displaylabel} Population diagram")
-            # Render the population diagram on startup
-            self.plot_renderer.render_population_diagram(self.islat.active_molecule)
-        
-        # Set initial zoom range (may trigger flux calculations)
-        self._set_initial_zoom_range()
-        
-        self._data_initialized = True
 
     def create_toolbar(self, frame):
         self.toolbar = iSLATNavigationToolbar(

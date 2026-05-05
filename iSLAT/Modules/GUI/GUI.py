@@ -493,8 +493,8 @@ class GUI:
                 if status == 'success':
                     #print("Async spectrum calculation complete - updating display...")
                     # Initialize data-dependent plot elements now that calculations are done
-                    self.plot.initialize_data()
                     self.plot.update_model_plot()
+                    self.plot._set_initial_zoom_range()
                     if hasattr(self.plot, 'canvas'):
                         self.plot.canvas.draw()
                     #print("Spectrum displayed successfully (async)")
