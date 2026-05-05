@@ -298,21 +298,20 @@ class InteractionHandler:
 
         pdp = self._get_population_diagram_plot()
 
-        # --- Property choices -----------------------------------------
-        PROP_OPTIONS = [
+        # --- Property choices built from MoleculeLine registry --------
+        from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine as _ML
+        # Plot-specific extras not on the line object itself
+        _EXTRA = [
             ("Population diagram Y [ln(4πF/hνA_u g_u)]", "rd_yax"),
-            ("Upper-level energy (E_up)",      "e_up"),
-            ("Lower-level energy (E_low)",      "e_low"),
-            ("Einstein A coefficient",          "a_stein"),
-            ("Upper-state degeneracy (g_up)",   "g_up"),
-            ("Lower-state degeneracy (g_low)",  "g_low"),
-            ("Wavelength (μm)",                 "wavelength"),
-            ("Model intensity",                 "intens"),
-            ("Line-center opacity (tau)",       "tau"),
-            ("Upper quantum label (lev_up)",    "lev_up"),
-            ("Lower quantum label (lev_low)",   "lev_low"),
-            ("Molecule / component",            "molecule"),
+            ("Model intensity",                           "intens"),
+            ("Line-center opacity (tau)",                 "tau"),
+            ("Molecule / component",                      "molecule"),
         ]
+        _FROM_REG = [
+            (_ML.get_text(k), k if k != "lam" else "wavelength")
+            for k in ("e_up", "e_low", "a_stein", "g_up", "g_low", "lev_up", "lev_low", "freq", "lam")
+        ]
+        PROP_OPTIONS = _EXTRA + _FROM_REG
         PROP_LABELS   = [p[0] for p in PROP_OPTIONS]
         PROP_VALUES   = [p[1] for p in PROP_OPTIONS]
 
@@ -463,16 +462,20 @@ class InteractionHandler:
 
         pdp = self._get_population_diagram_plot()
 
-        AXIS_OPTIONS = [
+        from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine as _ML
+        _AXIS_EXTRA = [
             ("Population diagram Y [ln(4πF/hνA_u g_u)]", "rd_yax"),
-            ("Upper-level energy (E_up)",                  "eu"),
-            ("Lower-level energy (E_low)",                 "e_low"),
-            ("Wavelength (μm)",                            "wavelength"),
-            ("Model intensity",                            "intens"),
-            ("Einstein A coefficient",                     "a_stein"),
-            ("Upper-state degeneracy (g_up)",              "g_up"),
-            ("Lower-state degeneracy (g_low)",             "g_low"),
-            ("Line-center opacity (tau)",                  "tau"),
+            ("Model intensity",                           "intens"),
+            ("Line-center opacity (tau)",                 "tau"),
+        ]
+        _FROM_REG_AXIS = [
+            (_ML.get_text(k), k if k != "lam" else "wavelength")
+            for k in ("e_up", "e_low", "lam", "a_stein", "g_up", "g_low")
+        ]
+        # Use internal key 'eu' for e_up (matches component data dict)
+        AXIS_OPTIONS = [
+            (label, "eu" if key == "e_up" else key)
+            for label, key in (_AXIS_EXTRA + _FROM_REG_AXIS)
         ]
         AXIS_LABELS  = [o[0] for o in AXIS_OPTIONS]
         AXIS_VALUES  = [o[1] for o in AXIS_OPTIONS]

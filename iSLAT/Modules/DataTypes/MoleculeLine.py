@@ -1,7 +1,12 @@
-from typing import Dict, Any, Optional, Union
+from typing import ClassVar, Dict, NamedTuple, Any, Optional, Union
 import numpy as np
 
 from ._pandas_import import get_pandas as _get_pandas
+
+class PropertyInfo(NamedTuple):
+    """Holds both a LaTeX and a plain-text label for a MoleculeLine property."""
+    latex: str   # LaTeX string suitable for matplotlib axis/colorbar labels
+    text:  str   # Plain-text string suitable for GUI dropdowns, log output, etc.
 
 class MoleculeLine:
     """
@@ -12,7 +17,39 @@ class MoleculeLine:
     """
     __slots__ = ('molecule_id', 'nr', 'lev_up', 'lev_low', 'lam', 'freq', 
                  'a_stein', 'e_up', 'e_low', 'g_up', 'g_low')
-    
+
+    # Class-level registry mapping property keys to PropertyInfo(latex, text).
+    # Shared across all instances — zero per-instance memory cost.
+    PROPERTY_INFO: ClassVar[Dict[str, PropertyInfo]] = {
+        "e_up":   PropertyInfo(latex=r"$E_{u}$ (K)",          text="Upper-level energy E_up (K)"),
+        "e_low":  PropertyInfo(latex=r"$E_{low}$ (K)",        text="Lower-level energy E_low (K)"),
+        "lam":    PropertyInfo(latex=r"$\lambda$ ($\mu m$)",   text="Wavelength (μm)"),
+        "freq":   PropertyInfo(latex=r"Frequency (cm$^{-1}$)", text="Frequency (cm⁻¹)"),
+        "a_stein":PropertyInfo(latex=r"$A_{u}$ (s$^{-1}$)",   text="Einstein A coefficient (s⁻¹)"),
+        "g_up":   PropertyInfo(latex=r"$g_{u}$",              text="Upper-state degeneracy g_up"),
+        "g_low":  PropertyInfo(latex=r"$g_{low}$",            text="Lower-state degeneracy g_low"),
+        "nr":     PropertyInfo(latex="Line number",            text="Line number"),
+        "lev_up": PropertyInfo(latex="Upper level label",     text="Upper level label"),
+        "lev_low":PropertyInfo(latex="Lower level label",     text="Lower level label"),
+    }
+
+    @classmethod
+    def get_latex(cls, key: str, fallback: Optional[str] = None) -> str:
+        """Return the LaTeX label for *key*, or *fallback* (defaults to *key*)."""
+        info = cls.PROPERTY_INFO.get(key)
+        return info.latex if info is not None else (fallback if fallback is not None else key)
+
+    @classmethod
+    def get_text(cls, key: str, fallback: Optional[str] = None) -> str:
+        """Return the plain-text label for *key*, or *fallback* (defaults to *key*)."""
+        info = cls.PROPERTY_INFO.get(key)
+        return info.text if info is not None else (fallback if fallback is not None else key)
+
+    # Backward-compatible shim — returns latex labels as before
+    @classmethod
+    def _property_labels_compat(cls) -> Dict[str, str]:
+        return {k: v.latex for k, v in cls.PROPERTY_INFO.items()}
+
     def __init__(self, molecule_id: str, line_data: Dict[str, Any], **kwargs):
         """
         Initialize a MoleculeLine object.

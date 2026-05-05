@@ -27,6 +27,7 @@ import matplotlib
 
 from .BasePlot import BasePlot
 import iSLAT.Constants as c
+from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine as _MoleculeLine
 
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
@@ -782,29 +783,29 @@ class PopulationDiagramPlot(BasePlot):
     # ------------------------------------------------------------------
     @staticmethod
     def _property_label(prop: str) -> str:
-        """Human-readable label for a property name."""
-        _LABELS = {
-            "e_up": r"$E_{u}$ (K)",
-            "e_low": r"$E_{low}$ (K)",
-            "a_stein": r"$A_{u}$ (s$^{-1}$)",
-            "g_up": r"$g_{u}$",
-            "g_low": r"$g_{low}$",
-            "wavelength": r"$\lambda$ (μm)",
-            "intens": "Intensity",
-            "tau": r"Opacity ($\tau$)",
+        """LaTeX label for a property name (used for colourbar labels)."""
+        _OVERRIDES = {
+            "eu":        _MoleculeLine.PROPERTY_INFO["e_up"].latex,
+            "wavelength": _MoleculeLine.PROPERTY_INFO["lam"].latex,
+            "intens":    "Intensity",
+            "tau":       r"Opacity ($\tau$)",
+            "rd_yax":    r"ln(4πF/(hν$A_{u}$$g_{u}$))",
         }
-        return _LABELS.get(prop, prop)
+        if prop in _OVERRIDES:
+            return _OVERRIDES[prop]
+        info = _MoleculeLine.PROPERTY_INFO.get(prop)
+        return info.latex if info is not None else prop
 
-    # Axis-property helpers
+    # Axis-property helpers — built from MoleculeLine.PROPERTY_INFO (latex labels) plus
+    # derived/plot-specific properties not directly stored on the line object.
     _AXIS_LABELS: Dict[str, str] = {
-        "eu":         r"$E_{u}$ (K)",
+        **{k: v.latex for k, v in _MoleculeLine.PROPERTY_INFO.items()},
+        # Internal key aliases used by the component data dicts
+        "eu":         _MoleculeLine.PROPERTY_INFO["e_up"].latex,   # alias for e_up
+        "wavelength": _MoleculeLine.PROPERTY_INFO["lam"].latex,    # alias for lam
+        # Derived / plot-only properties
         "rd_yax":     r"ln(4πF/(hν$A_{u}$$g_{u}$))",
-        "e_low":      r"$E_{low}$ (K)",
-        "wavelength": r"$\lambda$ (μm)",
         "intens":     "Intensity",
-        "a_stein":    r"$A_{u}$ (s$^{-1}$)",
-        "g_up":       r"$g_{u}$",
-        "g_low":      r"$g_{low}$",
         "tau":        r"Opacity ($\tau$)",
     }
 
@@ -867,29 +868,55 @@ class PopulationDiagramPlot(BasePlot):
         """Overlay highlighted lines as larger scatter points."""
         if not self.highlight_lines:
             return
-        # Highlights are only meaningful in the default E_u vs rd_yax view
-        if self._x_prop != "eu" or self._y_prop != "rd_yax":
-            return
         color = self._get_theme_value("active_scatter_line_color", "green")
-        e_ups: List[float] = []
-        rd_vals: List[float] = []
-        for line_obj, intensity, _ in self.highlight_lines:
+
+        x_vals: List[float] = []
+        y_vals: List[float] = []
+
+        for line_obj, intensity, tau in self.highlight_lines:
             if any(
                 v is None
                 for v in [intensity, line_obj.a_stein, line_obj.g_up, line_obj.lam]
             ):
                 continue
+
+            # Pre-compute derived values used by multiple axis options
             F = intensity * beam_s
             freq = c.SPEED_OF_LIGHT_MICRONS / line_obj.lam
             rd = np.log(
                 4 * np.pi * F
                 / (line_obj.a_stein * c.PLANCK_CONSTANT * freq * line_obj.g_up)
-            )
-            e_ups.append(line_obj.e_up)
-            rd_vals.append(rd)
-        if e_ups:
+            ) if (F > 0 and line_obj.a_stein > 0) else np.nan
+
+            def _resolve(prop: str) -> Optional[float]:
+                """Map a property key to a scalar value for this line."""
+                _LINE_MAP = {
+                    "eu":         line_obj.e_up,
+                    "e_low":      line_obj.e_low,
+                    "rd_yax":     rd,
+                    "wavelength": line_obj.lam,
+                    "intens":     intensity,
+                    "a_stein":    line_obj.a_stein,
+                    "g_up":       line_obj.g_up,
+                    "g_low":      line_obj.g_low,
+                    "tau":        tau,
+                }
+                val = _LINE_MAP.get(prop)
+                try:
+                    return float(val) if val is not None else None
+                except (TypeError, ValueError):
+                    return None
+
+            xv = _resolve(self._x_prop)
+            yv = _resolve(self._y_prop)
+            if xv is None or yv is None or np.isnan(xv) or np.isnan(yv):
+                continue
+            x_vals.append(xv)
+            y_vals.append(yv)
+
+        if x_vals:
             ax.scatter(
-                e_ups, rd_vals, s=30, color=color,
+                x_vals, y_vals, s=30, color=color,
                 edgecolors="black", zorder=5,
             )
 
