@@ -8,7 +8,6 @@ _current_theme = None
 _LIGHT_DEFAULTS = {"tooltip_background": "peachpuff", "tooltip_foreground": "#000000"}
 _DARK_DEFAULTS  = {"tooltip_background": "#3C3F41",  "tooltip_foreground": "#F0F0F0"}
 
-
 def set_tooltip_theme(theme: dict | None) -> None:
     """Set the module-level theme used by all future tooltips."""
     global _current_theme
@@ -22,7 +21,6 @@ def _resolve_tooltip_colors(explicit_bg=None, explicit_fg=None):
     bg = explicit_bg or theme.get("tooltip_background") or _LIGHT_DEFAULTS["tooltip_background"]
     fg = explicit_fg or theme.get("tooltip_foreground") or _LIGHT_DEFAULTS["tooltip_foreground"]
     return bg, fg
-
 
 class ToolTip(object):
     def __init__(self, widget, text, bg=None, fg=None):
@@ -65,7 +63,6 @@ class ToolTip(object):
         if tw:
             tw.destroy()
 
-
 def CreateToolTip(widget, text, bg=None, fg=None):
     toolTip = ToolTip(widget, text, bg=bg, fg=fg)
 
@@ -81,7 +78,6 @@ def CreateToolTip(widget, text, bg=None, fg=None):
     widget.bind('<Leave>', leave)
 
     return toolTip
-
 
 class MenuToolTip:
     """Tooltip support for individual tk.Menu entries.

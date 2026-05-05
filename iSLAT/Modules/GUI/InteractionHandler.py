@@ -266,6 +266,11 @@ class InteractionHandler:
         )
         menu.add_separator()
         menu.add_command(
+            label="Axis Settings\u2026",
+            command=lambda: self._open_axis_settings_dialog(canvas_widget),
+        )
+        menu.add_separator()
+        menu.add_command(
             label=("✓ " if _all_mode else "  ") + "Show All Active Molecules",
             command=_show_all_active_molecules,
         )
@@ -295,6 +300,7 @@ class InteractionHandler:
 
         # --- Property choices -----------------------------------------
         PROP_OPTIONS = [
+            ("Population diagram Y [ln(4πF/hνA_u g_u)]", "rd_yax"),
             ("Upper-level energy (E_up)",      "e_up"),
             ("Lower-level energy (E_low)",      "e_low"),
             ("Einstein A coefficient",          "a_stein"),
@@ -443,6 +449,109 @@ class InteractionHandler:
 
         ttk.Button(btn_frame, text="Apply",  command=_apply).pack(side="left",  padx=4)
         ttk.Button(btn_frame, text="Cancel", command=_cancel).pack(side="left", padx=4)
+
+        win.bind("<Return>", lambda _e: _apply())
+        win.bind("<Escape>", lambda _e: _cancel())
+
+    def _open_axis_settings_dialog(self, parent_widget):
+        """Open a dialog to configure the population diagram axis properties and log scale."""
+        try:
+            import tkinter as tk
+            import tkinter.ttk as ttk
+        except ImportError:
+            return
+
+        pdp = self._get_population_diagram_plot()
+
+        AXIS_OPTIONS = [
+            ("Population diagram Y [ln(4πF/hνA_u g_u)]", "rd_yax"),
+            ("Upper-level energy (E_up)",                  "eu"),
+            ("Lower-level energy (E_low)",                 "e_low"),
+            ("Wavelength (μm)",                            "wavelength"),
+            ("Model intensity",                            "intens"),
+            ("Einstein A coefficient",                     "a_stein"),
+            ("Upper-state degeneracy (g_up)",              "g_up"),
+            ("Lower-state degeneracy (g_low)",             "g_low"),
+            ("Line-center opacity (tau)",                  "tau"),
+        ]
+        AXIS_LABELS  = [o[0] for o in AXIS_OPTIONS]
+        AXIS_VALUES  = [o[1] for o in AXIS_OPTIONS]
+
+        # Seed from current state
+        cur_x = getattr(pdp, '_x_prop', 'eu')     if pdp else 'eu'
+        cur_y = getattr(pdp, '_y_prop', 'rd_yax') if pdp else 'rd_yax'
+        cur_x_log = getattr(pdp, '_x_log', False) if pdp else False
+        cur_y_log = getattr(pdp, '_y_log', False) if pdp else False
+
+        init_x_idx = AXIS_VALUES.index(cur_x) if cur_x in AXIS_VALUES else 1
+        init_y_idx = AXIS_VALUES.index(cur_y) if cur_y in AXIS_VALUES else 0
+
+        win = tk.Toplevel(parent_widget)
+        win.title("Population Diagram — Axis Settings")
+        win.resizable(False, False)
+        win.grab_set()
+
+        pad = {"padx": 8, "pady": 4}
+
+        # X axis
+        tk.Label(win, text="X axis:").grid(row=0, column=0, sticky="w", **pad)
+        x_var = tk.StringVar(value=AXIS_LABELS[init_x_idx])
+        x_combo = ttk.Combobox(win, textvariable=x_var, values=AXIS_LABELS,
+                               state="readonly", width=38)
+        x_combo.grid(row=0, column=1, sticky="ew", **pad)
+
+        x_log_var = tk.BooleanVar(value=cur_x_log)
+        tk.Checkbutton(win, text="Log scale (X)", variable=x_log_var).grid(
+            row=1, column=0, columnspan=2, sticky="w", **pad)
+
+        ttk.Separator(win, orient="horizontal").grid(
+            row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=2)
+
+        # Y axis
+        tk.Label(win, text="Y axis:").grid(row=3, column=0, sticky="w", **pad)
+        y_var = tk.StringVar(value=AXIS_LABELS[init_y_idx])
+        y_combo = ttk.Combobox(win, textvariable=y_var, values=AXIS_LABELS,
+                               state="readonly", width=38)
+        y_combo.grid(row=3, column=1, sticky="ew", **pad)
+
+        y_log_var = tk.BooleanVar(value=cur_y_log)
+        tk.Checkbutton(win, text="Log scale (Y)", variable=y_log_var).grid(
+            row=4, column=0, columnspan=2, sticky="w", **pad)
+
+        # Buttons
+        btn_frame = tk.Frame(win)
+        btn_frame.grid(row=5, column=0, columnspan=2, pady=6)
+
+        def _apply():
+            x_label = x_var.get()
+            y_label = y_var.get()
+            if x_label not in AXIS_LABELS or y_label not in AXIS_LABELS:
+                return
+            x_prop = AXIS_VALUES[AXIS_LABELS.index(x_label)]
+            y_prop = AXIS_VALUES[AXIS_LABELS.index(y_label)]
+            current_pdp = self._get_population_diagram_plot()
+            if current_pdp is not None:
+                current_pdp.set_axes(
+                    x_prop=x_prop, y_prop=y_prop,
+                    x_log=x_log_var.get(), y_log=y_log_var.get(),
+                    regenerate=True,
+                )
+                self.canvas.draw_idle()
+            win.destroy()
+
+        def _reset():
+            current_pdp = self._get_population_diagram_plot()
+            if current_pdp is not None:
+                current_pdp.set_axes(regenerate=True)
+                self.canvas.draw_idle()
+            win.destroy()
+
+        def _cancel():
+            win.destroy()
+
+        ttk.Button(btn_frame, text="Apply",        command=_apply).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Reset Defaults",command=_reset).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Cancel",       command=_cancel).pack(side="left", padx=4)
 
         win.bind("<Return>", lambda _e: _apply())
         win.bind("<Escape>", lambda _e: _cancel())

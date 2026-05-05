@@ -143,6 +143,11 @@ class PopulationDiagramPlot(BasePlot):
         self._color_mapping: Optional[Dict[str, Any]] = None
         # Tracked colorbar so it can be removed on the next regeneration
         self._colorbar = None
+        # Axis configuration
+        self._x_prop: str = "eu"
+        self._y_prop: str = "rd_yax"
+        self._x_log: bool = False
+        self._y_log: bool = False
         # When True, the plot is locked to all active/visible molecules in
         # _molecules_dict_ref and regenerates automatically when the set changes.
         self._all_molecules_mode: bool = False
@@ -202,24 +207,26 @@ class PopulationDiagramPlot(BasePlot):
 
         # ---- Compute population-diagram values for each component ----
         self._component_data = []
-        all_valid_rd: List[np.ndarray] = []
-        all_valid_eu: List[np.ndarray] = []
+        all_valid_x: List[np.ndarray] = []
+        all_valid_y: List[np.ndarray] = []
 
         for comp in components:
             cdata = self._compute_component(comp)
             if cdata is not None:
                 self._component_data.append(cdata)
                 mask = cdata["valid_mask"]
-                if np.any(mask):
-                    all_valid_rd.append(cdata["rd_yax"][mask])
-                    all_valid_eu.append(cdata["eu"][mask])
+                x_arr = self._get_axis_array(cdata, self._x_prop)
+                y_arr = self._get_axis_array(cdata, self._y_prop)
+                if np.any(mask) and x_arr is not None and y_arr is not None:
+                    all_valid_x.append(x_arr[mask])
+                    all_valid_y.append(y_arr[mask])
 
         if not self._component_data:
             title = components[0]["name"] if components else "Unknown"
             ax.set_title(f"{title} - No intensity data", color=fg)
             return
 
-        if not all_valid_rd:
+        if not all_valid_x or not all_valid_y:
             names = ", ".join(cd["name"] for cd in self._component_data)
             ax.set_title(
                 f"{names} - No valid data for population diagram",
@@ -239,17 +246,33 @@ class PopulationDiagramPlot(BasePlot):
             self._render_highlights(ax, first["beam_s"])
 
         # ---- Axis limits & labels ------------------------------------
-        cat_valid_rd = np.concatenate(all_valid_rd)
-        cat_valid_eu = np.concatenate(all_valid_eu)
-        all_rd = np.concatenate([cd["rd_yax"] for cd in self._component_data])
-        all_eu = np.concatenate([cd["eu"] for cd in self._component_data])
+        cat_valid_x = np.concatenate(all_valid_x)
+        cat_valid_y = np.concatenate(all_valid_y)
+        _all_x_arrs = [self._get_axis_array(cd, self._x_prop) for cd in self._component_data]
+        _all_y_arrs = [self._get_axis_array(cd, self._y_prop) for cd in self._component_data]
+        all_x_data = np.concatenate([a for a in _all_x_arrs if a is not None]) if any(a is not None for a in _all_x_arrs) else cat_valid_x
+        all_y_data = np.concatenate([a for a in _all_y_arrs if a is not None]) if any(a is not None for a in _all_y_arrs) else cat_valid_y
 
-        ax.set_ylim(np.nanmin(cat_valid_rd), np.nanmax(all_rd) + 0.5)
-        ax.set_xlim(np.nanmin(all_eu) - 50, np.nanmax(cat_valid_eu))
-        ax.set_ylabel(
-            r"ln(4πF/(hν$A_{u}$$g_{u}$))", color=fg, labelpad=-1
-        )
-        ax.set_xlabel(r"$E_{u}$ (K)", color=fg)
+        # X limits
+        if self._x_prop == "eu":
+            ax.set_xlim(np.nanmin(all_x_data) - 50, np.nanmax(cat_valid_x))
+        else:
+            _xr = np.nanmax(cat_valid_x) - np.nanmin(all_x_data)
+            _xpad = _xr * 0.05 if _xr > 0 else max(abs(np.nanmin(all_x_data)) * 0.05, 1)
+            ax.set_xlim(np.nanmin(all_x_data) - _xpad, np.nanmax(cat_valid_x) + _xpad)
+
+        # Y limits
+        if self._y_prop == "rd_yax":
+            ax.set_ylim(np.nanmin(cat_valid_y), np.nanmax(all_y_data) + 0.5)
+        else:
+            _yr = np.nanmax(all_y_data) - np.nanmin(cat_valid_y)
+            _ypad = _yr * 0.05 if _yr > 0 else max(abs(np.nanmin(cat_valid_y)) * 0.05, 1)
+            ax.set_ylim(np.nanmin(cat_valid_y) - _ypad, np.nanmax(all_y_data) + _ypad)
+
+        ax.set_xscale("log" if self._x_log else "linear")
+        ax.set_yscale("log" if self._y_log else "linear")
+        ax.set_ylabel(self._get_axis_label(self._y_prop), color=fg, labelpad=-1)
+        ax.set_xlabel(self._get_axis_label(self._x_prop), color=fg)
 
         # Title: single component → use its name; multi → generic
         if len(self._component_data) == 1:
@@ -456,9 +479,13 @@ class PopulationDiagramPlot(BasePlot):
                 if single
                 else cdata["color"]
             )
+            x_arr = self._get_axis_array(cdata, self._x_prop)
+            y_arr = self._get_axis_array(cdata, self._y_prop)
+            if x_arr is None or y_arr is None:
+                continue
             ax.scatter(
-                cdata["eu"],
-                cdata["rd_yax"],
+                x_arr,
+                y_arr,
                 s=0.5 if single else 5,
                 color=color,
                 label=cdata["name"],
@@ -602,24 +629,26 @@ class PopulationDiagramPlot(BasePlot):
             return
 
         # ---- Continuous properties -----------------------------------
-        all_eu: List[np.ndarray] = []
-        all_rd: List[np.ndarray] = []
+        all_x: List[np.ndarray] = []
+        all_y: List[np.ndarray] = []
         all_vals: List[np.ndarray] = []
 
         for cdata in self._component_data:
             vals = cdata.get(internal_key)
-            if vals is None:
+            x_arr = self._get_axis_array(cdata, self._x_prop)
+            y_arr = self._get_axis_array(cdata, self._y_prop)
+            if vals is None or x_arr is None or y_arr is None:
                 continue
-            all_eu.append(cdata["eu"])
-            all_rd.append(cdata["rd_yax"])
+            all_x.append(x_arr)
+            all_y.append(y_arr)
             all_vals.append(np.asarray(vals, dtype=float))
 
         if not all_vals:
             self._render_by_component(ax)
             return
 
-        eu_cat = np.concatenate(all_eu)
-        rd_cat = np.concatenate(all_rd)
+        eu_cat = np.concatenate(all_x)
+        rd_cat = np.concatenate(all_y)
         val_cat = np.concatenate(all_vals)
 
         # Percentile cutoffs override explicit vmin/vmax when set
@@ -662,25 +691,32 @@ class PopulationDiagramPlot(BasePlot):
         self, ax: Axes, prop: str, cmap_name: str
     ) -> None:
         """Render scatter with categorical colour mapping."""
-        all_eu: List[np.ndarray] = []
-        all_rd: List[np.ndarray] = []
+        all_x: List[np.ndarray] = []
+        all_y: List[np.ndarray] = []
         all_labels: List[np.ndarray] = []
 
         for cdata in self._component_data:
+            x_arr = self._get_axis_array(cdata, self._x_prop)
+            y_arr = self._get_axis_array(cdata, self._y_prop)
+            if x_arr is None or y_arr is None:
+                continue
+            n = len(x_arr)
             if prop == "component":
-                labels = np.full(len(cdata["eu"]), cdata["name"], dtype=object)
+                labels = np.full(n, cdata["name"], dtype=object)
             else:
                 vals = cdata.get(prop)
                 if vals is None:
-                    labels = np.full(len(cdata["eu"]), "unknown", dtype=object)
+                    labels = np.full(n, "unknown", dtype=object)
                 else:
                     labels = np.asarray(vals, dtype=str)
-            all_eu.append(cdata["eu"])
-            all_rd.append(cdata["rd_yax"])
+            all_x.append(x_arr)
+            all_y.append(y_arr)
             all_labels.append(labels)
 
-        eu_cat = np.concatenate(all_eu)
-        rd_cat = np.concatenate(all_rd)
+        if not all_x:
+            return
+        eu_cat = np.concatenate(all_x)
+        rd_cat = np.concatenate(all_y)
         label_cat = np.concatenate(all_labels)
 
         unique_labels = np.unique(label_cat)
@@ -759,12 +795,80 @@ class PopulationDiagramPlot(BasePlot):
         }
         return _LABELS.get(prop, prop)
 
+    # Axis-property helpers
+    _AXIS_LABELS: Dict[str, str] = {
+        "eu":         r"$E_{u}$ (K)",
+        "rd_yax":     r"ln(4πF/(hν$A_{u}$$g_{u}$))",
+        "e_low":      r"$E_{low}$ (K)",
+        "wavelength": r"$\lambda$ (μm)",
+        "intens":     "Intensity",
+        "a_stein":    r"$A_{u}$ (s$^{-1}$)",
+        "g_up":       r"$g_{u}$",
+        "g_low":      r"$g_{low}$",
+        "tau":        r"Opacity ($\tau$)",
+    }
+
+    @classmethod
+    def _get_axis_label(cls, prop: str) -> str:
+        """Human-readable axis label for a given property name."""
+        return cls._AXIS_LABELS.get(prop, prop)
+
+    @staticmethod
+    def _get_axis_array(
+        cdata: Dict[str, Any], prop: str
+    ) -> Optional[np.ndarray]:
+        """Extract a property array from a component data dict.
+
+        Returns ``None`` if the property is absent or cannot be cast to float.
+        """
+        arr = cdata.get(prop)
+        if arr is None:
+            return None
+        try:
+            return np.asarray(arr, dtype=float)
+        except (ValueError, TypeError):
+            return None
+
+    def set_axes(
+        self,
+        x_prop: str = "eu",
+        y_prop: str = "rd_yax",
+        x_log: bool = False,
+        y_log: bool = False,
+        *,
+        regenerate: bool = True,
+    ) -> None:
+        """Configure the plot axes.
+
+        Parameters
+        ----------
+        x_prop : str
+            Property key to use for the X axis (e.g. ``'eu'``, ``'wavelength'``).
+        y_prop : str
+            Property key to use for the Y axis (e.g. ``'rd_yax'``, ``'intens'``).
+        x_log : bool
+            Whether to use a logarithmic scale for the X axis.
+        y_log : bool
+            Whether to use a logarithmic scale for the Y axis.
+        regenerate : bool
+            If ``True`` (default) the plot is regenerated immediately.
+        """
+        self._x_prop = x_prop
+        self._y_prop = y_prop
+        self._x_log = x_log
+        self._y_log = y_log
+        if regenerate:
+            self.generate_plot()
+
     # ------------------------------------------------------------------
     # Highlighted-lines overlay
     # ------------------------------------------------------------------
     def _render_highlights(self, ax: Axes, beam_s: float) -> None:
         """Overlay highlighted lines as larger scatter points."""
         if not self.highlight_lines:
+            return
+        # Highlights are only meaningful in the default E_u vs rd_yax view
+        if self._x_prop != "eu" or self._y_prop != "rd_yax":
             return
         color = self._get_theme_value("active_scatter_line_color", "green")
         e_ups: List[float] = []

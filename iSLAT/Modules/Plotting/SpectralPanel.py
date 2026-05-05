@@ -25,7 +25,6 @@ from matplotlib.figure import Figure as MplFigure
 
 from .BasePlot import BasePlot
 
-
 class GapMode(Enum):
     """Strategy for handling gaps in observed wavelength/flux data.
 
@@ -43,7 +42,6 @@ class GapMode(Enum):
     """
     CONNECT = "connect"
     SKIP = "skip"
-
 
 class XScaling(Enum):
     """Strategy for distributing wavelength ranges across stacked panels.
@@ -68,12 +66,10 @@ class XScaling(Enum):
     WAVELENGTH = "wavelength"
     DATA_DENSITY = "data_density"
 
-
 if TYPE_CHECKING:
     import pandas as pd
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
-
 
 class SpectralPanel(BasePlot):
     """
