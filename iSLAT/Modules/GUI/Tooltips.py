@@ -13,7 +13,6 @@ def set_tooltip_theme(theme: dict | None) -> None:
     global _current_theme
     _current_theme = theme
 
-
 def _resolve_tooltip_colors(explicit_bg=None, explicit_fg=None):
     """Return (bg, fg) for a tooltip, respecting explicit overrides,
     the current theme, and sensible fallback defaults."""
@@ -38,7 +37,11 @@ class ToolTip(object):
         "Display text in tooltip window"
         if self.tipwindow or not self.text:
             return
-        x, y, cx, cy = self.widget.bbox("insert")
+        try:
+            x, y, cx, cy = self.widget.bbox("insert")
+        except Exception:
+            # Fallback for widgets that don't support "insert" (e.g. Listbox)
+            x, y, cx, cy = 0, 0, 0, 0
         x = x + self.widget.winfo_rootx() + 45
         y = y + cy + self.widget.winfo_rooty() + 27
         self.tipwindow = tw = Toplevel(self.widget)

@@ -12,7 +12,6 @@ from typing import Optional, Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from iSLAT.iSLATClass import iSLAT
 
-
 class FullSpectrumWindow(tk.Toplevel):
     """
     GUI window for displaying and interacting with full spectrum plots.
