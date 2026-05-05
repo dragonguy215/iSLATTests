@@ -150,6 +150,28 @@ class MainPlotGrid(BasePlot):
         self.ax_popdiagram: Optional[Axes] = ax_popdiagram
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def create_three_panel_axes(fig):
+        """Create the standard iSLAT 3-panel layout on *fig*.
+
+        Layout (GridSpec 2 by 2):
+            Row 0, spanning both columns : full spectrum overview
+            Row 1, left column           : line inspection zoom
+            Row 1, right column          : population / rotation diagram
+
+        Returns
+        -------
+        tuple[Axes, Axes, Axes]
+            ``(ax_spectrum, ax_inspection, ax_popdiagram)``
+        """
+        from matplotlib.gridspec import GridSpec
+        gs = GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1.5], figure=fig)
+        ax1 = fig.add_subplot(gs[0, :])
+        ax2 = fig.add_subplot(gs[1, 0])
+        ax3 = fig.add_subplot(gs[1, 1])
+        return ax1, ax2, ax3
+
+    # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
         """Build the three-panel layout.
 

@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple, Callable, Any, Union, TYPE_CHECK
 from matplotlib.ticker import MaxNLocator
 
 from .BasePlot import BasePlot
+from .SpectrumPanel import SpectrumPanel
 
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
@@ -99,8 +100,8 @@ class FitLinesPlotGrid(BasePlot):
             # get color based on fit det
             line_color = 'lime' if self.fit_csv_dict[idx]['Fit_det'] else 'red'
             try:
-                # Plot Gaussian fit + uncertainty using BasePlot helper
-                self._plot_gaussian_fit(
+                # Plot Gaussian fit + uncertainty using SpectrumPanel helper
+                SpectrumPanel.plot_gaussian_fit(
                     ax, gauss_fit, fitted_wave, fitted_flux,
                     color=line_color, uncertainty_sigma=self.fit_line_uncertainty,
                 )

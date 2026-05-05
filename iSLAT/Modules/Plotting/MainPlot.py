@@ -12,6 +12,7 @@ import iSLAT.Constants as c
 
 from .PlotRenderer import PlotRenderer
 from .BasePlot import BasePlot
+from .MainPlotGrid import MainPlotGrid
 from .PlotView import PlotView
 from .ThreePanelView import ThreePanelView
 from .FullSpectrumView import FullSpectrumView
@@ -88,8 +89,8 @@ class iSLATPlot:
 
         #self.fig = plt.Figure(figsize=(15, 8.5))
         self.fig = plt.Figure(constrained_layout=True)
-        # Use shared 3-panel layout helper from BasePlot
-        self.ax1, self.ax2, self.ax3 = BasePlot.create_three_panel_axes(self.fig)
+        # Use shared 3-panel layout helper from MainPlotGrid
+        self.ax1, self.ax2, self.ax3 = MainPlotGrid.create_three_panel_axes(self.fig)
 
         self.ax1.set_title("Full Spectrum with Line Inspection")
         self.ax1.set_ylabel('Flux density (Jy)')

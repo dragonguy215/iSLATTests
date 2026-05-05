@@ -11,6 +11,7 @@ from matplotlib.axes import Axes
 from .BasePlot import BasePlot
 from .LineInspectionPlot import LineInspectionPlot
 from .PopulationDiagramPlot import PopulationDiagramPlot
+from .SpectrumPanel import SpectrumPanel
 
 # Import debug configuration
 try:
@@ -1163,9 +1164,9 @@ class PlotRenderer(BasePlot):
             lam_min = np.min(fitted_wave)
             lam_max = np.max(fitted_wave)
             
-            # Plot the fit result using shared BasePlot helper
+            # Plot the fit result using SpectrumPanel helper
             uncertainty_sigma = self.islat.user_settings.get('fit_line_uncertainty', 3.0)
-            BasePlot._plot_gaussian_fit(
+            SpectrumPanel.plot_gaussian_fit(
                 ax, gauss_fit, fitted_wave, fitted_flux,
                 color='lime', uncertainty_sigma=uncertainty_sigma,
             )

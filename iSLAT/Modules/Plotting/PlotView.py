@@ -312,5 +312,3 @@ class PlotView(ABC):
     def get_figure(self) -> "Figure":
         """Return the matplotlib Figure for this view."""
         ...
-
-    
