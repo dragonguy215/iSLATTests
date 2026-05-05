@@ -68,7 +68,6 @@ class FileInteractionPane(ttk.Frame):
         # Configure label_frame columns: label expands, buttons don't
         self.label_frame.grid_columnconfigure(0, weight=1)  # Label column expands
         self.label_frame.grid_columnconfigure(1, weight=0)  # Button column fixed
-        self.label_frame.grid_columnconfigure(2, weight=0)  # X button column fixed
         
         # Initialize with default text or show loaded file name if available
         default_text = "No file loaded"
@@ -96,18 +95,8 @@ class FileInteractionPane(ttk.Frame):
         self.load_spectrum_btn.bind('<Button-1>', self._handle_load_spectrum_click)
         CreateToolTip(
             self.load_spectrum_btn, 
-            "Click to load spectrum.\nCtrl/Cmd Click to load saved parameters."
+            "Click to load spectrum.\nCtrl/Cmd Click to load saved parameters.\nSelect multiple files to load a sample."
         )
-
-        # + button to add sample spectra (row 0, column 2 - above the X buttons)
-        self.add_sample_btn = ttk.Button(
-            self.label_frame,
-            text="+",
-            width=1,
-            command=self._add_sample_spectra
-        )
-        self.add_sample_btn.grid(row=0, column=2, sticky="e", padx=(0, 0), pady=2)
-        CreateToolTip(self.add_sample_btn, "Add spectra to sample list\n(for Fit Saved Lines To Sample\nand left/right arrow cycling)")
         
         # Row 1: Input line list
         # Check if a default line list is already loaded
@@ -125,6 +114,8 @@ class FileInteractionPane(ttk.Frame):
             bg=self.bg
         )
         self.input_line_list_label.grid(row=1, column=0, sticky="ew", padx=(5, 5), pady=2)
+        self.input_line_list_label.bind('<Button-1>', self._on_line_list_label_click)
+        CreateToolTip(self.input_line_list_label, "Click to remove the loaded line list")
         
         self.input_line_list_btn = ttk.Button(
             self.label_frame,
@@ -132,15 +123,6 @@ class FileInteractionPane(ttk.Frame):
             command=self._load_input_line_list
         )
         self.input_line_list_btn.grid(row=1, column=1, sticky="ew", padx=(2, 0), pady=2)
-        
-        self.input_line_list_clear_btn = ttk.Button(
-            self.label_frame,
-            text="x",
-            width=1,
-            command=self._clear_input_line_list
-        )
-        self.input_line_list_clear_btn.grid(row=1, column=2, sticky="e", padx=(0, 0), pady=2)
-        CreateToolTip(self.input_line_list_clear_btn, "Clear line list")
         
         # Row 2: Output line measurements
         self.output_measurements_label = trim_label(
@@ -150,6 +132,8 @@ class FileInteractionPane(ttk.Frame):
             bg=self.bg
         )
         self.output_measurements_label.grid(row=2, column=0, sticky="ew", padx=(5, 5), pady=2)
+        self.output_measurements_label.bind('<Button-1>', self._on_output_label_click)
+        CreateToolTip(self.output_measurements_label, "Click to remove the loaded output file")
         
         self.output_line_measurements_btn = ttk.Button(
             self.label_frame,
@@ -157,15 +141,6 @@ class FileInteractionPane(ttk.Frame):
             command=self._load_output_line_measurements
         )
         self.output_line_measurements_btn.grid(row=2, column=1, sticky="ew", padx=(2, 0), pady=2)
-        
-        self.output_measurements_clear_btn = ttk.Button(
-            self.label_frame,
-            text="x",
-            width=1,
-            command=self._clear_output_line_measurements
-        )
-        self.output_measurements_clear_btn.grid(row=2, column=2, sticky="e", padx=(0, 0), pady=2)
-        CreateToolTip(self.output_measurements_clear_btn, "Clear output file")
 
     def _handle_load_spectrum_click(self, event):
         """
@@ -190,8 +165,25 @@ class FileInteractionPane(ttk.Frame):
             # Ctrl/Command click - load spectrum with saved parameters
             self.islat_class.load_spectrum(load_parameters=True, force_dialog=True)
         else:
-            # Normal click
-            self.islat_class.load_spectrum(force_dialog=True)
+            # Normal click - allow multiple file selection for sample loading
+            from iSLAT.Modules.GUI import GUI as GUIModule
+            from iSLAT.Modules.FileHandling.iSLATFileHandling import example_data_folder_path
+            file_paths = GUIModule.file_selector(
+                title='Choose Spectrum Data File(s)',
+                initialdir=example_data_folder_path,
+                allow_multiple=True
+            )
+            if not file_paths:
+                return
+            if isinstance(file_paths, str):
+                file_paths = [file_paths]
+            else:
+                file_paths = list(file_paths)
+            # Load the first file as the primary spectrum
+            self.islat_class.load_spectrum(file_path=file_paths[0], force_dialog=False)
+            # Add remaining files to the sample
+            if len(file_paths) > 1:
+                self.islat_class.add_sample_spectra(file_paths[1:])
     
     def update_label(self, widget, text = None):
         widget.configure(text=text)
@@ -364,6 +356,16 @@ class FileInteractionPane(ttk.Frame):
         if len(sample) <= 1:
             return
         self._show_sample_dropdown(event)
+
+    def _on_line_list_label_click(self, event):
+        """Clear the input line list when the label is clicked (if one is loaded)."""
+        if self.islat_class.input_line_list:
+            self._clear_input_line_list()
+
+    def _on_output_label_click(self, event):
+        """Clear the output file when the label is clicked (if one is loaded)."""
+        if self.islat_class.output_line_measurements:
+            self._clear_output_line_measurements()
 
     def _show_sample_dropdown(self, event):
         """Create and post a popup menu listing all spectra in the current sample."""
