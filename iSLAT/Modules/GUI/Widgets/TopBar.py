@@ -355,30 +355,71 @@ class TopBar(ResizableFrame):
 
     def fit_selected_line(self, deblend=False):
         """Fit the currently selected line using LMFIT."""
-        if not hasattr(self.main_plot, 'current_selection') or self.main_plot.current_selection is None:
+        pm = self.main_plot
+        if not hasattr(pm, 'current_selection') or pm.current_selection is None:
             self.data_field.insert_text("No region selected for fitting.\n")
             return
 
+        xmin, xmax = pm.current_selection
+
         try:
-            # Compute the fit using the main plot's fitting function
-            fit_result = self.main_plot.compute_fit_line(deblend=deblend)
-            
-            if fit_result and len(fit_result) >= 3:
-                lmfit_result, fitted_wave, fitted_flux = fit_result
-                
-                if lmfit_result is not None and hasattr(lmfit_result, 'params'):
-                    # Extract parameters using the FittingEngine methods
-                    line_params = self.main_plot.fitting_engine.extract_line_parameters()
-                    
-                    if deblend:
-                        self._display_deblend_results(line_params)
-                    else:
-                        self._display_single_gaussian_results(line_params)
+            import numpy as np
+            fit_mask = (pm.islat.wave_data >= xmin) & (pm.islat.wave_data <= xmax)
+            x_fit = pm.islat.wave_data[fit_mask]
+            y_fit = pm.islat.flux_data[fit_mask]
+
+            if len(x_fit) < 5:
+                self.data_field.insert_text("Insufficient data points in selection for fitting.\n")
+                return
+
+            fit_kwargs = dict(xmin=xmin, xmax=xmax, deblend=deblend)
+            if deblend:
+                active_mol = getattr(pm.islat, 'active_molecule', None)
+                fit_kwargs.update(
+                    wave_data_full=pm.islat.wave_data,
+                    err_data_full=pm.islat.err_data,
+                    user_settings=getattr(pm.islat, 'user_settings', {}),
+                    active_molecule_fwhm=getattr(active_mol, 'fwhm', None) if active_mol else None,
+                    lines_with_intensity=(
+                        active_mol.intensity.get_lines_in_range_with_intensity(xmin, xmax)
+                        if active_mol and hasattr(active_mol, 'intensity')
+                        else None
+                    ),
+                    line_threshold=(
+                        pm.islat.user_settings.get('line_threshold', 0.03)
+                        if getattr(pm.islat, 'user_settings', None) else 0.03
+                    ),
+                )
+
+            fit_result, fitted_wave, fitted_flux = pm.fitting_engine.fit_gaussian_line(
+                x_fit, y_fit, **fit_kwargs
+            )
+            pm.fit_result = (fit_result, fitted_wave, fitted_flux)
+
+            # Render the fit via the active view's line-inspection panel
+            if fit_result is not None and fitted_wave is not None:
+                user_settings = getattr(pm.islat, 'user_settings', {})
+                legend_visible = pm.legend_toggle
+                grid = getattr(getattr(pm, '_three_panel_view', None), '_grid', None)
+                if grid is not None and grid.inspection_panel is not None:
+                    grid.inspection_panel.render_fit_results(
+                        grid.ax_inspection,
+                        pm.fit_result,
+                        xmin, xmax,
+                        user_settings=user_settings,
+                        legend_visible=legend_visible,
+                    )
+                pm.canvas.draw_idle()
+
+            if fit_result is not None and hasattr(fit_result, 'params'):
+                line_params = pm.fitting_engine.extract_line_parameters()
+                if deblend:
+                    self._display_deblend_results(line_params)
                 else:
-                    self.data_field.insert_text("Fit completed but no valid result object returned.\n", clear_after=False)
+                    self._display_single_gaussian_results(line_params)
             else:
-                self.data_field.insert_text("Fit failed or insufficient data.\n", clear_after=False)
-            
+                self.data_field.insert_text("Fit completed but no valid result object returned.\n", clear_after=False)
+
         except Exception as e:
             self.data_field.insert_text(f"Error during fitting: {e}\n", clear_after=False)
             self.data_field.insert_text(f"Traceback: {traceback.format_exc()}\n", clear_after=False)
@@ -601,7 +642,14 @@ class TopBar(ResizableFrame):
                 return plot
             
             if plot_results:
-                self.main_plot.plot_fitted_saved_lines(fit_results_data)
+                from iSLAT.Modules.Plotting.SpectrumPanel import SpectrumPanel
+                uncertainty_sigma = self.config.get('fit_line_uncertainty', 3.0)
+                SpectrumPanel.plot_gaussian_fits(
+                    self.main_plot.ax1,
+                    fit_results_data,
+                    color='lime',
+                    uncertainty_sigma=uncertainty_sigma,
+                )
                 self.main_plot.canvas.draw_idle()
         else:
             self.data_field.insert_text("No lines found or no fits completed successfully.\n", clear_after=False)

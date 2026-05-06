@@ -134,11 +134,6 @@ class iSLATPlot:
         self._configure_subplots_surface = ConfigureSubplotsSurface()
         self.control_bus.register_surface("configure_subplots", self._configure_subplots_surface)
 
-        # Molecules whose parameters changed while they were hidden.
-        # Consumed by on_molecule_visibility_changed to force a re-render
-        # instead of simply toggling the (now stale) artists.
-        self._stale_molecules: set = set()
-
         # Set up interaction handler callbacks
         self.interaction_handler.set_span_select_callback(self.onselect)
         self.interaction_handler.set_click_callback(self.on_click)
@@ -490,13 +485,19 @@ class iSLATPlot:
         """
         # Always update the active view
         self.active_view.update_model_plot()
+        # Mark every inactive view stale so it re-renders on next activate().
+        self._mark_inactive_views_stale()
 
-        # Mark the *other* view as needing a refresh next time it's activated,
-        # instead of doing an expensive silent update now.
-        if self.is_full_spectrum:
-            self._three_panel_view._needs_refresh = True
-        else:
-            self._full_spectrum_view._needs_refresh = True
+    def _mark_inactive_views_stale(self) -> None:
+        """Set ``_needs_refresh = True`` on every view that is not currently active.
+
+        Views honour this flag in their ``activate()`` implementation and
+        re-render lazily, so no work is done until the user actually switches
+        to that view.
+        """
+        for view in self._views.values():
+            if view is not self.active_view and hasattr(view, '_needs_refresh'):
+                view._needs_refresh = True
 
     def onselect(self, xmin, xmax):
         self.current_selection = (xmin, xmax)
@@ -622,312 +623,48 @@ class iSLATPlot:
         self.atomic_toggle = True
         self.active_view.toggle_atomic_lines(True)
 
-    def plot_fitted_saved_lines(self, fit_results_data, ax=None):
-        """Plot fitted saved lines on the main spectrum axes.
-
-        Parameters
-        ----------
-        fit_results_data : tuple
-            (gauss_fits, fitted_waves, fitted_fluxes) as returned by the
-            batch-fitting pipeline.
-        ax : Axes, optional
-            Target axes.  Defaults to ``self.ax1``.
-        """
-        if ax is None:
-            ax = self.ax1
-        from .SpectrumPanel import SpectrumPanel
-        gauss_fits, fitted_waves, fitted_fluxes = fit_results_data
-        for gauss_fit, fitted_wave, fitted_flux in zip(gauss_fits, fitted_waves, fitted_fluxes):
-            if gauss_fit is None or fitted_wave is None or fitted_flux is None:
-                continue
-            lam_min = np.min(fitted_wave)
-            lam_max = np.max(fitted_wave)
-            uncertainty_sigma = getattr(self.islat, 'user_settings', {}).get('fit_line_uncertainty', 3.0)
-            SpectrumPanel.plot_gaussian_fit(
-                ax, gauss_fit, fitted_wave, fitted_flux,
-                color='lime', uncertainty_sigma=uncertainty_sigma,
-            )
-            ax.vlines([lam_min, lam_max], -2, 10, colors='lime', alpha=0.5)
-
     def on_click(self, event):
         """Handle mouse click events on the plot."""
         self.interaction_handler.handle_click_event(event)
     
     def on_active_molecule_changed(self):
-        """
-        Called when the active molecule changes.
-        Delegates rendering to the active view.
-        """
-        debug_config.info("active_molecule", "on_active_molecule_changed() called")
-
-        new_molecule = getattr(self.islat, 'active_molecule', None)
-        current_selection = getattr(self, 'current_selection', None)
-
-        # Delegate to the active view — it handles title, active-line
-        # clearing, and re-running the selection chain if needed.
+        """Called when the active molecule changes — delegates to the active view."""
         self.active_view.on_active_molecule_changed(
-            new_molecule=new_molecule,
-            current_selection=current_selection,
+            new_molecule=getattr(self.islat, 'active_molecule', None),
+            current_selection=getattr(self, 'current_selection', None),
         )
-
-        # Mark the other view as stale so it picks up the change on
-        # next activate().
-        if self.is_full_spectrum:
-            self._three_panel_view._needs_refresh = True
-        else:
-            self._full_spectrum_view._needs_refresh = True
-
-        debug_config.info("active_molecule", "on_active_molecule_changed() completed")
+        self._mark_inactive_views_stale()
 
     def on_molecule_parameter_changed(self, molecule_name, parameter_name, old_value, new_value):
-        """
-        Called when any molecule parameter changes.
-        Manages stale-molecule bookkeeping, then delegates rendering to the active view.
-        """
-        debug_config.info("main_plot", f"Parameter change: {molecule_name}.{parameter_name}: {old_value} → {new_value}")
-
-        # Visibility changes are handled by on_molecule_visibility_changed
-        # (called explicitly from ControlPanel) — skip here to avoid
-        # double-rendering.
+        """Called when any molecule parameter changes — delegates to the active view."""
         if parameter_name == 'is_visible':
             return
-
-        # Check if this molecule is visible — if hidden, mark stale
-        if (hasattr(self.islat, 'molecules_dict') and
-            molecule_name in self.islat.molecules_dict):
-
-            molecule = self.islat.molecules_dict[molecule_name]
-
-            if molecule.is_visible:
-                # Delegate to update_model_plot so the inactive view is
-                # also marked stale and refreshes on next activate().
-                self.update_model_plot()
-            else:
-                self._stale_molecules.add(molecule_name)
-                debug_config.trace("main_plot", f"{molecule_name} parameter changed while hidden — marked stale")
-
-        # Delegate line-inspection / pop-diagram updates to the active view
-        current_selection = getattr(self, 'current_selection', None)
         self.active_view.on_molecule_parameter_changed(
             molecule_name=molecule_name,
             parameter_name=parameter_name,
-            current_selection=current_selection,
+            current_selection=getattr(self, 'current_selection', None),
         )
+        self._mark_inactive_views_stale()
 
     def on_molecule_deleted(self, molecule_name):
-        """
-        Handle molecule deletion by delegating to the active view.
-
-        Parameters
-        ----------
-        molecule_name : str
-            Name of the deleted molecule
-        """
-        # Delegate to the active view which handles clearing + rebuild
+        """Called when a molecule is deleted — delegates to the active view."""
         self.active_view.on_molecule_deleted(molecule_name)
-
-        # Mark the other view as stale
-        if self.is_full_spectrum:
-            self._three_panel_view._needs_refresh = True
-        else:
-            self._full_spectrum_view._needs_refresh = True
+        self._mark_inactive_views_stale()
     
     def on_molecule_visibility_changed(self, molecule_name, is_visible):
-        """
-        Handle molecule visibility changes by delegating to the active view.
-
-        The active view handles the rendering update (lightweight artist
-        toggling in full-spectrum mode.) The inactive view is marked stale so it
-        re-renders with the correct visibility on next activate().
-        
-        Parameters
-        ----------
-        molecule_name : str
-            Name of the molecule whose visibility changed
-        is_visible : bool
-            New visibility state
-        """
+        """Called when a molecule's visibility changes — delegates to the active view."""
         if not hasattr(self.islat, 'molecules_dict'):
             return
-        
-        current_selection = getattr(self, 'current_selection', None)
-        active_molecule = getattr(self.islat, 'active_molecule', None)
-
-        # If the molecule had its parameters changed while hidden, we need
-        # to force a full re-render (not just an artist toggle) so the
-        # displayed spectrum reflects the updated parameters.
-        force_rerender = is_visible and molecule_name in self._stale_molecules
-        if force_rerender:
-            self._stale_molecules.discard(molecule_name)
-            debug_config.trace("main_plot", f"{molecule_name} was stale — forcing re-render on visibility toggle")
-
         self.active_view.on_molecule_visibility_changed(
             molecule_name=molecule_name,
             is_visible=is_visible,
             molecules_dict=self.islat.molecules_dict,
             wave_data=self.islat.wave_data,
-            active_molecule=active_molecule,
-            current_selection=current_selection,
-            force_rerender=force_rerender,
+            active_molecule=getattr(self.islat, 'active_molecule', None),
+            current_selection=getattr(self, 'current_selection', None),
         )
-
-        # Mark the *other* view as needing a full refresh next time it is
-        # activated, so molecule visibility stays consistent across views.
-        if self.is_full_spectrum:
-            self._three_panel_view._needs_refresh = True
-        else:
-            self._full_spectrum_view._needs_refresh = True
+        self._mark_inactive_views_stale()
     
-    def compute_fit_line(self, xmin=None, xmax=None, deblend=False, update_plot=True):
-        """
-        Compute fit line using FittingEngine with data access.
-        
-        Parameters
-        ----------
-        xmin, xmax : float, optional
-            Wavelength range. Uses current_selection if not provided.
-        deblend : bool
-            Whether to perform multi-component deblending
-            
-        Returns
-        -------
-        tuple or None
-            (fit_result, fitted_wave, fitted_flux) or None if fitting fails
-        """
-        if xmin is None or xmax is None:
-            if hasattr(self, 'current_selection') and self.current_selection:
-                xmin, xmax = self.current_selection
-            else:
-                return None
-        
-        # Use vectorized mask for efficient data selection
-        fit_mask = (self.islat.wave_data >= xmin) & (self.islat.wave_data <= xmax)
-        x_fit = self.islat.wave_data[fit_mask]
-        y_fit = self.islat.flux_data[fit_mask]
-        
-        if len(x_fit) < 5:
-            return None
-        
-        try:
-            # Build extra kwargs for deblend mode
-            fit_kwargs = dict(xmin=xmin, xmax=xmax, deblend=deblend)
-            if deblend:
-                fit_kwargs.update(
-                    wave_data_full=self.islat.wave_data,
-                    err_data_full=self.islat.err_data,
-                    user_settings=getattr(self.islat, 'user_settings', {}),
-                    active_molecule_fwhm=getattr(self.islat.active_molecule, 'fwhm', None) if getattr(self.islat, 'active_molecule', None) else None,
-                    lines_with_intensity=(
-                        self.islat.active_molecule.intensity.get_lines_in_range_with_intensity(xmin, xmax)
-                        if getattr(self.islat, 'active_molecule', None) and hasattr(self.islat.active_molecule, 'intensity')
-                        else None
-                    ),
-                    line_threshold=(
-                        self.islat.user_settings.get('line_threshold', 0.03)
-                        if getattr(self.islat, 'user_settings', None) else 0.03
-                    )
-                )
-            
-            fit_result, fitted_wave, fitted_flux = self.fitting_engine.fit_gaussian_line(
-                x_fit, y_fit, **fit_kwargs
-            )
-            self.fit_result = (fit_result, fitted_wave, fitted_flux)
-            if update_plot and self.current_selection is not None:
-                # Overlay the fit directly on the existing line inspection plot
-                # without clearing ax2 (which would destroy the active lines).
-                max_y = fitted_flux.max() if len(fitted_flux) > 0 else 0.15
-                self._render_fit_results_in_line_inspection(
-                    fit_result=self.fit_result, xmin=xmin, xmax=xmax, max_y=max_y,
-                )
-                self.canvas.draw_idle()
-            return self.fit_result
-        except Exception as e:
-            debug_config.error("main_plot", f"Error in fitting: {str(e)}")
-            return None
-    
-    def _render_fit_results_in_line_inspection(
-        self, fit_result: Any, xmin: float, xmax: float, max_y: float,
-    ) -> None:
-        """Overlay a Gaussian fit result on the line-inspection axes (ax2)."""
-        ax2 = self.ax2
-        # Clear old fit artists that overlap with the new range
-        clear_old = True
-        try:
-            clear_old = getattr(self.islat, 'user_settings', {}).get('clear_old_fits', True)
-        except Exception:
-            pass
-        if clear_old:
-            for line in ax2.lines[:]:
-                if getattr(line, '_islat_fit_result', False) or (
-                    hasattr(line, 'get_label') and line.get_label()
-                    and ('Fit' in line.get_label() or 'Component' in line.get_label())
-                ):
-                    xd = line.get_xdata()
-                    if len(xd) > 0 and np.min(xd) <= xmax and np.max(xd) >= xmin:
-                        line.remove()
-            for coll in ax2.collections[:]:
-                if getattr(coll, '_islat_fit_result', False) or (
-                    hasattr(coll, 'get_label') and coll.get_label()
-                    and ('uncertainty' in coll.get_label().lower() or 'sigma' in coll.get_label().lower())
-                ):
-                    try:
-                        paths = coll.get_paths()
-                        if paths:
-                            bounds = paths[0].get_extents()
-                            if bounds.xmin <= xmax and bounds.xmax >= xmin:
-                                coll.remove()
-                        else:
-                            coll.remove()
-                    except Exception:
-                        coll.remove()
-        try:
-            gauss_fit, fitted_wave, fitted_flux = fit_result
-            if gauss_fit is not None and fitted_wave is not None and fitted_flux is not None:
-                fit_mask = (fitted_wave >= xmin) & (fitted_wave <= xmax)
-                if np.any(fit_mask):
-                    fit_line = ax2.plot(
-                        fitted_wave[fit_mask], fitted_flux[fit_mask],
-                        color='red', linewidth=1, label='Total Fit', linestyle='--',
-                    )[0]
-                    fit_line._islat_fit_result = True
-                    # Multi-component vs single-component
-                    if hasattr(gauss_fit, 'params') and gauss_fit.params:
-                        prefixes = {
-                            p.split('_')[0] + '_'
-                            for p in gauss_fit.params
-                            if '_' in p and p.split('_')[0].startswith('g') and p.split('_')[0][1:].isdigit()
-                        }
-                        if len(prefixes) > 1:
-                            try:
-                                components = gauss_fit.eval_components(x=fitted_wave[fit_mask])
-                                for i, prefix in enumerate(sorted(prefixes)):
-                                    if prefix in components:
-                                        comp = ax2.plot(
-                                            fitted_wave[fit_mask], components[prefix],
-                                            linestyle='--', linewidth=1,
-                                            label=f'Component {i + 1}',
-                                        )[0]
-                                        comp._islat_fit_result = True
-                            except Exception as e:
-                                debug_config.warning('main_plot', f'Could not plot fit components: {e}')
-                        else:
-                            sigma = getattr(self.islat, 'user_settings', {}).get('fit_line_uncertainty', 1.0)
-                            dely = gauss_fit.eval_uncertainty(sigma=sigma)
-                            fill = ax2.fill_between(
-                                fitted_wave, fitted_flux - dely, fitted_flux + dely,
-                                color='gray', alpha=0.3, label=r'3-$\sigma$ uncertainty band',
-                            )
-                            fill._islat_fit_result = True
-        except Exception as e:
-            debug_config.warning('main_plot', f'Could not render fit results: {e}')
-        handles, labels = ax2.get_legend_handles_labels()
-        if handles:
-            ax2.legend()
-            if hasattr(self, 'legend_toggle'):
-                leg = ax2.get_legend()
-                if leg is not None:
-                    leg.set_visible(self.legend_toggle)
-
     def save_fig(self, filename, dpi=300):
         """Save the current figure to a file."""
         try:

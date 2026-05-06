@@ -333,6 +333,73 @@ class SpectrumPanel(SpectralPanel):
             pass  # Uncertainty evaluation may fail for some fits
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def plot_gaussian_fits(
+        ax: "Axes",
+        fit_results_data: Any,
+        color: str = "lime",
+        linewidth: float = 2,
+        zorder: int = 10,
+        uncertainty_sigma: float = 3.0,
+        fill_alpha: float = 0.3,
+        range_markers: bool = True,
+        range_marker_color: str = "lime",
+        range_marker_alpha: float = 0.5,
+    ) -> None:
+        """Plot multiple Gaussian fit results on *ax* in a single call.
+
+        Iterates over a batch of fit results (as returned by the
+        batch-fitting pipeline) and calls :meth:`plot_gaussian_fit` for
+        each valid entry.  Optionally draws vertical range markers at
+        ``[lam_min, lam_max]`` for each fit.
+
+        Parameters
+        ----------
+        ax : Axes
+            Target matplotlib Axes.
+        fit_results_data : tuple
+            ``(gauss_fits, fitted_waves, fitted_fluxes)`` — each element is
+            an iterable of per-fit values in the same order.
+        color : str
+            Line and fill colour applied to every fit.
+        linewidth : float
+            Width of each fit curve.
+        zorder : int
+            Drawing order for the fit curves.
+        uncertainty_sigma : float
+            Number of sigma for uncertainty envelopes.
+        fill_alpha : float
+            Transparency of the uncertainty bands.
+        range_markers : bool
+            When *True* vertical dashed lines are drawn at the min/max
+            wavelength of each fitted range.
+        range_marker_color : str
+            Colour of the range-marker lines.
+        range_marker_alpha : float
+            Transparency of the range-marker lines.
+        """
+        gauss_fits, fitted_waves, fitted_fluxes = fit_results_data
+        for gauss_fit, fitted_wave, fitted_flux in zip(gauss_fits, fitted_waves, fitted_fluxes):
+            if gauss_fit is None or fitted_wave is None or fitted_flux is None:
+                continue
+            SpectrumPanel.plot_gaussian_fit(
+                ax, gauss_fit, fitted_wave, fitted_flux,
+                color=color,
+                linewidth=linewidth,
+                zorder=zorder,
+                uncertainty_sigma=uncertainty_sigma,
+                fill_alpha=fill_alpha,
+            )
+            if range_markers:
+                lam_min = float(np.min(fitted_wave))
+                lam_max = float(np.max(fitted_wave))
+                ax.vlines(
+                    [lam_min, lam_max], -2, 10,
+                    colors=range_marker_color,
+                    alpha=range_marker_alpha,
+                )
+
+    # ------------------------------------------------------------------
     def render_fit_results(
         self,
         ax: Axes,
