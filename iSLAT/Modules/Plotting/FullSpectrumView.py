@@ -718,12 +718,96 @@ class FullSpectrumView(ToggleMixin, PlotView):
         parameter_name: str,
         current_selection: Optional[Tuple[float, float]] = None,
     ) -> None:
-        """Mark stale so the next activate() does a full rebuild."""
-        self._needs_refresh = True
+        """Re-render immediately if this view is active, otherwise mark stale."""
+        if parameter_name == 'is_visible':
+            return
+
+        if not self._initialised or self._plot is None:
+            # Not yet rendered — just mark stale for the next activate().
+            self._needs_refresh = True
+            return
+
+        mol_dict = getattr(self._islat, 'molecules_dict', None)
+        if mol_dict is None:
+            self._needs_refresh = True
+            return
+
+        molecule = mol_dict.get(molecule_name)
+        if molecule is None or not getattr(molecule, 'is_visible', True):
+            # Hidden molecules don't need an immediate repaint; mark stale
+            # so they re-render correctly when made visible again.
+            self._needs_refresh = True
+            return
+
+        # Active view with a visible molecule — update in-place now.
+        self._plot.update_panels_inplace()
+        if self._canvas is not None:
+            self._canvas.draw_idle()
 
     def on_molecule_deleted(self, molecule_name: str) -> None:
         """Mark stale so the next activate() does a full rebuild."""
         self._needs_refresh = True
+
+    # ------------------------------------------------------------------
+    # Artist-manipulation helpers (replace removed PlotRenderer calls)
+    # ------------------------------------------------------------------
+
+    def _set_molecule_visibility(
+        self, molecule_name: str, is_visible: bool, ax: "Axes"
+    ) -> bool:
+        """Toggle visibility of every Line2D tagged with *molecule_name* on *ax*.
+
+        Returns ``True`` if at least one artist was found and toggled.
+        """
+        found = False
+        for line in ax.lines:
+            if getattr(line, "_molecule_name", None) == molecule_name:
+                line.set_visible(is_visible)
+                found = True
+        return found
+
+    def _remove_molecule_lines(self, molecule_name: str, ax: "Axes") -> None:
+        """Remove all Line2D artists tagged with *molecule_name* from *ax*."""
+        to_remove = [
+            line for line in ax.lines
+            if getattr(line, "_molecule_name", None) == molecule_name
+        ]
+        for line in to_remove:
+            line.remove()
+
+    def _render_molecule_spectrum(
+        self, molecule: "Molecule", wave_data: "np.ndarray", ax: "Axes"
+    ) -> None:
+        """Plot *molecule*'s spectrum onto *ax* using the composed plot's styling.
+
+        Falls back to a full ``update_panels_inplace()`` rebuild when the
+        composed plot object is not yet available.
+        """
+        if self._plot is None:
+            return
+        # Delegate to FullSpectrumPlot's mol-cache helper so colour/style
+        # stays consistent with the rest of the composed plot.
+        mol_cache, _labels, _colors = self._plot._build_mol_cache()
+        entry = mol_cache.get(getattr(molecule, "name", None))
+        if entry is None:
+            # Molecule not in cache — trigger a full inplace refresh instead.
+            self._plot.update_panels_inplace()
+            if self._canvas is not None:
+                self._canvas.draw_idle()
+            return
+        m_lam, m_flux, m_color, m_label = entry
+        xlim = ax.get_xlim()
+        m_mask = (m_lam >= xlim[0]) & (m_lam <= xlim[1])
+        if np.any(m_mask):
+            line, = ax.plot(
+                m_lam[m_mask], m_flux[m_mask],
+                linestyle="--", color=m_color,
+                alpha=self._plot._get_theme_value("full_spectrum_model_alpha", 0.8),
+                linewidth=self._plot._get_theme_value("full_spectrum_model_linewidth", 0.8),
+                label=m_label,
+                zorder=self._plot._get_theme_value("zorder_model", 3),
+            )
+            line._molecule_name = getattr(molecule, "name", None)
 
     # ------------------------------------------------------------------
     def on_molecule_visibility_changed(
@@ -761,20 +845,14 @@ class FullSpectrumView(ToggleMixin, PlotView):
         if force_rerender and is_visible:
             molecule = molecules_dict.get(molecule_name)
             for ax in primary_axes:
-                self._renderer.remove_molecule_lines(
-                    molecule_name, ax=ax, lines=list(ax.lines), update_legend=False,
-                )
+                self._remove_molecule_lines(molecule_name, ax)
                 if molecule is not None:
-                    self._renderer.render_individual_molecule_spectrum(
-                        molecule, rv_wave, subplot=ax, update_legend=False,
-                    )
+                    self._render_molecule_spectrum(molecule, rv_wave, ax)
         else:
             # Try fast artist-toggle first.
             toggled = False
             for ax in primary_axes:
-                if self._renderer.set_molecule_visibility(
-                    molecule_name, is_visible, ax=ax, lines=ax.lines,
-                ):
+                if self._set_molecule_visibility(molecule_name, is_visible, ax):
                     toggled = True
 
             # If turning ON but no artists exist (e.g. after a full rebuild
@@ -783,9 +861,7 @@ class FullSpectrumView(ToggleMixin, PlotView):
                 molecule = molecules_dict.get(molecule_name)
                 if molecule is not None:
                     for ax in primary_axes:
-                        self._renderer.render_individual_molecule_spectrum(
-                            molecule, rv_wave, subplot=ax, update_legend=False,
-                        )
+                        self._render_molecule_spectrum(molecule, rv_wave, ax)
 
         # 2. Recompute summed spectrum on primary axes.
         #    For RSP the "summed" fill represents the fixed model flux
@@ -814,9 +890,9 @@ class FullSpectrumView(ToggleMixin, PlotView):
                 if np.any(mask) and np.any(summed_flux[mask] > 0):
                     fill = ax.fill_between(
                         summed_wavelengths[mask], 0, summed_flux[mask],
-                        color=self._renderer._get_theme_value("summed_spectra_color", "lightgray"),
+                        color=self._plot._get_theme_value("summed_spectra_color", "lightgray"),
                         alpha=1.0, label="Sum",
-                        zorder=self._renderer._get_theme_value("zorder_summed", 1),
+                        zorder=self._plot._get_theme_value("zorder_summed", 1),
                     )
                     fill._islat_summed = True
                     fill.set_visible(summed_visible)

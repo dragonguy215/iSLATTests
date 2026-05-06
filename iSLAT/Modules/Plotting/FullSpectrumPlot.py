@@ -482,6 +482,32 @@ class FullSpectrumPlot(StackedSpectralPanel):
     # ------------------------------------------------------------------
     # Convenience helpers
     # ------------------------------------------------------------------
+
+    def _plot_summed_spectrum(
+        self,
+        ax: "Axes",
+        wave_data: "np.ndarray",
+        summed_flux: "np.ndarray",
+        color: Optional[str] = None,
+        label: str = "Sum",
+        deduplicate: bool = False,
+    ) -> None:
+        """Plot the summed model spectrum as a filled area on *ax*."""
+        from .BasePlot import BasePlot
+        if summed_flux is None or len(summed_flux) == 0:
+            return
+        if not np.any(summed_flux > 0):
+            return
+        if deduplicate:
+            BasePlot._clear_tagged_artists(ax, "_islat_summed", lines=False)
+        fill_color = color or self._get_theme_value("summed_spectra_color", "lightgray")
+        fill = ax.fill_between(
+            wave_data, 0, summed_flux,
+            color=fill_color, alpha=1.0, label=label,
+            zorder=self._get_theme_value("zorder_summed", 1),
+        )
+        fill._islat_summed = True
+
     @property
     def _legend_axes(self) -> Optional["Axes"]:
         """Return the axes that should receive the molecule colour legend.
