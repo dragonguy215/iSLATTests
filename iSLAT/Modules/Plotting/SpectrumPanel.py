@@ -331,3 +331,118 @@ class SpectrumPanel(SpectralPanel):
             )
         except Exception:
             pass  # Uncertainty evaluation may fail for some fits
+
+    # ------------------------------------------------------------------
+    def render_fit_results(
+        self,
+        ax: Axes,
+        fit_result: Any,
+        xmin: float,
+        xmax: float,
+        *,
+        user_settings: Optional[Dict[str, Any]] = None,
+        legend_visible: bool = True,
+    ) -> None:
+        """Overlay Gaussian-fit results on *ax*.
+
+        Parameters
+        ----------
+        ax : Axes
+            Target axes (typically the line-inspection axes).
+        fit_result : tuple
+            ``(gauss_fit, fitted_wave, fitted_flux)``.
+        xmin, xmax : float
+            Wavelength range of the current selection.
+        user_settings : dict, optional
+            iSLAT user settings — used for ``clear_old_fits`` and
+            ``fit_line_uncertainty``.  Falls back to safe defaults.
+        legend_visible : bool
+            Whether the legend should be visible after rendering.
+        """
+        if ax is None:
+            return
+
+        if user_settings is None:
+            user_settings = {}
+
+        # Clear old fit results if requested
+        if user_settings.get('clear_old_fits', True):
+            self._clear_old_fit_results(ax, xmin, xmax)
+
+        try:
+            gauss_fit, fitted_wave, fitted_flux = fit_result
+            if gauss_fit is None or fitted_wave is None or fitted_flux is None:
+                return
+
+            fit_mask = (fitted_wave >= xmin) & (fitted_wave <= xmax)
+            if not np.any(fit_mask):
+                return
+
+            fit_line = ax.plot(
+                fitted_wave[fit_mask], fitted_flux[fit_mask],
+                color='red', linewidth=1, label='Total Fit', linestyle='--',
+            )[0]
+            fit_line._islat_fit_result = True
+
+            # Multi-component handling
+            if hasattr(gauss_fit, 'params') and gauss_fit.params:
+                prefixes = set()
+                for pname in gauss_fit.params:
+                    if '_' in pname:
+                        pfx = pname.split('_')[0] + '_'
+                        if pfx.startswith('g') and pfx[1:-1].isdigit():
+                            prefixes.add(pfx)
+
+                if len(prefixes) > 1:
+                    try:
+                        components = gauss_fit.eval_components(x=fitted_wave[fit_mask])
+                        for i, pfx in enumerate(sorted(prefixes)):
+                            if pfx in components:
+                                comp_line = ax.plot(
+                                    fitted_wave[fit_mask], components[pfx],
+                                    linestyle='--', linewidth=1,
+                                    label=f"Component {i+1}",
+                                )[0]
+                                comp_line._islat_fit_result = True
+                    except Exception:
+                        pass
+                else:
+                    sigma = user_settings.get('fit_line_uncertainty', 1.0)
+                    dely = gauss_fit.eval_uncertainty(sigma=sigma)
+                    fill = ax.fill_between(
+                        fitted_wave, fitted_flux - dely, fitted_flux + dely,
+                        color='gray', alpha=0.3,
+                        label=r'3-$\sigma$ uncertainty band',
+                    )
+                    fill._islat_fit_result = True
+
+        except Exception:
+            pass
+
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend()
+            leg = ax.get_legend()
+            if leg is not None:
+                leg.set_visible(legend_visible)
+
+    @staticmethod
+    def _clear_old_fit_results(ax: Axes, xmin: float, xmax: float) -> None:
+        """Remove existing fit-result artists that overlap ``[xmin, xmax]``."""
+        for line in ax.lines[:]:
+            if hasattr(line, '_islat_fit_result'):
+                xdata = line.get_xdata()
+                if len(xdata) > 0:
+                    if np.min(xdata) <= xmax and np.max(xdata) >= xmin:
+                        line.remove()
+
+        for coll in ax.collections[:]:
+            if hasattr(coll, '_islat_fit_result'):
+                try:
+                    paths = coll.get_paths()
+                    if paths:
+                        bounds = paths[0].get_extents()
+                        if bounds.xmin <= xmax and bounds.xmax >= xmin:
+                            coll.remove()
+                except Exception:
+                    coll.remove()

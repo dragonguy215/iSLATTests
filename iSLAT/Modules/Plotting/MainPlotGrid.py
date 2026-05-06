@@ -1060,8 +1060,10 @@ class MainPlotGrid(CompositePlot):
         if fit_result is not None:
             current_ylim = ax.get_ylim()
             max_y = current_ylim[1] / 1.1 if current_ylim[1] > 0 else 0.15
-            self.render_fit_results(fit_result, xmin, xmax, max_y,
-                                    legend_visible=legend_visible)
+            self.inspection_panel.render_fit_results(
+                ax, fit_result, xmin, xmax,
+                legend_visible=legend_visible,
+            )
 
     def render_population_diagram_for_molecule(
         self,
@@ -1136,109 +1138,22 @@ class MainPlotGrid(CompositePlot):
     ) -> None:
         """Overlay Gaussian-fit results on the line-inspection panel.
 
-        Parameters
-        ----------
-        fit_result : tuple
-            ``(gauss_fit, fitted_wave, fitted_flux)``.
-        xmin, xmax : float
-            Wavelength range of the current selection.
-        max_y : float
-            Maximum y value for scaling (unused but kept for API compat).
-        user_settings : dict, optional
-            iSLAT user settings — used for ``clear_old_fits`` and
-            ``fit_line_uncertainty``.  Falls back to safe defaults.
-        legend_visible : bool
-            Whether the legend should be visible after rendering.
+        Delegates to :meth:`SpectrumPanel.render_fit_results` via the
+        persistent :attr:`inspection_panel` instance.
         """
         ax = self.ax_inspection
         if ax is None:
             return
-
-        if user_settings is None:
-            user_settings = {}
-
-        # Clear old fit results if requested
-        if user_settings.get('clear_old_fits', True):
-            self._clear_old_fit_results(ax, xmin, xmax)
-
-        try:
-            gauss_fit, fitted_wave, fitted_flux = fit_result
-            if gauss_fit is None or fitted_wave is None or fitted_flux is None:
-                return
-
-            fit_mask = (fitted_wave >= xmin) & (fitted_wave <= xmax)
-            if not np.any(fit_mask):
-                return
-
-            fit_line = ax.plot(
-                fitted_wave[fit_mask], fitted_flux[fit_mask],
-                color='red', linewidth=1, label='Total Fit', linestyle='--',
-            )[0]
-            fit_line._islat_fit_result = True
-
-            # Multi-component handling
-            if hasattr(gauss_fit, 'params') and gauss_fit.params:
-                prefixes = set()
-                for pname in gauss_fit.params:
-                    if '_' in pname:
-                        pfx = pname.split('_')[0] + '_'
-                        if pfx.startswith('g') and pfx[1:-1].isdigit():
-                            prefixes.add(pfx)
-
-                if len(prefixes) > 1:
-                    try:
-                        components = gauss_fit.eval_components(x=fitted_wave[fit_mask])
-                        for i, pfx in enumerate(sorted(prefixes)):
-                            if pfx in components:
-                                comp_line = ax.plot(
-                                    fitted_wave[fit_mask], components[pfx],
-                                    linestyle='--', linewidth=1,
-                                    label=f"Component {i+1}",
-                                )[0]
-                                comp_line._islat_fit_result = True
-                    except Exception:
-                        pass
-                else:
-                    sigma = user_settings.get('fit_line_uncertainty', 1.0)
-                    dely = gauss_fit.eval_uncertainty(sigma=sigma)
-                    fill = ax.fill_between(
-                        fitted_wave, fitted_flux - dely, fitted_flux + dely,
-                        color='gray', alpha=0.3,
-                        label=r'3-$\sigma$ uncertainty band',
-                    )
-                    fill._islat_fit_result = True
-
-        except Exception:
-            pass
-
-        handles, labels = ax.get_legend_handles_labels()
-        if handles:
-            ax.legend()
-            leg = ax.get_legend()
-            if leg is not None:
-                leg.set_visible(legend_visible)
-
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _clear_old_fit_results(ax: Axes, xmin: float, xmax: float) -> None:
-        """Remove existing fit-result artists that overlap ``[xmin, xmax]``."""
-        for line in ax.lines[:]:
-            if hasattr(line, '_islat_fit_result'):
-                xdata = line.get_xdata()
-                if len(xdata) > 0:
-                    if np.min(xdata) <= xmax and np.max(xdata) >= xmin:
-                        line.remove()
-
-        for coll in ax.collections[:]:
-            if hasattr(coll, '_islat_fit_result'):
-                try:
-                    paths = coll.get_paths()
-                    if paths:
-                        bounds = paths[0].get_extents()
-                        if bounds.xmin <= xmax and bounds.xmax >= xmin:
-                            coll.remove()
-                except Exception:
-                    coll.remove()
+        if self.inspection_panel is not None:
+            self.inspection_panel.render_fit_results(
+                ax, fit_result, xmin, xmax,
+                user_settings=user_settings,
+                legend_visible=legend_visible,
+            )
+        else:
+            # Fallback: delegate to SpectrumPanel static helpers directly
+            from .SpectrumPanel import SpectrumPanel as _SP
+            _SP._clear_old_fit_results(ax, xmin, xmax)
 
     def clear_active_lines(self, active_lines_list: List[Any]) -> None:
         """Remove all active-line artists (vlines, text, scatter) and clear the list.
