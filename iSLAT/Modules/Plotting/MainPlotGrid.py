@@ -723,11 +723,7 @@ class MainPlotGrid(CompositePlot):
 
         # If turning ON but no artists exist, plot from scratch
         if is_visible and not toggled:
-            self._plot_molecule_spectrum(
-                ax, molecule,
-                wave_data=self.wave_data,
-                interpolate_to_input=False,
-            )
+            self.spectrum_panel._plot_molecule_spectrum(ax, molecule, self.wave_data)
 
         # Recompute summed spectrum
         self._update_summed_spectrum()
