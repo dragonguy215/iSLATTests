@@ -9,6 +9,7 @@ import pandas as pd
 import iSLAT.Constants as c
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Callable, Tuple, List, Dict, Any
+from .spectral_utils import flux_integral
 
 class LineAnalyzer:
     """
@@ -233,36 +234,6 @@ class LineAnalyzer:
             except (ValueError, TypeError, ZeroDivisionError):
                 entry['RD_y'] = np.nan
 
-    @staticmethod
-    def flux_integral(lam, flux, err, lam_min, lam_max) -> Tuple[float, float]:
-        wavelength_mask = (lam >= lam_min) & (lam <= lam_max)
-
-        if not np.any (wavelength_mask):
-            return 0.0, 0.0
-
-        lam_range = lam[wavelength_mask]
-        flux_range = flux[wavelength_mask]
-
-        if len (lam_range) < 2:
-            return 0.0, 0.0
-
-        # Convert to frequency space for proper integration
-        freq_range = c.SPEED_OF_LIGHT_MICRONS / lam_range[::-1]
-
-        # Integrate in frequency space (reverse order for proper frequency ordering)
-        line_flux_meas = np.trapezoid(flux_range[::-1], x=freq_range[::-1])
-        line_flux_meas = -line_flux_meas * 1e-23  # Convert Jy*Hz to erg/s/cm^2
-
-        # Calculate error propagation if error data provided
-        if err is not None:
-            err_range = err[wavelength_mask]
-            line_err_meas = np.trapezoid(err_range[::-1], x=freq_range[::-1])
-            line_err_meas = -line_err_meas * 1e-23
-        else:
-            line_err_meas = 0.0
-
-        return line_flux_meas, line_err_meas
-
     def _fit_single_line(
         self,
         line_index: int,
@@ -333,7 +304,7 @@ class LineAnalyzer:
             err_data=err_data
         )
 
-        flux_data_integral, err_data_integral = self.flux_integral(
+        flux_data_integral, err_data_integral = flux_integral(
             calc_wave_data, calc_flux_data, err=err_data, lam_min=xmin, lam_max=xmax
         )
 

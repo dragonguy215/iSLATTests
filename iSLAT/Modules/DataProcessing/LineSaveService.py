@@ -7,6 +7,7 @@ separated from GUI concerns to enable reuse and testing.
 
 import numpy as np
 from typing import Any, Dict, Optional, Tuple
+from .spectral_utils import flux_integral
 
 class LineSaveService:
     """
@@ -182,7 +183,7 @@ class LineSaveService:
                 center_wave = (xmin + xmax) / 2.0
                 
                 # Calculate flux integral in the selected range
-                line_flux, line_err = main_plot.flux_integral(
+                line_flux, line_err = flux_integral(
                     wave_data,
                     flux_data,
                     err_data,

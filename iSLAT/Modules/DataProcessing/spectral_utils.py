@@ -8,10 +8,12 @@ canonical implementation avoids duplication and makes updates easier.
 
 from __future__ import annotations
 
+from typing import Tuple
 import warnings
 
 import numpy as np
 
+import iSLAT.Constants as c
 
 def make_bins(wavs: np.ndarray):
     """Given a series of wavelength points, find the edges and widths
@@ -134,3 +136,32 @@ def spectres(
             new_fluxes[diff_idx[k]] = fw.sum() / w.sum()
 
     return new_fluxes
+
+def flux_integral(lam, flux, err, lam_min, lam_max) -> Tuple[float, float]:
+    wavelength_mask = (lam >= lam_min) & (lam <= lam_max)
+
+    if not np.any (wavelength_mask):
+        return 0.0, 0.0
+
+    lam_range = lam[wavelength_mask]
+    flux_range = flux[wavelength_mask]
+
+    if len (lam_range) < 2:
+        return 0.0, 0.0
+
+    # Convert to frequency space for proper integration
+    freq_range = c.SPEED_OF_LIGHT_MICRONS / lam_range[::-1]
+
+    # Integrate in frequency space (reverse order for proper frequency ordering)
+    line_flux_meas = np.trapezoid(flux_range[::-1], x=freq_range[::-1])
+    line_flux_meas = -line_flux_meas * 1e-23  # Convert Jy*Hz to erg/s/cm^2
+
+    # Calculate error propagation if error data provided
+    if err is not None:
+        err_range = err[wavelength_mask]
+        line_err_meas = np.trapezoid(err_range[::-1], x=freq_range[::-1])
+        line_err_meas = -line_err_meas * 1e-23
+    else:
+        line_err_meas = 0.0
+
+    return line_flux_meas, line_err_meas

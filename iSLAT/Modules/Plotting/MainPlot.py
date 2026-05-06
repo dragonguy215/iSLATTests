@@ -547,30 +547,6 @@ class iSLATPlot:
         self.legend_toggle = not self.legend_toggle
         self.active_view.toggle_legend(self.legend_toggle)
 
-    def flux_integral(self, lam, flux, err, lam_min, lam_max):
-        """
-        Calculate flux integral in the selected wavelength range.
-        
-        Parameters
-        ----------
-        lam : array
-            Wavelength array in microns
-        flux : array  
-            Flux array in Jy
-        err : array
-            Error array in Jy
-        lam_min : float
-            Minimum wavelength in microns
-        lam_max : float
-            Maximum wavelength in microns
-            
-        Returns
-        -------
-        tuple
-            (line_flux_meas, line_err_meas) in erg/s/cm^2
-        """
-        return self.line_analyzer.flux_integral(lam, flux, err, lam_min, lam_max)
-
     def remove_atomic_lines(self):
         """Remove atomic lines — delegates to the active view."""
         self.atomic_toggle = False

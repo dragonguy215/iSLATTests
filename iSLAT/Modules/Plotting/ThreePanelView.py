@@ -37,7 +37,8 @@ if TYPE_CHECKING:
 
 import iSLAT.Constants as c
 from iSLAT.Modules.FileHandling.iSLATFileHandling import load_atomic_lines
-from iSLAT.Modules.DataProcessing.LineAnalyzer import LineAnalyzer
+#from iSLAT.Modules.DataProcessing.LineAnalyzer import LineAnalyzer
+from iSLAT.Modules.DataProcessing.spectral_utils import flux_integral
 
 # Import debug configuration
 try:
@@ -80,7 +81,6 @@ class ThreePanelView(ToggleMixin, PlotView):
         self.active_lines: List[Any] = []
         self.selected_line: Optional[Dict[str, Any]] = None
         self._pick_event_connected: bool = False
-        self._line_analyzer = LineAnalyzer()
 
         # Multi-molecule line inspection state
         # Stores the last (xmin, xmax) selection so comparison-molecule
@@ -826,7 +826,7 @@ class ThreePanelView(ToggleMixin, PlotView):
         if current_selection is not None:
             xmin, xmax = current_selection
             err_data = getattr(islat, 'err_data', None)
-            line_flux, _ = self._line_analyzer.flux_integral(
+            line_flux, _ = flux_integral(
                 lam=islat.wave_data,
                 flux=islat.flux_data,
                 lam_min=xmin, lam_max=xmax,
@@ -836,7 +836,7 @@ class ThreePanelView(ToggleMixin, PlotView):
             active_mol = getattr(islat, 'active_molecule', None)
             if active_mol is not None:
                 molecule_wave, molecule_flux_arr = active_mol.get_flux(return_wavelengths=True)
-                model_flux, _ = self._line_analyzer.flux_integral(
+                model_flux, _ = flux_integral(
                     lam=molecule_wave,
                     flux=molecule_flux_arr,
                     lam_min=xmin, lam_max=xmax,

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple, Callable, Union
 
+from iSLAT.Modules.DataProcessing.spectral_utils import flux_integral
 import iSLAT.Modules.FileHandling.iSLATFileHandling as ifh
 import iSLAT.Constants as c
 from iSLAT.Modules.DataProcessing.FittingEngine import FittingEngine
@@ -53,7 +54,8 @@ def _fit_spectrum_batch_worker(
     # Imports are inside the function because this runs in a fresh
     # worker process that doesn't inherit the parent's import state.
     from iSLAT.Modules.DataProcessing.FittingEngine import FittingEngine
-    from iSLAT.Modules.DataProcessing.LineAnalyzer import LineAnalyzer
+    #from iSLAT.Modules.DataProcessing.LineAnalyzer import LineAnalyzer
+    from iSLAT.Modules.DataProcessing.spectral_utils import flux_integral
 
     spectrum_idx = batch_data['spectrum_idx']
     wave_data = batch_data['wave_data']
@@ -89,7 +91,7 @@ def _fit_spectrum_batch_worker(
         )
 
         # -- Flux integral (delegates to LineAnalyzer) --
-        flux_data_integral, err_data_integral = LineAnalyzer.flux_integral(
+        flux_data_integral, err_data_integral = flux_integral(
             wave_data, flux_data, err=err_data,
             lam_min=xmin, lam_max=xmax,
         )
@@ -347,7 +349,7 @@ class BatchFittingService:
             err_data=task.err_data
         )
         
-        flux_data_integral, err_data_integral = self.line_analyzer.flux_integral(
+        flux_data_integral, err_data_integral = flux_integral(
             task.wave_data, task.flux_data, err=task.err_data, 
             lam_min=task.xmin, lam_max=task.xmax
         )
