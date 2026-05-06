@@ -174,6 +174,127 @@ class PopulationDiagramPlot(BasePlot):
         return self._component_data
 
     # ------------------------------------------------------------------
+    # Active-lines API implementation
+    # ------------------------------------------------------------------
+    def render_active_lines(
+        self,
+        line_data: List[Tuple["MoleculeLine", float, Any]],
+        active_lines: List[Any],
+        *,
+        molecule: Optional["Molecule"] = None,
+        threshold: float = 0.0,
+        color: str = "green",
+        **kwargs,
+    ) -> Any:
+        """Render scatter points for *line_data* on the population diagram.
+
+        Appends / updates entries in *active_lines* and returns the
+        :class:`~matplotlib.collections.PathCollection` scatter artist.
+
+        Parameters
+        ----------
+        line_data : list[tuple]
+            ``(MoleculeLine, intensity, tau)`` triples.
+        active_lines : list
+            Mutable list updated in-place with scatter artist references.
+        molecule : Molecule
+            Active molecule (required for ``radius`` and ``distance``).
+        threshold : float
+            Fraction (0-1) of max intensity below which lines are excluded.
+        color : str
+            Scatter point colour.
+
+        Returns
+        -------
+        PathCollection or None
+            The scatter artist, or *None* if nothing was plotted.
+        """
+        if (
+            not line_data
+            or self._ax is None
+            or molecule is None
+        ):
+            return None
+
+        intensities = [i for _, i, _ in line_data]
+        max_intensity = max(intensities) if intensities else 1.0
+        if max_intensity <= 0:
+            return None
+
+        radius = getattr(molecule, "radius", 1.0)
+        distance = getattr(molecule, "distance", 140.0)
+        area = np.pi * (radius * c.ASTRONOMICAL_UNIT_M * 1e2) ** 2
+        dist = distance * c.PARSEC_CM
+        beam_s = area / dist ** 2
+
+        e_ups: List[float] = []
+        rd_yaxs: List[float] = []
+        value_data_list: List[Dict[str, Any]] = []
+
+        for line, intensity, tau_val in line_data:
+            frac = intensity / max_intensity
+            if frac < threshold:
+                continue
+            if any(
+                x is None
+                for x in [intensity, line.a_stein, line.g_up, line.lam]
+            ):
+                continue
+
+            F = intensity * beam_s
+            freq = c.SPEED_OF_LIGHT_MICRONS / line.lam
+            rd_yax = np.log(
+                4 * np.pi * F / (line.a_stein * c.PLANCK_CONSTANT * freq * line.g_up)
+            )
+            e_ups.append(line.e_up)
+            rd_yaxs.append(rd_yax)
+
+            from iSLAT.Modules.Plotting.LineInspectionPlot import LineInspectionPlot as _LIP
+            info = _LIP.get_line_info(line, intensity, tau_val)
+            info["rd_yax"] = rd_yax
+            info["intensity_percent"] = frac * 100
+            value_data_list.append(info)
+
+        if not e_ups:
+            return None
+
+        ax = self._ax
+        sc = ax.scatter(
+            e_ups, rd_yaxs, s=30,
+            color=color, edgecolors="black", picker=True,
+        )
+
+        for idx, info in enumerate(value_data_list):
+            info["_scatter_point_index"] = idx
+            if idx < len(active_lines):
+                active_lines[idx][2] = sc
+                active_lines[idx][3].update(info)
+            else:
+                active_lines.append([None, None, sc, info])
+
+        return sc
+
+    def clear_active_lines(self, active_lines: List[Any]) -> None:
+        """Remove scatter artists from *active_lines* and clear the list.
+
+        Parameters
+        ----------
+        active_lines : list
+            Mutable list of ``[vline, text, scatter, info]`` entries.
+        """
+        seen_scatter = set()
+        for entry in active_lines:
+            sc = entry[2] if len(entry) > 2 else None
+            if sc is not None and id(sc) not in seen_scatter:
+                seen_scatter.add(id(sc))
+                if getattr(sc, 'axes', None) is not None:
+                    try:
+                        sc.remove()
+                    except (ValueError, AttributeError):
+                        pass
+        active_lines.clear()
+
+    # ------------------------------------------------------------------
     # Plot generation
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:

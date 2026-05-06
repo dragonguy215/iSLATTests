@@ -131,6 +131,8 @@ class BasePlot(ABC):
         self.legend_strategy: LegendStrategy = (
             legend_strategy if legend_strategy is not None else StandardLegend()
         )
+        # Mutable list of active line artist entries: [vline, text, scatter, info_dict]
+        self._active_lines: List[Any] = []
 
     # ------------------------------------------------------------------
     # Theme helpers
@@ -708,6 +710,67 @@ class BasePlot(ABC):
                 for val in (line["xmin"], line["xmax"]):
                     art = ax.axvline(val, color=range_color, alpha=alpha)
                     setattr(art, tag, True)
+
+    # ------------------------------------------------------------------
+    # Active-lines API
+    # ------------------------------------------------------------------
+    @property
+    def active_lines(self) -> List[Any]:
+        """List of active line artist entries managed by this panel.
+
+        Each entry is ``[vline_artist, text_artist, scatter_artist, info_dict]``.
+        Use :meth:`render_active_lines` to populate and
+        :meth:`clear_active_lines` to remove all artists.
+        """
+        return self._active_lines
+
+    def render_active_lines(
+        self,
+        line_data: List[Any],
+        active_lines: List[Any],
+        **kwargs,
+    ) -> Any:
+        """Render active line markers or scatter points onto this panel.
+
+        The default implementation is a no-op.  Subclasses should override:
+
+        * :class:`LineInspectionPlot` — renders vertical dashed line markers
+          with energy/A-coefficient labels.
+        * :class:`PopulationDiagramPlot` — renders scatter points on the
+          Boltzmann diagram.
+
+        Parameters
+        ----------
+        line_data : list
+            ``(MoleculeLine, intensity, tau)`` triples.
+        active_lines : list
+            Mutable list that receives ``[line, text, scatter, info]`` entries.
+        **kwargs
+            Subclass-specific keyword arguments (e.g. *max_y*, *threshold*,
+            *color*, *molecule*, etc.).
+
+        Returns
+        -------
+        Any
+            Subclass-dependent return value (e.g. the scatter artist from
+            :class:`PopulationDiagramPlot`).
+        """
+        return None
+
+    def clear_active_lines(self, active_lines: List[Any]) -> None:
+        """Remove all active-line artists and clear *active_lines*.
+
+        The default implementation simply clears the list without removing
+        matplotlib artists.  Subclasses override this to also call
+        ``artist.remove()`` on each stored artist before clearing.
+
+        Parameters
+        ----------
+        active_lines : list
+            The mutable active-lines list to clear (same object that was
+            passed to :meth:`render_active_lines`).
+        """
+        active_lines.clear()
 
     # ------------------------------------------------------------------
     # Abstract API — subclasses must implement

@@ -796,64 +796,19 @@ class MainPlotGrid(CompositePlot):
     ) -> None:
         """Plot vertical line markers in the inspection panel.
 
-        Creates ``vlines`` + text labels on ``ax_inspection`` for each
-        molecular line in *line_data* that exceeds the intensity
-        *threshold* (as a fraction of the strongest line).
-
-        Each entry is appended to *active_lines* as
-        ``[vline_artist, text_artist, None, info_dict]``.
-
-        Parameters
-        ----------
-        line_data : list[tuple]
-            ``(MoleculeLine, intensity, tau)`` triples.
-        active_lines : list
-            Mutable list that receives ``[line, text, scatter, info]``
-            entries.
-        max_y : float
-            Scaling height for the strongest line.
-        threshold : float
-            Fraction (0-1) of max intensity below which lines are hidden.
-        color : str
-            Colour for the markers and labels.
-        molecule_name : str
-            Name of the molecule owning these lines (stored in info dict).
-        molecule_color : str
-            Color of the molecule (stored in info dict for pick handling).
+        Delegates to :meth:`LineInspectionPlot.render_active_lines` via
+        the persistent :attr:`inspection_panel` instance.
         """
-        if not line_data or self.ax_inspection is None:
+        if self.inspection_panel is None or self.ax_inspection is None:
             return
-
-        intensities = [i for _, i, _ in line_data]
-        max_intensity = max(intensities) if intensities else 1.0
-        if max_intensity <= 0:
-            return
-
-        ax = self.ax_inspection
-        for line, intensity, tau_val in line_data:
-            frac = intensity / max_intensity
-            if frac < threshold:
-                continue
-            lineheight = frac * max_y
-            if lineheight <= 0:
-                continue
-
-            vline = ax.vlines(
-                line.lam, 0, lineheight,
-                color=color, linestyle="dashed", linewidth=1, picker=True,
-            )
-            text = ax.text(
-                line.lam, lineheight,
-                f"{line.e_up:.0f},{line.a_stein:.3f}",
-                fontsize="x-small", color=color, rotation=45,
-            )
-            info = LineInspectionPlot.get_line_info(line, intensity, tau_val)
-            info["lineheight"] = lineheight
-            info["intensity_percent"] = frac * 100
-            info["molecule_name"] = molecule_name
-            info["molecule_color"] = molecule_color or color
-
-            active_lines.append([vline, text, None, info])
+        self.inspection_panel.render_active_lines(
+            line_data, active_lines,
+            max_y=max_y,
+            threshold=threshold,
+            color=color,
+            molecule_name=molecule_name,
+            molecule_color=molecule_color,
+        )
 
     def render_active_line_scatter(
         self,
@@ -866,92 +821,19 @@ class MainPlotGrid(CompositePlot):
     ) -> Any:
         """Plot scatter points for active lines on the population diagram.
 
-        Returns the :class:`PathCollection` (scatter artist) so the GUI
-        can enable pick-events on it.
+        Delegates to :meth:`PopulationDiagramPlot.render_active_lines` via
+        the persistent :attr:`pop_diagram_panel` instance.
 
-        Parameters
-        ----------
-        line_data : list[tuple]
-            ``(MoleculeLine, intensity, tau)`` triples.
-        active_lines : list
-            Mutable list — existing entries are updated in-place, new
-            entries appended.
-        molecule : Molecule
-            Active molecule (used for ``radius``, ``distance``).
-        threshold : float
-            Fraction (0-1) of max intensity below which lines are hidden.
-        color : str
-            Scatter point colour.
-
-        Returns
-        -------
-        PathCollection or None
-            The scatter artist, or *None* if nothing was plotted.
+        Returns the :class:`PathCollection` scatter artist, or *None*.
         """
-        if (
-            not line_data
-            or self.ax_popdiagram is None
-            or molecule is None
-            or c is None
-        ):
+        if self.pop_diagram_panel is None or self.ax_popdiagram is None:
             return None
-
-        intensities = [i for _, i, _ in line_data]
-        max_intensity = max(intensities) if intensities else 1.0
-        if max_intensity <= 0:
-            return None
-
-        radius = getattr(molecule, "radius", 1.0)
-        distance = getattr(molecule, "distance", 140.0)
-        area = np.pi * (radius * c.ASTRONOMICAL_UNIT_M * 1e2) ** 2
-        dist = distance * c.PARSEC_CM
-        beam_s = area / dist ** 2
-
-        e_ups: List[float] = []
-        rd_yaxs: List[float] = []
-        value_data_list: List[Dict[str, Any]] = []
-
-        for line, intensity, tau_val in line_data:
-            frac = intensity / max_intensity
-            if frac < threshold:
-                continue
-            if any(
-                x is None
-                for x in [intensity, line.a_stein, line.g_up, line.lam]
-            ):
-                continue
-
-            F = intensity * beam_s
-            freq = c.SPEED_OF_LIGHT_MICRONS / line.lam
-            rd_yax = np.log(
-                4 * np.pi * F / (line.a_stein * c.PLANCK_CONSTANT * freq * line.g_up)
-            )
-            e_ups.append(line.e_up)
-            rd_yaxs.append(rd_yax)
-
-            info = LineInspectionPlot.get_line_info(line, intensity, tau_val)
-            info["rd_yax"] = rd_yax
-            info["intensity_percent"] = frac * 100
-            value_data_list.append(info)
-
-        if not e_ups:
-            return None
-
-        ax = self.ax_popdiagram
-        sc = ax.scatter(
-            e_ups, rd_yaxs, s=30,
-            color=color, edgecolors="black", picker=True,
+        return self.pop_diagram_panel.render_active_lines(
+            line_data, active_lines,
+            molecule=molecule,
+            threshold=threshold,
+            color=color,
         )
-
-        for idx, info in enumerate(value_data_list):
-            info["_scatter_point_index"] = idx
-            if idx < len(active_lines):
-                active_lines[idx][2] = sc
-                active_lines[idx][3].update(info)
-            else:
-                active_lines.append([None, None, sc, info])
-
-        return sc
 
     # ==================================================================
     # GUI line-inspection & population-diagram rendering
@@ -1155,20 +1037,34 @@ class MainPlotGrid(CompositePlot):
             from .SpectrumPanel import SpectrumPanel as _SP
             _SP._clear_old_fit_results(ax, xmin, xmax)
 
-    def clear_active_lines(self, active_lines_list: List[Any]) -> None:
+    def clear_active_lines(self, active_lines: List[Any]) -> None:
         """Remove all active-line artists (vlines, text, scatter) and clear the list.
+
+        Overrides :meth:`BasePlot.clear_active_lines` to handle all three
+        artist types (vline, text, scatter) stored across both the
+        inspection and population-diagram panels.
 
         Parameters
         ----------
-        active_lines_list : list
+        active_lines : list
             Mutable list of ``[line_artist, text_artist, scatter_artist, info_dict]``
             entries.  The list is cleared in-place.
         """
-        for entry in active_lines_list:
-            for artist in entry[:3]:  # line, text, scatter
+        seen_scatter = set()
+        for entry in active_lines:
+            vline, text = entry[0], entry[1]
+            sc = entry[2] if len(entry) > 2 else None
+            for artist in (vline, text):
                 if artist is not None and getattr(artist, 'axes', None) is not None:
                     try:
                         artist.remove()
                     except (ValueError, AttributeError):
                         pass
-        active_lines_list.clear()
+            if sc is not None and id(sc) not in seen_scatter:
+                seen_scatter.add(id(sc))
+                if getattr(sc, 'axes', None) is not None:
+                    try:
+                        sc.remove()
+                    except (ValueError, AttributeError):
+                        pass
+        active_lines.clear()

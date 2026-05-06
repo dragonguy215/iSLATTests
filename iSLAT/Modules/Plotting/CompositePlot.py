@@ -34,7 +34,6 @@ from .BasePlot import BasePlot
 if TYPE_CHECKING:
     pass  # avoid circular imports; annotations below use string literals
 
-
 class CompositePlot(BasePlot):
     """Abstract base for composite multi-panel plot objects.
 

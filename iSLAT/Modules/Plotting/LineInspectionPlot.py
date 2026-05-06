@@ -240,6 +240,98 @@ class LineInspectionPlot(SpectrumPanel):
         return max_y
 
     # ------------------------------------------------------------------
+    # Active-lines API implementation
+    # ------------------------------------------------------------------
+    def render_active_lines(
+        self,
+        line_data: List[Tuple["MoleculeLine", float, Any]],
+        active_lines: List[Any],
+        *,
+        max_y: float = 0.1,
+        threshold: float = 0.0,
+        color: str = "green",
+        molecule_name: str = "",
+        molecule_color: str = "",
+        **kwargs,
+    ) -> None:
+        """Render vertical dashed line markers for *line_data* on this panel.
+
+        Creates ``vlines`` + text labels for each line that exceeds the
+        intensity *threshold* (as a fraction of the strongest line) and
+        appends ``[vline, text, None, info_dict]`` entries to *active_lines*.
+
+        Parameters
+        ----------
+        line_data : list[tuple]
+            ``(MoleculeLine, intensity, tau)`` triples.
+        active_lines : list
+            Mutable list that receives ``[vline, text, None, info]`` entries.
+        max_y : float
+            Scaling height for the strongest line.
+        threshold : float
+            Fraction (0-1) of max intensity below which lines are hidden.
+        color : str
+            Colour for the markers and labels.
+        molecule_name : str
+            Molecule name stored in the info dict.
+        molecule_color : str
+            Molecule colour stored in the info dict.
+        """
+        # Use the already-resolved axes directly — do NOT call _resolve_axes()
+        # here as that clears the axes and would wipe the already-rendered
+        # observed spectrum and molecule model.
+        ax = self._ax if self._ax is not None else self._external_ax
+        if not line_data or ax is None:
+            return
+
+        intensities = [i for _, i, _ in line_data]
+        max_intensity = max(intensities) if intensities else 1.0
+        if max_intensity <= 0:
+            return
+
+        for line, intensity, tau_val in line_data:
+            frac = intensity / max_intensity
+            if frac < threshold:
+                continue
+            lineheight = frac * max_y
+            if lineheight <= 0:
+                continue
+
+            vline = ax.vlines(
+                line.lam, 0, lineheight,
+                color=color, linestyle="dashed", linewidth=1, picker=True,
+            )
+            text = ax.text(
+                line.lam, lineheight,
+                f"{line.e_up:.0f},{line.a_stein:.3f}",
+                fontsize="x-small", color=color, rotation=45,
+            )
+            info = LineInspectionPlot.get_line_info(line, intensity, tau_val)
+            info["lineheight"] = lineheight
+            info["intensity_percent"] = frac * 100
+            info["molecule_name"] = molecule_name
+            info["molecule_color"] = molecule_color or color
+
+            active_lines.append([vline, text, None, info])
+
+    def clear_active_lines(self, active_lines: List[Any]) -> None:
+        """Remove vline and text artists from *active_lines* and clear the list.
+
+        Parameters
+        ----------
+        active_lines : list
+            Mutable list of ``[vline, text, scatter, info]`` entries.
+        """
+        for entry in active_lines:
+            for artist in entry[:2]:  # vline and text only
+                if artist is not None and getattr(artist, 'axes', None) is not None:
+                    try:
+                        artist.remove()
+                    except (ValueError, AttributeError):
+                        pass
+        active_lines.clear()
+
+    # ------------------------------------------------------------------
     # Line information helpers
     # ------------------------------------------------------------------
     @staticmethod
