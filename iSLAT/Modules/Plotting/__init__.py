@@ -65,9 +65,13 @@ from .MainPlotGrid import MainPlotGrid
 from .FitLinesPlotGrid import FitLinesPlotGrid
 from .PlotView import PlotView
 from .ToggleMixin import ToggleMixin
+from .PopulationDiagramContextMixin import PopulationDiagramContextMixin
+from .LineInspectionContextMixin import LineInspectionContextMixin
+from .SpectrumPanelView import SpectrumPanelView
 from .ThreePanelView import ThreePanelView
 from .FullSpectrumView import FullSpectrumView
 from .PopulationDiagramView import PopulationDiagramView
+from .LineInspectionView import LineInspectionView
 
 __all__ = [
     "BasePlot",

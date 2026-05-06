@@ -26,6 +26,7 @@ from .ToggleMixin import ToggleMixin
 from .MainPlotGrid import MainPlotGrid
 from .LineInspectionPlot import LineInspectionPlot
 from .PopulationDiagramContextMixin import PopulationDiagramContextMixin
+from .LineInspectionContextMixin import LineInspectionContextMixin
 
 if TYPE_CHECKING:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -52,7 +53,7 @@ except ImportError:
         def trace(self, *a, **k): pass
     debug_config = _Fallback()
 
-class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin):
+class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineInspectionContextMixin):
     """
     Standard 3-panel GUI view backed by a :class:`MainPlotGrid`.
 
@@ -1041,39 +1042,6 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin):
             return self._build_population_diagram_menu(pdp, canvas_widget, draw_idle)
 
         return None
-
-    def _build_line_inspection_menu(self, canvas_widget: Any) -> Any:
-        """Build the right-click menu for the line inspection panel (ax2)."""
-        try:
-            import tkinter as tk
-        except ImportError:
-            return None
-
-        islat = self._islat
-        menu = tk.Menu(canvas_widget, tearoff=0)
-
-        def _save_current_line():
-            if hasattr(islat, 'GUI') and hasattr(islat.GUI, 'top_bar'):
-                islat.GUI.top_bar.save_line(save_type="selected")
-
-        def _fit_current_line():
-            if hasattr(islat, 'GUI') and hasattr(islat.GUI, 'top_bar'):
-                islat.GUI.top_bar.fit_selected_line(deblend=False)
-
-        def _run_deblender():
-            if hasattr(islat, 'GUI') and hasattr(islat.GUI, 'top_bar'):
-                islat.GUI.top_bar.fit_selected_line(deblend=True)
-
-        def _save_all_lines_in_range():
-            if hasattr(islat, 'GUI') and hasattr(islat.GUI, 'top_bar'):
-                islat.GUI.top_bar.save_all_lines_in_range()
-
-        menu.add_command(label="Save Current Line",       command=_save_current_line)
-        menu.add_command(label="Fit Current Line",        command=_fit_current_line)
-        menu.add_command(label="Run Deblender",           command=_run_deblender)
-        menu.add_separator()
-        menu.add_command(label="Save All Lines in Range", command=_save_all_lines_in_range)
-        return menu
 
     # ------------------------------------------------------------------
     # Canvas / drawing
