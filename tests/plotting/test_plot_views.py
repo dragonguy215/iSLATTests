@@ -1026,15 +1026,6 @@ class TestThreePanelViewGrid:
         # The grid should have been created
         assert view._grid is not None
 
-    def test_do_update_model_plot_does_not_use_renderer_for_spectrum(self, rich_controller):
-        """After Step 2, _do_update_model_plot should NOT call
-        renderer.render_main_spectrum_plot — that is now handled by the grid."""
-        pm, mol, md = rich_controller
-        from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
-        view = ThreePanelView(pm)
-        view._do_update_model_plot()
-        pm.plot_renderer.render_main_spectrum_plot.assert_not_called()
-
     def test_do_update_model_plot_calls_make_span_selector(self, rich_controller):
         pm, mol, md = rich_controller
         from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView

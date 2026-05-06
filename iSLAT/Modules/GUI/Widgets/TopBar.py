@@ -733,7 +733,7 @@ class TopBar(ResizableFrame):
         try:
             self.data_field.clear()
             single_lines = self.main_plot.find_single_lines()
-            self.main_plot.plot_single_lines()
+            #self.main_plot.plot_single_lines() # method no longer exists
             for i, line in enumerate(single_lines[:lines_to_show]):  # Show first lines_to_show lines
                 self.data_field.insert_text(f"  Line {i+1}:", clear_after=False)
                 for key, value in line.items():

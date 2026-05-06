@@ -852,17 +852,6 @@ class iSLATPlot:
             debug_config.error("main_plot", f"Error in line detection: {str(e)}")
             return []
     
-    def plot_single_lines(self):
-        """Plot single lines on main plot with rendering."""
-        self.update_model_plot()
-        if not hasattr(self, 'single_lines_list') or not self.single_lines_list:
-            return
-            
-        # Extract wavelengths for batch plotting
-        wavelengths = [line['wavelength'] for line in self.single_lines_list]
-        # Delegate to PlotRenderer for plotting
-        self.plot_renderer.plot_single_lines(wavelengths)
-    
     def plot_saved_lines(self, loaded_lines=None, data_field=None):
         """Plot saved lines — delegates to the active view."""
         self.line_toggle = True
