@@ -175,11 +175,10 @@ class InteractionHandler:
             view = self.plot_manager.active_view
             grid = getattr(view, '_grid', None)
             if grid is not None:
-                return getattr(grid, '_pdp', None)
-            # Fallback: try the legacy plot_renderer path
-            return getattr(self.plot_manager.plot_renderer, '_population_diagram_plot', None)
+                return getattr(grid, 'pop_diagram_panel', None)
         except Exception:
-            return None
+            pass
+        return None
 
     def _show_population_diagram_context_menu(self, event):
         """Show a context menu on the population diagram (ax3)."""

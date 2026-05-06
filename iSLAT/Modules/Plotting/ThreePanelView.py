@@ -11,7 +11,7 @@ for all spectrum-panel rendering, mirroring how :class:`FullSpectrumView`
 composes a :class:`FullSpectrumPlot`.  The axes and canvas are still
 owned by the :class:`iSLATPlot` controller — :class:`MainPlotGrid`
 renders onto them without calling ``fig.clf()`` so that cached
-references in ``InteractionHandler`` and ``PlotRenderer`` stay valid.
+references in ``InteractionHandler`` stay valid.
 """
 
 from __future__ import annotations
@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
     from matplotlib.figure import Figure
     from matplotlib.axes import Axes
-    from .PlotRenderer import PlotRenderer
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
@@ -67,7 +66,7 @@ class ThreePanelView(ToggleMixin, PlotView):
         Parameters
         ----------
         plot_manager : iSLATPlot
-            The main controller that owns fig, canvas, ax1-3, and PlotRenderer.
+            The main controller that owns fig, canvas, ax1-3.
         """
         self._pm = plot_manager  # short alias for the controller
         self._needs_refresh: bool = True  # Set True when data changes; cleared after re-render
@@ -140,9 +139,6 @@ class ThreePanelView(ToggleMixin, PlotView):
             ax_popdiagram=self._pm.ax3,
         )
         return self._grid
-    @property
-    def _renderer(self) -> "PlotRenderer":
-        return self._pm.plot_renderer
 
     @property
     def _islat(self):
@@ -207,19 +203,16 @@ class ThreePanelView(ToggleMixin, PlotView):
         """Apply *theme* to the three-panel figure, axes, and canvas.
 
         Delegates to the controller's :meth:`_apply_plot_theming` which
-        already handles figure/axes/spine/tick colouring.  Also updates
-        the PlotRenderer and its sub-plot delegates so subsequent renders
-        pick up the new colours.
+        already handles figure/axes/spine/tick colouring.
         """
         # Keep the controller's theme reference in sync
         self._pm.theme = theme
 
-        if hasattr(self._pm, 'plot_renderer'):
-            self._pm.plot_renderer.theme = theme
-            if hasattr(self._pm.plot_renderer, '_line_inspection_plot') and self._pm.plot_renderer._line_inspection_plot is not None:
-                self._pm.plot_renderer._line_inspection_plot.theme = theme
-            if hasattr(self._pm.plot_renderer, '_population_diagram_plot') and self._pm.plot_renderer._population_diagram_plot is not None:
-                self._pm.plot_renderer._population_diagram_plot.theme = theme
+        # Propagate theme to the grid so future renders pick up the colours.
+        if self._grid is not None:
+            self._grid.theme = theme
+            if self._grid.pop_diagram_panel is not None:
+                self._grid.pop_diagram_panel.theme = theme
 
         # Restyle figure / axes / data artists
         self._pm._apply_plot_theming()
@@ -259,8 +252,14 @@ class ThreePanelView(ToggleMixin, PlotView):
         islat = self._islat
 
         if not hasattr(islat, 'molecules_dict') or len(islat.molecules_dict) == 0:
-            # No molecules — fall back to the renderer for a quick clear
-            self._renderer.clear_model_lines()
+            # No molecules — clear all molecule artists from the spectrum axes.
+            if self._grid is not None:
+                self._grid.clear_all_molecule_lines()
+            else:
+                # Grid not yet created — clear directly from ax1
+                for line in self._pm.ax1.lines[:]:
+                    if getattr(line, "_molecule_name", None) is not None:
+                        line.remove()
             self._canvas.draw_idle()
             return
 
@@ -483,7 +482,12 @@ class ThreePanelView(ToggleMixin, PlotView):
 
     def on_molecule_deleted(self, molecule_name: str) -> None:
         """A molecule was removed — clear and rebuild everything."""
-        self._renderer.clear_model_lines()
+        if self._grid is not None:
+            self._grid.clear_all_molecule_lines()
+        else:
+            for line in self._pm.ax1.lines[:]:
+                if getattr(line, "_molecule_name", None) is not None:
+                    line.remove()
 
         active_mol = getattr(self._islat, 'active_molecule', None)
         if (active_mol is not None

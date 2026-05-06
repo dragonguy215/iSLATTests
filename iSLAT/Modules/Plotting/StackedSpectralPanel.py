@@ -851,7 +851,7 @@ class StackedSpectralPanel(CompositePlot):
         )
 
     def __add__(self, other: StackedSpectralPanel) -> "CompositeStackedPanel":
-        """Syntactic sugar: ``plot_a + plot_b`` ≡ ``plot_a.stack_with(plot_b)``."""
+        """Syntactic sugar: ``plot_a + plot_b`` = ``plot_a.stack_with(plot_b)``."""
         if not isinstance(other, StackedSpectralPanel):
             return NotImplemented
         return self.stack_with(other)

@@ -389,8 +389,7 @@ class LineInspectionPlot(SpectrumPanel):
         ----------
         line_data : list of (MoleculeLine, intensity, tau)
             Line tuples as returned by
-            ``Molecule.intensity.get_lines_in_range_with_intensity()``
-            or ``PlotRenderer.get_molecule_line_data()``.
+            ``Molecule.intensity.get_lines_in_range_with_intensity()``.
 
         Returns
         -------

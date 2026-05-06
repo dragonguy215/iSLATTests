@@ -96,7 +96,6 @@ class FullSpectrumView(ToggleMixin, PlotView):
     def __init__(self, plot_manager: Any) -> None:
         self._pm = plot_manager
         self._islat = plot_manager.islat
-        self._renderer = plot_manager.plot_renderer
         self._parent_frame: Any = None
 
         # Canvas -- built lazily
@@ -488,13 +487,6 @@ class FullSpectrumView(ToggleMixin, PlotView):
 
     def _apply_selection(self, xmin: float, xmax: float) -> None:
         main_plot = self._islat.GUI.plot
-
-        if hasattr(main_plot, "plot_renderer"):
-            main_plot.plot_renderer._pop_diagram_molecule = None
-            main_plot.plot_renderer._pop_diagram_cache_key = None
-            main_plot.plot_renderer._active_scatter_collection = None
-            main_plot.plot_renderer._active_scatter_count = 0
-            main_plot.plot_renderer._active_scatter_collections = []
 
         main_plot.current_selection = (xmin, xmax)
 

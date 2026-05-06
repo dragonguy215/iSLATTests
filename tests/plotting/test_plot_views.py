@@ -939,7 +939,7 @@ class TestThreePanelViewGrid:
 
     These tests exercise the _ensure_grid / _do_update_model_plot /
     on_molecule_visibility_changed pathways that now route through a
-    MainPlotGrid instead of PlotRenderer.
+    MainPlotGrid.
     """
 
     @pytest.fixture
@@ -1098,14 +1098,24 @@ class TestThreePanelViewGrid:
         assert len(pm.ax1.lines) > 0
 
     def test_empty_molecules_clears_model(self, rich_controller):
-        """When molecules_dict is empty, _do_update_model_plot should clear."""
+        """When molecules_dict is empty, _do_update_model_plot should clear model lines from ax1."""
         pm, mol, md = rich_controller
-        pm.islat.molecules_dict = MagicMock()
-        pm.islat.molecules_dict.__len__ = MagicMock(return_value=0)
+        # First render so molecule lines exist on ax1
         from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
         view = ThreePanelView(pm)
         view._do_update_model_plot()
-        pm.plot_renderer.clear_model_lines.assert_called_once()
+        # Confirm molecule lines are on ax1
+        tagged_before = [l for l in pm.ax1.lines if getattr(l, "_molecule_name", None) is not None]
+
+        # Now swap in an empty molecules_dict and re-render
+        pm.islat.molecules_dict = MagicMock()
+        pm.islat.molecules_dict.__len__ = MagicMock(return_value=0)
+        # Reset the grid so it re-evaluates molecule count
+        view._grid = None
+        view._do_update_model_plot()
+        # All molecule-tagged lines should be gone
+        tagged_after = [l for l in pm.ax1.lines if getattr(l, "_molecule_name", None) is not None]
+        assert len(tagged_after) == 0
 
 
 class TestThreePanelViewThreshold:

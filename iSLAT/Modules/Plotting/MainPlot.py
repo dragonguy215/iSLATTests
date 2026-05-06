@@ -10,7 +10,6 @@ from typing import Optional, List, Tuple, Any, TYPE_CHECKING
 
 import iSLAT.Constants as c
 
-from .PlotRenderer import PlotRenderer
 from .BasePlot import BasePlot
 from .MainPlotGrid import MainPlotGrid
 from .PlotView import PlotView
@@ -55,7 +54,7 @@ class iSLATPlot:
     population diagrams, and interactive features.
     
     Architecture:
-    - PlotRenderer: Handles matplotlib rendering and visual updates
+    - MainPlotGrid / ThreePanelView: Handles matplotlib rendering via borrowed-axes
     - InteractionHandler: Processes mouse/keyboard interactions
     - FittingEngine: Handles line fitting operations
     - LineAnalyzer: Provides line detection and analysis capabilities
@@ -102,14 +101,13 @@ class iSLATPlot:
         #self._apply_plot_theming()
 
         # Initialize the modular classes
-        self.plot_renderer = PlotRenderer(self)
         self.interaction_handler = InteractionHandler(self)
         self.fitting_engine = FittingEngine()
         self.line_analyzer = LineAnalyzer()
 
         # --- View strategy pattern ---
         # The active_view is the current rendering strategy.
-        # ThreePanelView delegates to the existing axes + PlotRenderer.
+        # ThreePanelView delegates to the existing axes via MainPlotGrid.
         # FullSpectrumView provides the self-contained multi-panel full spectrum layout.
         self._three_panel_view: PlotView = ThreePanelView(self)
         self._full_spectrum_view: PlotView = FullSpectrumView(self)
@@ -204,18 +202,25 @@ class iSLATPlot:
         """Apply theme colors to matplotlib figure, axes, data artists, and toolbar.
 
         Delegates figure/axes background and data-artist re-colouring to
-        :meth:`PlotRenderer.apply_theme_to_figure` (inherited from
-        :class:`BasePlot`) and adds GUI-specific extras on top:
+        :meth:`BasePlot.apply_theme_to_figure` via the three-panel-view’s
+        grid (if available) and adds GUI-specific extras on top:
         canvas widget background, toolbar, legend frame colouring, grid
         lines, and ``axis_text_label_color`` support.
         """
         try:
             # --- Common figure/axes/artist theming via BasePlot ----------
-            # PlotRenderer now inherits BasePlot, so it has
-            # apply_theme_to_figure().  We temporarily ensure its theme
-            # reference is in sync, then call the inherited method.
-            self.plot_renderer.theme = self.theme
-            self.plot_renderer.apply_theme_to_figure(self.fig)
+            # Obtain a BasePlot-capable object to call apply_theme_to_figure.
+            # Prefer the grid (already themed) to avoid creating a proxy.
+            grid = getattr(self._three_panel_view, '_grid', None)
+            if grid is not None:
+                grid.theme = self.theme
+                grid.apply_theme_to_figure(self.fig)
+            else:
+                # Grid not yet created — use a lightweight proxy.
+                class _ThemeProxy(BasePlot):
+                    def generate_plot(self, **kw): pass
+                proxy = _ThemeProxy(fig=self.fig, theme=self.theme)
+                proxy.apply_theme_to_figure(self.fig)
 
             # --- GUI-specific extras ------------------------------------
             # Some GUI themes define 'axis_text_label_color' which is
@@ -271,13 +276,15 @@ class iSLATPlot:
 
     @property
     def line_inspection_plot(self):
-        """Access the reusable :class:`LineInspectionPlot` delegate."""
-        return self.plot_renderer._line_inspection_plot
+        """Access the active :class:`LineInspectionPlot` delegate from the grid."""
+        grid = getattr(self._three_panel_view, '_grid', None)
+        return getattr(grid, 'inspection_panel', None)
 
     @property
     def population_diagram_plot(self):
-        """Access the reusable :class:`PopulationDiagramPlot` delegate."""
-        return self.plot_renderer._population_diagram_plot
+        """Access the active :class:`PopulationDiagramPlot` from the grid."""
+        grid = getattr(self._three_panel_view, '_grid', None)
+        return getattr(grid, 'pop_diagram_panel', None)
 
     def _register_update_callbacks(self):
         """Register callbacks to handle parameter and molecule changes"""
@@ -445,7 +452,7 @@ class iSLATPlot:
         self.active_view.on_selection(xmin, xmax)
 
     # ------------------------------------------------------------------
-    # Data-access & interaction helpers (moved from PlotRenderer)
+    # Data-access & interaction helpers
     # ------------------------------------------------------------------
 
     def get_molecule_line_data(
@@ -570,7 +577,19 @@ class iSLATPlot:
         """
         if ax is None:
             ax = self.ax1
-        self.plot_renderer.plot_fitted_saved_lines(fit_results_data, ax)
+        from .SpectrumPanel import SpectrumPanel
+        gauss_fits, fitted_waves, fitted_fluxes = fit_results_data
+        for gauss_fit, fitted_wave, fitted_flux in zip(gauss_fits, fitted_waves, fitted_fluxes):
+            if gauss_fit is None or fitted_wave is None or fitted_flux is None:
+                continue
+            lam_min = np.min(fitted_wave)
+            lam_max = np.max(fitted_wave)
+            uncertainty_sigma = getattr(self.islat, 'user_settings', {}).get('fit_line_uncertainty', 3.0)
+            SpectrumPanel.plot_gaussian_fit(
+                ax, gauss_fit, fitted_wave, fitted_flux,
+                color='lime', uncertainty_sigma=uncertainty_sigma,
+            )
+            ax.vlines([lam_min, lam_max], -2, 10, colors='lime', alpha=0.5)
 
     def on_click(self, event):
         """Handle mouse click events on the plot."""
@@ -660,8 +679,7 @@ class iSLATPlot:
         Handle molecule visibility changes by delegating to the active view.
 
         The active view handles the rendering update (lightweight artist
-        toggling in full-spectrum mode, or PlotRenderer-based update in
-        three-panel mode).  The inactive view is marked stale so it
+        toggling in full-spectrum mode.) The inactive view is marked stale so it
         re-renders with the correct visibility on next activate().
         
         Parameters
@@ -760,7 +778,7 @@ class iSLATPlot:
                 # Overlay the fit directly on the existing line inspection plot
                 # without clearing ax2 (which would destroy the active lines).
                 max_y = fitted_flux.max() if len(fitted_flux) > 0 else 0.15
-                self.plot_renderer._render_fit_results_in_line_inspection(
+                self._render_fit_results_in_line_inspection(
                     fit_result=self.fit_result, xmin=xmin, xmax=xmax, max_y=max_y,
                 )
                 self.canvas.draw_idle()
@@ -769,6 +787,89 @@ class iSLATPlot:
             debug_config.error("main_plot", f"Error in fitting: {str(e)}")
             return None
     
+    def _render_fit_results_in_line_inspection(
+        self, fit_result: Any, xmin: float, xmax: float, max_y: float,
+    ) -> None:
+        """Overlay a Gaussian fit result on the line-inspection axes (ax2)."""
+        ax2 = self.ax2
+        # Clear old fit artists that overlap with the new range
+        clear_old = True
+        try:
+            clear_old = getattr(self.islat, 'user_settings', {}).get('clear_old_fits', True)
+        except Exception:
+            pass
+        if clear_old:
+            for line in ax2.lines[:]:
+                if getattr(line, '_islat_fit_result', False) or (
+                    hasattr(line, 'get_label') and line.get_label()
+                    and ('Fit' in line.get_label() or 'Component' in line.get_label())
+                ):
+                    xd = line.get_xdata()
+                    if len(xd) > 0 and np.min(xd) <= xmax and np.max(xd) >= xmin:
+                        line.remove()
+            for coll in ax2.collections[:]:
+                if getattr(coll, '_islat_fit_result', False) or (
+                    hasattr(coll, 'get_label') and coll.get_label()
+                    and ('uncertainty' in coll.get_label().lower() or 'sigma' in coll.get_label().lower())
+                ):
+                    try:
+                        paths = coll.get_paths()
+                        if paths:
+                            bounds = paths[0].get_extents()
+                            if bounds.xmin <= xmax and bounds.xmax >= xmin:
+                                coll.remove()
+                        else:
+                            coll.remove()
+                    except Exception:
+                        coll.remove()
+        try:
+            gauss_fit, fitted_wave, fitted_flux = fit_result
+            if gauss_fit is not None and fitted_wave is not None and fitted_flux is not None:
+                fit_mask = (fitted_wave >= xmin) & (fitted_wave <= xmax)
+                if np.any(fit_mask):
+                    fit_line = ax2.plot(
+                        fitted_wave[fit_mask], fitted_flux[fit_mask],
+                        color='red', linewidth=1, label='Total Fit', linestyle='--',
+                    )[0]
+                    fit_line._islat_fit_result = True
+                    # Multi-component vs single-component
+                    if hasattr(gauss_fit, 'params') and gauss_fit.params:
+                        prefixes = {
+                            p.split('_')[0] + '_'
+                            for p in gauss_fit.params
+                            if '_' in p and p.split('_')[0].startswith('g') and p.split('_')[0][1:].isdigit()
+                        }
+                        if len(prefixes) > 1:
+                            try:
+                                components = gauss_fit.eval_components(x=fitted_wave[fit_mask])
+                                for i, prefix in enumerate(sorted(prefixes)):
+                                    if prefix in components:
+                                        comp = ax2.plot(
+                                            fitted_wave[fit_mask], components[prefix],
+                                            linestyle='--', linewidth=1,
+                                            label=f'Component {i + 1}',
+                                        )[0]
+                                        comp._islat_fit_result = True
+                            except Exception as e:
+                                debug_config.warning('main_plot', f'Could not plot fit components: {e}')
+                        else:
+                            sigma = getattr(self.islat, 'user_settings', {}).get('fit_line_uncertainty', 1.0)
+                            dely = gauss_fit.eval_uncertainty(sigma=sigma)
+                            fill = ax2.fill_between(
+                                fitted_wave, fitted_flux - dely, fitted_flux + dely,
+                                color='gray', alpha=0.3, label=r'3-$\sigma$ uncertainty band',
+                            )
+                            fill._islat_fit_result = True
+        except Exception as e:
+            debug_config.warning('main_plot', f'Could not render fit results: {e}')
+        handles, labels = ax2.get_legend_handles_labels()
+        if handles:
+            ax2.legend()
+            if hasattr(self, 'legend_toggle'):
+                leg = ax2.get_legend()
+                if leg is not None:
+                    leg.set_visible(self.legend_toggle)
+
     def save_fig(self, filename, dpi=300):
         """Save the current figure to a file."""
         try:

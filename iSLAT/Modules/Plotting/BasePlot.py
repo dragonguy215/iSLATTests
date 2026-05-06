@@ -531,8 +531,7 @@ class BasePlot(ABC):
     def _update_legend(ax: Axes) -> None:
         """Add or update the legend on *ax*, excluding invisible artists.
 
-        This static method is kept for backward compatibility with
-        :class:`PlotRenderer` and other callers that invoke it directly.
+        This static method is kept for backward compatibility with callers that invoke it directly.
         It delegates to :class:`StandardLegend`.
         """
         _fallback = StandardLegend()

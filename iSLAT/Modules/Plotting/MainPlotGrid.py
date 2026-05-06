@@ -193,8 +193,7 @@ class MainPlotGrid(CompositePlot):
         In **borrowed-axes mode** (axes were supplied to ``__init__``)
         the existing axes are simply cleared and re-rendered — the
         figure layout and axes identities are *not* touched, so cached
-        references held by ``InteractionHandler`` or ``PlotRenderer``
-        remain valid.
+        references held by ``InteractionHandler`` remain valid.
         """
         if self._borrowed_axes:
             # Borrowed mode — render onto the pre-existing axes.
@@ -662,6 +661,26 @@ class MainPlotGrid(CompositePlot):
         for line in target.lines[:]:
             if getattr(line, "_molecule_name", None) == molecule_name:
                 line.remove()
+
+    def clear_all_molecule_lines(self, ax: Optional[Axes] = None) -> None:
+        """Remove every molecule-tagged ``Line2D`` from *ax*.
+
+        Parameters
+        ----------
+        ax : Axes, optional
+            Defaults to ``ax_spectrum``.
+        """
+        target = ax if ax is not None else self.ax_spectrum
+        if target is None:
+            return
+        for line in target.lines[:]:
+            if getattr(line, "_molecule_name", None) is not None:
+                line.remove()
+
+    @property
+    def _pdp(self) -> Optional["PopulationDiagramPlot"]:
+        """Alias for :attr:`pop_diagram_panel` (used by :class:`InteractionHandler`)."""
+        return self.pop_diagram_panel
 
     def handle_molecule_visibility_change(
         self,
