@@ -17,6 +17,7 @@ import numpy as np
 
 from .PlotView import PlotView
 from .PopulationDiagramPlot import PopulationDiagramPlot
+from .PopulationDiagramContextMixin import PopulationDiagramContextMixin
 
 if TYPE_CHECKING:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -40,7 +41,7 @@ try:
 except ImportError:
     FigureCanvasTkAgg = None
 
-class PopulationDiagramView(PlotView):
+class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
     """
     Standalone population-diagram view.
 
@@ -71,6 +72,8 @@ class PopulationDiagramView(PlotView):
 
         # Pick-event cid so we can disconnect on deactivate
         self._pick_cid: Optional[int] = None
+        # Right-click event cid on our own canvas
+        self._right_click_cid: Optional[int] = None
 
     # ==================================================================
     # Internal helpers
@@ -134,10 +137,20 @@ class PopulationDiagramView(PlotView):
         if self._canvas is not None:
             if self._fig is not None and self._canvas.figure is self._fig:
                 return
+            # Disconnect old event before destroying
+            if self._right_click_cid is not None:
+                try:
+                    self._canvas.mpl_disconnect(self._right_click_cid)
+                except Exception:
+                    pass
+                self._right_click_cid = None
             self._canvas.get_tk_widget().destroy()
             self._canvas = None
         if self._fig is not None and FigureCanvasTkAgg is not None and self._parent_frame is not None:
             self._canvas = FigureCanvasTkAgg(self._fig, master=self._parent_frame)
+            self._right_click_cid = self._canvas.mpl_connect(
+                'button_press_event', self._on_canvas_button_press
+            )
 
     def _apply_theme_to_fig(self) -> None:
         """Apply the controller's current theme to the owned figure."""
@@ -181,19 +194,58 @@ class PopulationDiagramView(PlotView):
 
         self.apply_theme(self._pm.theme)
 
+        # Register view-specific controls with the ControlBus
+        self._register_control_fields()
+
         if self._canvas is not None:
             self._canvas.get_tk_widget().pack(
                 fill="both", expand=True, padx=0, pady=0
             )
             self._canvas.draw_idle()
 
+    def _on_canvas_button_press(self, event) -> None:
+        """Handle button-press events on the view's own canvas."""
+        if event.button != 3:
+            return
+        if self._canvas is None:
+            return
+        try:
+            canvas_widget = self._canvas.get_tk_widget()
+        except Exception:
+            return
+        menu = self.build_context_menu(event, canvas_widget)
+        if menu is None:
+            return
+        try:
+            x_root = canvas_widget.winfo_rootx() + int(event.x)
+            y_root = canvas_widget.winfo_rooty() + int(canvas_widget.winfo_height() - event.y)
+            menu.tk_popup(x_root, y_root)
+        except Exception:
+            pass
+        finally:
+            menu.grab_release()
+
     def deactivate(self) -> None:
         """Unpack the canvas from its parent frame."""
+        # Unregister all ControlBus fields this view registered
+        bus = getattr(self._pm, 'control_bus', None)
+        if bus is not None:
+            bus.unregister_owner(self)
+
         if self._canvas is not None:
             try:
                 self._canvas.get_tk_widget().pack_forget()
             except Exception:
                 pass
+
+    # ==================================================================
+    # PlotView — interaction context
+    # ==================================================================
+
+    def build_context_menu(self, event: Any, canvas_widget: Any) -> Any:
+        """Delegate to the shared population-diagram context menu builder."""
+        draw_idle = self._canvas.draw_idle if self._canvas is not None else lambda: None
+        return self._build_population_diagram_menu(self._plot, canvas_widget, draw_idle)
 
     # ==================================================================
     # PlotView — theme

@@ -294,6 +294,36 @@ class PlotView(ABC):
         return None
 
     # ------------------------------------------------------------------
+    # Interaction context
+    # ------------------------------------------------------------------
+    def build_context_menu(self, event: Any, canvas_widget: Any) -> Optional[Any]:
+        """Build and return a ``tk.Menu`` for a right-click at *event*, or ``None``.
+
+        The default returns ``None`` (no context menu).  Views that provide
+        a right-click menu should override this and return a populated
+        ``tk.Menu``.  The caller (:class:`InteractionHandler`) is responsible
+        for positioning and displaying the menu via ``menu.tk_popup(x, y)``.
+
+        Parameters
+        ----------
+        event :
+            The matplotlib ``MouseEvent`` that triggered the right-click.
+        canvas_widget :
+            The Tk widget backing the active canvas (used to anchor the menu
+            and compute screen coordinates).
+        """
+        return None
+
+    def _register_control_fields(self) -> None:
+        """Register this view's :class:`ControlField` objects on the :class:`ControlBus`.
+
+        Called from :meth:`activate`.  The default is a no-op.  Views that
+        expose view-specific controls (e.g. :class:`FullSpectrumView`'s
+        n-panels entry) should override this and call
+        ``bus.unregister_owner(self)`` in :meth:`deactivate`.
+        """
+
+    # ------------------------------------------------------------------
     # Canvas / drawing
     # ------------------------------------------------------------------
     @abstractmethod

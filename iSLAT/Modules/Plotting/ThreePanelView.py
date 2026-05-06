@@ -25,6 +25,7 @@ from .BasePlot import BasePlot
 from .ToggleMixin import ToggleMixin
 from .MainPlotGrid import MainPlotGrid
 from .LineInspectionPlot import LineInspectionPlot
+from .PopulationDiagramContextMixin import PopulationDiagramContextMixin
 
 if TYPE_CHECKING:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -51,7 +52,7 @@ except ImportError:
         def trace(self, *a, **k): pass
     debug_config = _Fallback()
 
-class ThreePanelView(ToggleMixin, PlotView):
+class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin):
     """
     Standard 3-panel GUI view backed by a :class:`MainPlotGrid`.
 
@@ -167,6 +168,9 @@ class ThreePanelView(ToggleMixin, PlotView):
         """Show the original 3-panel canvas and refresh."""
         self._canvas.get_tk_widget().pack(fill="both", expand=True, padx=0, pady=0)
 
+        # Register view-specific controls with the ControlBus
+        self._register_control_fields()
+
         # Register comparison-molecule change callback once
         if not self._comparison_callback_registered:
             islat = self._islat
@@ -195,6 +199,11 @@ class ThreePanelView(ToggleMixin, PlotView):
     def deactivate(self) -> None:
         """Hide the original canvas."""
         self._canvas.get_tk_widget().pack_forget()
+
+        # Unregister all fields this view registered across all surfaces
+        bus = getattr(self._pm, 'control_bus', None)
+        if bus is not None:
+            bus.unregister_owner(self)
 
     # ------------------------------------------------------------------
     # Theme
@@ -1011,6 +1020,60 @@ class ThreePanelView(ToggleMixin, PlotView):
             # Re-run the line inspection / population diagram
             self.on_selection(xmin, xmax)
         self._canvas.draw_idle()
+
+    # ------------------------------------------------------------------
+    # Interaction context
+    # ------------------------------------------------------------------
+
+    def build_context_menu(self, event: Any, canvas_widget: Any) -> Any:
+        """Return a ``tk.Menu`` appropriate for the right-clicked axes, or ``None``."""
+        try:
+            import tkinter as tk
+        except ImportError:
+            return None
+
+        if event.inaxes == self.ax2:
+            return self._build_line_inspection_menu(canvas_widget)
+
+        if event.inaxes == self.ax3:
+            pdp = getattr(self._grid, 'pop_diagram_panel', None) if self._grid is not None else None
+            draw_idle = self._pm.canvas.draw_idle
+            return self._build_population_diagram_menu(pdp, canvas_widget, draw_idle)
+
+        return None
+
+    def _build_line_inspection_menu(self, canvas_widget: Any) -> Any:
+        """Build the right-click menu for the line inspection panel (ax2)."""
+        try:
+            import tkinter as tk
+        except ImportError:
+            return None
+
+        islat = self._islat
+        menu = tk.Menu(canvas_widget, tearoff=0)
+
+        def _save_current_line():
+            if hasattr(islat, 'GUI') and hasattr(islat.GUI, 'top_bar'):
+                islat.GUI.top_bar.save_line(save_type="selected")
+
+        def _fit_current_line():
+            if hasattr(islat, 'GUI') and hasattr(islat.GUI, 'top_bar'):
+                islat.GUI.top_bar.fit_selected_line(deblend=False)
+
+        def _run_deblender():
+            if hasattr(islat, 'GUI') and hasattr(islat.GUI, 'top_bar'):
+                islat.GUI.top_bar.fit_selected_line(deblend=True)
+
+        def _save_all_lines_in_range():
+            if hasattr(islat, 'GUI') and hasattr(islat.GUI, 'top_bar'):
+                islat.GUI.top_bar.save_all_lines_in_range()
+
+        menu.add_command(label="Save Current Line",       command=_save_current_line)
+        menu.add_command(label="Fit Current Line",        command=_fit_current_line)
+        menu.add_command(label="Run Deblender",           command=_run_deblender)
+        menu.add_separator()
+        menu.add_command(label="Save All Lines in Range", command=_save_all_lines_in_range)
+        return menu
 
     # ------------------------------------------------------------------
     # Canvas / drawing
