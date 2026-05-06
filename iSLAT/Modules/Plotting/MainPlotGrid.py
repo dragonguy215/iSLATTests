@@ -751,8 +751,10 @@ class MainPlotGrid(CompositePlot):
         ax = self.ax_spectrum
         if ax is None:
             return
-        # Remove old summed fill
-        self._clear_tagged_artists(ax, "_islat_summed", lines=False)
+
+        # Remove old summed fill via BasePlot static helper
+        from .BasePlot import BasePlot
+        BasePlot._clear_tagged_artists(ax, "_islat_summed", lines=False)
 
         if self.molecules is None:
             return
@@ -761,7 +763,20 @@ class MainPlotGrid(CompositePlot):
                 self.wave_data_obs, visible_only=True,
             )
             if s_wave is not None and len(s_flux) > 0 and np.any(s_flux > 0):
-                self._plot_summed_spectrum(ax, s_wave, s_flux, deduplicate=True)
+                # Delegate to SpectrumPanel which owns _plot_summed_spectrum
+                if self.spectrum_panel is not None:
+                    self.spectrum_panel._plot_summed_spectrum(
+                        ax, s_wave, s_flux, deduplicate=True,
+                    )
+                else:
+                    # Fallback: minimal inline fill (spectrum_panel not yet created)
+                    fill_color = self._get_theme_value("summed_spectra_color", "lightgray")
+                    fill = ax.fill_between(
+                        s_wave, 0, s_flux,
+                        color=fill_color, alpha=1.0, label="Sum",
+                        zorder=self._get_theme_value("zorder_summed", 1),
+                    )
+                    fill._islat_summed = True
         except Exception:
             pass
 
