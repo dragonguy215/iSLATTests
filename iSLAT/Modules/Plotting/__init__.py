@@ -67,6 +67,7 @@ from .PlotView import PlotView
 from .ToggleMixin import ToggleMixin
 from .ThreePanelView import ThreePanelView
 from .FullSpectrumView import FullSpectrumView
+from .PopulationDiagramView import PopulationDiagramView
 
 __all__ = [
     "BasePlot",
@@ -92,6 +93,7 @@ __all__ = [
     "ToggleMixin",
     "ThreePanelView",
     "FullSpectrumView",
+    "PopulationDiagramView",
     "ResidualSpectrumPlot",
     "OpticalDepthPanel",
     "OpticalDepthSpectrumPlot",

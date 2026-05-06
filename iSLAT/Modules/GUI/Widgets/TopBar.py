@@ -196,6 +196,27 @@ class TopBar(ResizableFrame):
             "Display Full Spectrum (Ctrl+F)":   "Open the full combined model spectrum\nin a separate window.",
         })
 
+        # ── Views dropdown ─────────────────────────────────────────────
+        views_drpwn = create_menu_btn(self.button_frame, self.theme, "Views", 0, 2)
+        views_menu = tk.Menu(views_drpwn, tearoff=0,
+            bg=btn_theme.get("background", "lightgray"),
+            fg=self.theme.get("foreground", "#F0F0F0"),
+            activebackground=btn_theme.get("active_background", "gray"),
+            activeforeground=self.theme.get("foreground", "#F0F0F0"),
+        )
+        for _view_name in self.main_plot.views:
+            views_menu.add_command(
+                label=_view_name,
+                command=lambda n=_view_name: self.main_plot.switch_view(n),
+            )
+        views_drpwn.config(menu=views_menu)
+        MenuToolTip(views_menu, {
+            "Three Panel":        "Standard 3-panel layout:\nfull spectrum, line inspection,\nand population diagram.",
+            "Full Spectrum":      "Multi-panel full-spectrum view\nshowing the entire wavelength range.",
+            "Population Diagram": "Standalone Boltzmann / rotation\ndiagram for the active molecule.",
+        })
+        # ──────────────────────────────────────────────────────────────
+
         saved_lines_tip = "Show saved lines\nfrom the 'Input Line List'\nKeybind: S"
         atomic_lines_tip = "Show atomic lines\nusing separation threshold\nset in the 'Line Separ.\nKeybind: A"
         #export_model_tip = "Export current\nmodels into csv files"

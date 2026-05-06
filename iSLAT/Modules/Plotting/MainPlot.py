@@ -15,6 +15,7 @@ from .MainPlotGrid import MainPlotGrid
 from .PlotView import PlotView
 from .ThreePanelView import ThreePanelView
 from .FullSpectrumView import FullSpectrumView
+from .PopulationDiagramView import PopulationDiagramView
 from iSLAT.Modules.DataTypes.Molecule import Molecule
 from iSLAT.Modules.GUI.InteractionHandler import InteractionHandler
 from iSLAT.Modules.DataProcessing.FittingEngine import FittingEngine
@@ -111,8 +112,17 @@ class iSLATPlot:
         # FullSpectrumView provides the self-contained multi-panel full spectrum layout.
         self._three_panel_view: PlotView = ThreePanelView(self)
         self._full_spectrum_view: PlotView = FullSpectrumView(self)
+        self._population_diagram_view: PlotView = PopulationDiagramView(self)
         self.active_view: PlotView = self._three_panel_view
         self.is_full_spectrum: bool = False
+
+        # Ordered dict of all switchable views (name → PlotView).
+        # The order determines the order shown in the Views dropdown.
+        self._views: dict = {
+            "Three Panel": self._three_panel_view,
+            "Full Spectrum": self._full_spectrum_view,
+            "Population Diagram": self._population_diagram_view,
+        }
 
         # View-change callbacks — notified when active_view switches
         self._view_change_callbacks: list = []
@@ -265,6 +275,54 @@ class iSLATPlot:
         except Exception as e:
             debug_config.error("main_plot", f"Could not apply plot theming: {e}")
     
+    # ------------------------------------------------------------------
+    # View registry — lets external callers enumerate and switch views
+    # ------------------------------------------------------------------
+    @property
+    def views(self) -> dict:
+        """Return an ordered ``{name: PlotView}`` mapping of all registered views."""
+        return self._views
+
+    @property
+    def active_view_name(self) -> str:
+        """Return the display name of the currently active view."""
+        for name, view in self._views.items():
+            if view is self.active_view:
+                return name
+        return "Three Panel"
+
+    def switch_view(self, view_name: str) -> None:
+        """Switch to the named view, deactivating the current one.
+
+        Parameters
+        ----------
+        view_name : str
+            One of the keys in :attr:`views`
+            (e.g. ``"Three Panel"``, ``"Full Spectrum"``,
+            ``"Population Diagram"``).
+        """
+        if view_name not in self._views:
+            debug_config.warning(
+                "main_plot", f"switch_view: unknown view '{view_name}'",
+            )
+            return
+        target = self._views[view_name]
+        if target is self.active_view:
+            return
+
+        old_view = self.active_view
+        old_view.deactivate()
+
+        self.active_view = target
+
+        # Keep is_full_spectrum in sync so existing callers still work
+        self.is_full_spectrum = (target is self._full_spectrum_view)
+
+        target.activate(self.parent_frame)
+        self._notify_view_change(old_view, target)
+
+        debug_config.info("main_plot", f"switch_view: active view → '{view_name}'")
+
     # ------------------------------------------------------------------
     # Backward-compatibility property for external code that still
     # references full_spectrum_plot directly.
