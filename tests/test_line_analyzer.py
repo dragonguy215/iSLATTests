@@ -147,11 +147,14 @@ class TestFindSingleLines:
 
 
 # ============================================================================
-# flux_integral (static method)
+# flux_integral (standalone function in spectral_utils)
 # ============================================================================
 
+from iSLAT.Modules.DataProcessing.spectral_utils import flux_integral
+
+
 class TestFluxIntegral:
-    """Tests for the static flux_integral method."""
+    """Tests for flux_integral from spectral_utils."""
 
     def test_zero_flux_returns_zero(self):
         """Zero flux should give zero integral."""
@@ -159,7 +162,7 @@ class TestFluxIntegral:
         flux = np.zeros_like(lam)
         err = np.ones_like(lam) * 1e-18
 
-        result, err_result = LineAnalyzer.flux_integral(lam, flux, err, 12.0, 18.0)
+        result, err_result = flux_integral(lam, flux, err, 12.0, 18.0)
         assert result == pytest.approx(0.0, abs=1e-30)
 
     def test_no_overlap_returns_zero(self):
@@ -168,18 +171,17 @@ class TestFluxIntegral:
         flux = np.ones_like(lam)
         err = np.ones_like(lam) * 0.01
 
-        result, err_result = LineAnalyzer.flux_integral(lam, flux, err, 25.0, 30.0)
+        result, err_result = flux_integral(lam, flux, err, 25.0, 30.0)
         assert result == 0.0
         assert err_result == 0.0
 
     def test_integral_sign(self):
-        """Positive flux should generally produce a flux integral (sign depends on convention)."""
+        """Positive flux should produce a non-zero flux integral (converts to erg/s/cm^2)."""
         lam = np.linspace(10, 20, 1000)
         flux = np.ones_like(lam) * 1.0  # 1 Jy constant
         err = np.ones_like(lam) * 0.1
 
-        result, err_result = LineAnalyzer.flux_integral(lam, flux, err, 12.0, 18.0)
-        # The method converts to erg/s/cm^2 — just check it's non-zero
+        result, err_result = flux_integral(lam, flux, err, 12.0, 18.0)
         assert result != 0.0
 
     def test_null_error_returns_zero_error(self):
@@ -187,7 +189,7 @@ class TestFluxIntegral:
         lam = np.linspace(10, 20, 500)
         flux = np.ones_like(lam)
 
-        result, err_result = LineAnalyzer.flux_integral(lam, flux, None, 12.0, 18.0)
+        result, err_result = flux_integral(lam, flux, None, 12.0, 18.0)
         assert err_result == 0.0
 
     def test_single_point_returns_zero(self):
@@ -196,7 +198,7 @@ class TestFluxIntegral:
         flux = np.array([1.0])
         err = np.array([0.1])
 
-        result, err_result = LineAnalyzer.flux_integral(lam, flux, err, 14.0, 16.0)
+        result, err_result = flux_integral(lam, flux, err, 14.0, 16.0)
         assert result == 0.0
         assert err_result == 0.0
 
@@ -206,8 +208,8 @@ class TestFluxIntegral:
         flux = np.ones_like(lam) * 1.0
         err = np.ones_like(lam) * 0.1
 
-        narrow_result, _ = LineAnalyzer.flux_integral(lam, flux, err, 14.0, 16.0)
-        wide_result, _ = LineAnalyzer.flux_integral(lam, flux, err, 12.0, 18.0)
+        narrow_result, _ = flux_integral(lam, flux, err, 14.0, 16.0)
+        wide_result, _ = flux_integral(lam, flux, err, 12.0, 18.0)
         assert abs(wide_result) > abs(narrow_result)
 
 

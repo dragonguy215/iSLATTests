@@ -11,6 +11,7 @@ import pytest
 from matplotlib.figure import Figure as MplFigure
 
 from iSLAT.Modules.Plotting import BasePlot, DEFAULT_THEME
+from iSLAT.Modules.Plotting.SpectrumPanel import SpectrumPanel
 
 from tests.plotting import ConcreteSpectralPanel, make_wave_flux, make_atomic_lines, make_line_list
 
@@ -126,11 +127,12 @@ class TestClearTaggedArtists:
         plt.close(fig)
 
 
-class TestBasePlotRenderingHelpers:
-    """_plot_observed_spectrum, _plot_summed_spectrum, annotations."""
+class TestSpectrumPanelRenderingHelpers:
+    """SpectrumPanel concrete rendering helpers: _plot_observed_spectrum,
+    _plot_summed_spectrum."""
 
     def test_plot_observed_spectrum(self):
-        panel = ConcreteSpectralPanel(
+        panel = SpectrumPanel(
             np.arange(5.0), np.ones(5), 0.0, 4.0,
         )
         panel.generate_plot()
@@ -141,7 +143,7 @@ class TestBasePlotRenderingHelpers:
         panel.close()
 
     def test_plot_observed_spectrum_with_error(self):
-        panel = ConcreteSpectralPanel(
+        panel = SpectrumPanel(
             np.arange(5.0), np.ones(5), 0.0, 4.0,
         )
         panel.generate_plot()
@@ -152,7 +154,7 @@ class TestBasePlotRenderingHelpers:
         panel.close()
 
     def test_plot_observed_spectrum_deduplicate(self):
-        panel = ConcreteSpectralPanel(
+        panel = SpectrumPanel(
             np.arange(5.0), np.ones(5), 0.0, 4.0,
         )
         panel.generate_plot()
@@ -169,7 +171,7 @@ class TestBasePlotRenderingHelpers:
         panel.close()
 
     def test_plot_summed_spectrum(self):
-        panel = ConcreteSpectralPanel(
+        panel = SpectrumPanel(
             np.arange(5.0), np.ones(5), 0.0, 4.0,
         )
         panel.generate_plot()
@@ -182,7 +184,7 @@ class TestBasePlotRenderingHelpers:
         panel.close()
 
     def test_plot_summed_spectrum_empty_data(self):
-        panel = ConcreteSpectralPanel(
+        panel = SpectrumPanel(
             np.arange(5.0), np.ones(5), 0.0, 4.0,
         )
         panel.generate_plot()

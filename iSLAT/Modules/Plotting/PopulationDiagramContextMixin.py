@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-
 class PopulationDiagramContextMixin:
     """Mixin that supplies the population-diagram right-click menu and dialogs.
 

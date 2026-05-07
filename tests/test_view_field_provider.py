@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Tests for the dynamic ControlPanel / PlotView field-provider protocol.
+"""Tests for the ControlBus / ControlField view-registration protocol.
 
 Covers:
-  - PlotView.get_view_fields() / get_display_range_binding() default behaviour
-  - ThreePanelView inherits defaults (empty fields, None binding)
-  - FullSpectrumView provides n_panels field and display-range binding
+  - PlotView._register_control_fields() default is a no-op
+  - ThreePanelView does not register any fields (no bus present)
+  - FullSpectrumView registers an n_panels EntryField and a
+    DisplayRangeField on the control_panel surface
+  - ControlBus routes registrations to the correct surface
+  - ControlBus.unregister_owner removes all fields across surfaces
+  - FullSpectrumView getters/setters for n_panels and display range
+    delegate to the composed FullSpectrumPlot
   - iSLATPlot view-change callback infrastructure
-  - ControlPanel._rebuild_view_fields() / _on_view_changed()
-  - ControlPanel._update_display_range() binding routing
 """
 
 import matplotlib
@@ -15,11 +18,14 @@ matplotlib.use("Agg")
 
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
-import iSLAT.Constants as c
 from iSLAT.Modules.Plotting.PlotView import PlotView
 from iSLAT.Modules.Plotting.FullSpectrumPlot import FullSpectrumPlot
+from iSLAT.Modules.GUI.ControlField import (
+    EntryField, DisplayRangeField, ToggleField,
+)
+from iSLAT.Modules.GUI.ControlSurface import ControlBus, ControlSurface
 
 
 # ======================================================================
@@ -33,7 +39,6 @@ def _make_wave_flux(n=200, start=4.9, end=28.0):
 
 
 def _make_mock_islat():
-    """Build a mock iSLAT class with the minimum attributes needed."""
     islat = MagicMock()
     islat.display_range = (4.9, 5.9)
     islat._display_range = (4.9, 5.9)
@@ -46,7 +51,6 @@ def _make_mock_islat():
 
 
 def _make_mock_plot_manager(islat=None):
-    """Build a mock iSLATPlot (plot_manager) for FullSpectrumView."""
     if islat is None:
         islat = _make_mock_islat()
     pm = MagicMock()
@@ -58,27 +62,35 @@ def _make_mock_plot_manager(islat=None):
         "summed": True,
         "legend": True,
         "show_residuals": False,
-        "current_selection": None,
     }
-    pm.plot_renderer = MagicMock()
     pm.canvas = MagicMock()
     pm.ax1 = MagicMock()
     pm.ax2 = MagicMock()
     pm.ax3 = MagicMock()
-    # View-change callbacks (simulates MainPlot after Phase 1)
+    pm.control_bus = None  # no bus wired by default
     pm._view_change_callbacks = []
     return pm
 
 
+class _NoopSurface(ControlSurface):
+    """Headless ControlSurface that records rebuild calls without creating widgets."""
+
+    def __init__(self):
+        super().__init__()
+        self.rebuild_count = 0
+
+    def _rebuild(self):
+        self.rebuild_count += 1
+
+
 # ======================================================================
-# PlotView ABC default protocol
+# PlotView ABC — _register_control_fields default
 # ======================================================================
 
-class TestPlotViewProtocol:
-    """PlotView ABC provides default get_view_fields / get_display_range_binding."""
+class TestPlotViewRegisterFields:
+    """PlotView._register_control_fields() default is a no-op."""
 
-    def test_get_view_fields_default_returns_empty_list(self):
-        # Create a minimal concrete subclass
+    def test_register_control_fields_is_noop(self):
         class StubView(PlotView):
             def activate(self, pf): ...
             def deactivate(self): ...
@@ -101,63 +113,144 @@ class TestPlotViewProtocol:
             def get_figure(self): ...
 
         view = StubView()
-        assert view.get_view_fields() == []
-
-    def test_get_display_range_binding_default_returns_none(self):
-        class StubView(PlotView):
-            def activate(self, pf): ...
-            def deactivate(self): ...
-            def update_model_plot(self, *a, **k): ...
-            def on_molecule_visibility_changed(self, *a, **k): ...
-            def on_selection(self, xmin, xmax): ...
-            def clear_selection(self): ...
-            def clear_active_lines(self): ...
-            def on_active_molecule_changed(self, new_molecule=None, current_selection=None): ...
-            def on_molecule_parameter_changed(self, molecule_name, parameter_name, current_selection=None): ...
-            def on_molecule_deleted(self, molecule_name): ...
-            def apply_theme(self, t): ...
-            def sync_toggle_state(self, s): ...
-            def toggle_summed_spectrum(self, v): ...
-            def toggle_legend(self, v=None): ...
-            def toggle_saved_lines(self, s, **k): ...
-            def toggle_atomic_lines(self, s): ...
-            def draw(self): ...
-            def get_canvas(self): ...
-            def get_figure(self): ...
-
-        view = StubView()
-        assert view.get_display_range_binding() is None
+        # Must not raise; returns None
+        result = view._register_control_fields()
+        assert result is None
 
 
 # ======================================================================
-# ThreePanelView — inherits protocol defaults
+# ThreePanelView — no fields registered on a wired bus
 # ======================================================================
 
-class TestThreePanelViewProtocol:
-    """ThreePanelView should return empty fields and None binding."""
+class TestThreePanelViewNoFields:
+    """ThreePanelView does not register any fields on the ControlBus."""
 
-    def test_get_view_fields_empty(self):
+    def test_no_fields_registered_when_bus_present(self):
         from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
         pm = _make_mock_plot_manager()
-        view = ThreePanelView(pm)
-        assert view.get_view_fields() == []
+        bus = ControlBus()
+        surface = _NoopSurface()
+        bus.register_surface("control_panel", surface)
+        pm.control_bus = bus
 
-    def test_get_display_range_binding_none(self):
+        view = ThreePanelView(pm)
+        view._register_control_fields()
+
+        assert surface.fields() == []
+
+    def test_deactivate_unregister_owner_is_safe(self):
         from iSLAT.Modules.Plotting.ThreePanelView import ThreePanelView
         pm = _make_mock_plot_manager()
+        bus = ControlBus()
+        surface = _NoopSurface()
+        bus.register_surface("control_panel", surface)
+        pm.control_bus = bus
+
         view = ThreePanelView(pm)
-        assert view.get_display_range_binding() is None
+        # Deactivating without any registered fields must not raise
+        bus.unregister_owner(view)
+        assert surface.fields() == []
 
 
 # ======================================================================
-# FullSpectrumView — provides n_panels field + display-range binding
+# FullSpectrumView — registers n_panels + DisplayRangeField
 # ======================================================================
 
-class TestFullSpectrumViewProtocol:
-    """FullSpectrumView.get_view_fields / get_display_range_binding."""
+class TestFullSpectrumViewControlFields:
+    """FullSpectrumView registers an EntryField for n_panels and a
+    DisplayRangeField, both on the 'control_panel' surface."""
+
+    def _make_view_with_bus(self):
+        from iSLAT.Modules.Plotting.FullSpectrumView import FullSpectrumView
+        pm = _make_mock_plot_manager()
+        bus = ControlBus()
+        cp_surface = _NoopSurface()
+        tb_surface = _NoopSurface()
+        bus.register_surface("control_panel", cp_surface)
+        bus.register_surface("top_bar", tb_surface)
+        pm.control_bus = bus
+
+        view = FullSpectrumView(pm)
+        wave, flux = _make_wave_flux()
+        plot = FullSpectrumPlot(wave_data=wave, flux_data=flux, n_panels=8)
+        view._plot = plot
+        view._canvas = MagicMock()
+        return view, pm, bus, cp_surface, tb_surface
+
+    # ------------------------------------------------------------------
+    def test_register_fields_adds_n_panels_entry(self):
+        view, pm, bus, cp_surface, tb_surface = self._make_view_with_bus()
+        view._register_control_fields()
+
+        keys = [f.key for f in cp_surface.fields()]
+        assert "n_panels" in keys
+
+    def test_n_panels_field_is_entry_field(self):
+        view, pm, bus, cp_surface, tb_surface = self._make_view_with_bus()
+        view._register_control_fields()
+
+        field = cp_surface.get_field("n_panels")
+        assert isinstance(field, EntryField)
+        assert field.datatype == "int"
+
+    def test_n_panels_field_owner_is_view(self):
+        view, pm, bus, cp_surface, tb_surface = self._make_view_with_bus()
+        view._register_control_fields()
+
+        field = cp_surface.get_field("n_panels")
+        assert field.owner is view
+
+    def test_register_fields_adds_display_range_field(self):
+        view, pm, bus, cp_surface, tb_surface = self._make_view_with_bus()
+        view._register_control_fields()
+
+        cp_keys = [f.key for f in cp_surface.fields()]
+        # There must be at least one DisplayRangeField
+        display_fields = [f for f in cp_surface.fields() if isinstance(f, DisplayRangeField)]
+        assert len(display_fields) >= 1
+
+    def test_register_fields_adds_toggle_to_top_bar(self):
+        view, pm, bus, cp_surface, tb_surface = self._make_view_with_bus()
+        view._register_control_fields()
+
+        tb_keys = [f.key for f in tb_surface.fields()]
+        assert "show_residuals" in tb_keys
+
+    def test_show_residuals_is_toggle_field(self):
+        view, pm, bus, cp_surface, tb_surface = self._make_view_with_bus()
+        view._register_control_fields()
+
+        field = tb_surface.get_field("show_residuals")
+        assert isinstance(field, ToggleField)
+
+    def test_deactivate_removes_all_owned_fields(self):
+        view, pm, bus, cp_surface, tb_surface = self._make_view_with_bus()
+        view._register_control_fields()
+
+        assert len(cp_surface.fields()) > 0 or len(tb_surface.fields()) > 0
+        bus.unregister_owner(view)
+
+        assert cp_surface.fields() == []
+        assert tb_surface.fields() == []
+
+    def test_re_register_replaces_fields(self):
+        """Calling _register_control_fields twice should not duplicate fields."""
+        view, pm, bus, cp_surface, tb_surface = self._make_view_with_bus()
+        view._register_control_fields()
+        n_after_first = len(cp_surface.fields())
+        view._register_control_fields()
+        n_after_second = len(cp_surface.fields())
+        assert n_after_second == n_after_first
+
+
+# ======================================================================
+# FullSpectrumView getter / setter helpers
+# ======================================================================
+
+class TestFullSpectrumViewFieldGettersSetters:
+    """n_panels and display-range getters/setters delegate to the composed plot."""
 
     def _make_view_with_plot(self):
-        """Create a FullSpectrumView with a real FullSpectrumPlot attached."""
         from iSLAT.Modules.Plotting.FullSpectrumView import FullSpectrumView
         pm = _make_mock_plot_manager()
         view = FullSpectrumView(pm)
@@ -167,67 +260,54 @@ class TestFullSpectrumViewProtocol:
         view._canvas = MagicMock()
         return view, plot
 
-    def test_get_view_fields_returns_n_panels_descriptor(self):
-        view, plot = self._make_view_with_plot()
-        fields = view.get_view_fields()
-        assert len(fields) == 1
-        desc = fields[0]
-        assert desc["key"] == "n_panels"
-        assert desc["datatype"] == "int"
-        assert desc["default"] == 8
-        assert callable(desc["getter"])
-        assert callable(desc["setter"])
-
     def test_n_panels_getter_reads_from_plot(self):
         view, plot = self._make_view_with_plot()
-        fields = view.get_view_fields()
-        assert fields[0]["getter"]() == 8
+        assert view._get_n_panels() == 8
 
     def test_n_panels_setter_updates_plot(self):
         view, plot = self._make_view_with_plot()
-        fields = view.get_view_fields()
-        setter = fields[0]["setter"]
         with patch.object(plot, 'generate_plot'):
-            setter(5)
+            view._set_n_panels(5)
         assert plot.n_panels == 5
 
-    def test_get_display_range_binding_not_none(self):
+    def test_n_panels_setter_clamps_below_one(self):
         view, plot = self._make_view_with_plot()
-        binding = view.get_display_range_binding()
-        assert binding is not None
-        assert "getter" in binding
-        assert "setter" in binding
+        with patch.object(plot, 'generate_plot'):
+            view._set_n_panels(0)
+        assert plot.n_panels == 1
+
+    def test_n_panels_setter_noop_when_plot_none(self):
+        from iSLAT.Modules.Plotting.FullSpectrumView import FullSpectrumView
+        pm = _make_mock_plot_manager()
+        view = FullSpectrumView(pm)
+        # Should not raise
+        view._set_n_panels(5)
 
     def test_display_range_getter_returns_xlim(self):
         view, plot = self._make_view_with_plot()
-        binding = view.get_display_range_binding()
-        start, end = binding["getter"]()
+        start, end = view._get_display_range()
         assert start == pytest.approx(plot._xlim_start, abs=1e-6)
         assert end == pytest.approx(plot._xlim_end, abs=1e-6)
 
     def test_display_range_setter_updates_xlim(self):
         view, plot = self._make_view_with_plot()
-        binding = view.get_display_range_binding()
         with patch.object(plot, 'generate_plot'):
-            binding["setter"](10.0, 20.0)
+            view._set_display_range(10.0, 20.0)
         assert plot._xlim_start == pytest.approx(10.0)
         assert plot._xlim_end == pytest.approx(20.0)
 
-    def test_no_binding_when_plot_is_none(self):
+    def test_display_range_getter_returns_zeros_when_no_plot(self):
         from iSLAT.Modules.Plotting.FullSpectrumView import FullSpectrumView
         pm = _make_mock_plot_manager()
         view = FullSpectrumView(pm)
-        assert view._plot is None
-        assert view.get_display_range_binding() is None
+        assert view._get_display_range() == (0.0, 0.0)
 
-    def test_view_fields_default_when_plot_is_none(self):
+    def test_display_range_setter_noop_when_no_plot(self):
         from iSLAT.Modules.Plotting.FullSpectrumView import FullSpectrumView
         pm = _make_mock_plot_manager()
         view = FullSpectrumView(pm)
-        fields = view.get_view_fields()
-        assert len(fields) == 1
-        # default should be 10 when no plot
-        assert fields[0]["default"] == 10
+        # Should not raise
+        view._set_display_range(5.0, 25.0)
 
 
 # ======================================================================
@@ -238,9 +318,7 @@ class TestViewChangeCallbacks:
     """Tests for add/remove/notify view-change callbacks on iSLATPlot."""
 
     def _make_islat_plot_mock(self):
-        """Return mock with the new callback infra spliced in."""
         pm = _make_mock_plot_manager()
-        # Splice real callback infrastructure
         pm._view_change_callbacks = []
 
         def add_cb(cb):
@@ -256,7 +334,7 @@ class TestViewChangeCallbacks:
         pm.remove_view_change_callback = remove_cb
 
         def notify(old, new):
-            for cb in pm._view_change_callbacks:
+            for cb in list(pm._view_change_callbacks):
                 cb(old, new)
         pm._notify_view_change = notify
 
@@ -303,289 +381,26 @@ class TestViewChangeCallbacks:
         assert cb1.call_count == 1
         assert cb2.call_count == 1
 
+    def test_view_change_triggers_bus_unregister_then_register(self):
+        """Simulates a view switch: old view deactivates (unregister_owner),
+        new view activates (_register_control_fields)."""
+        pm = self._make_islat_plot_mock()
+        bus = ControlBus()
+        surface = _NoopSurface()
+        bus.register_surface("control_panel", surface)
+        pm.control_bus = bus
 
-# ======================================================================
-# ControlPanel dynamic view fields
-# ======================================================================
+        owner_a = object()
+        owner_b = object()
+        field_a = EntryField("field_a", "A:", lambda: 1, lambda v: None, owner=owner_a)
+        field_b = EntryField("field_b", "B:", lambda: 2, lambda v: None, owner=owner_b)
 
-class TestControlPanelViewSwitch:
-    """Test _rebuild_view_fields via _on_view_changed."""
+        bus.register(field_a, "control_panel")
+        assert surface.get_field("field_a") is field_a
 
-    @pytest.fixture
-    def tk_root(self):
-        try:
-            import tkinter as tk
-            root = tk.Tk()
-            root.withdraw()
-            yield root
-            root.destroy()
-        except Exception:
-            pytest.skip("Tk display not available")
+        # Simulate deactivation of old view, activation of new view
+        bus.unregister_owner(owner_a)
+        bus.register(field_b, "control_panel")
 
-    @pytest.fixture
-    def control_panel(self, tk_root):
-        """Build a ControlPanel with mocked dependencies."""
-        import tkinter as tk
-        from tkinter import ttk
-        islat = _make_mock_islat()
-        islat.molecules_dict = None  # simplify — skip mol callbacks
-        pm = _make_mock_plot_manager(islat)
-        data_field = MagicMock()
-        data_field.insert_text = MagicMock()
-        font = tk.font.Font(family="TkDefaultFont", size=10)
-        # Patch the load_control_panel_fields_config to avoid file I/O
-        with patch('iSLAT.Modules.GUI.Widgets.ControlPanel.load_control_panel_fields_config', return_value={}):
-            cp = self._build_control_panel(tk_root, islat, pm, data_field, font)
-        return cp
-
-    @staticmethod
-    def _build_control_panel(root, islat, plot, data_field, font):
-        """
-        Attempt to build a ControlPanel; if it fails due to missing attrs
-        on the mock, just attach the minimum for testing view-field logic.
-        """
-        import tkinter as tk
-        from tkinter import ttk
-        try:
-            from iSLAT.Modules.GUI.Widgets.ControlPanel import ControlPanel
-            cp = ControlPanel(root, islat, plot, data_field, font)
-            return cp
-        except Exception:
-            # Fallback: create a minimal frame with just the bits we need
-            cp = ttk.Frame(root)
-            cp.islat = islat
-            cp.plot = plot
-            cp.data_field = data_field
-            cp.font = font
-            cp.updating = False
-            cp.fg_color = "black"
-            cp.bg_color = "white"
-            cp._view_fields_frame = ttk.Frame(cp)
-            cp._view_fields_frame.grid(row=0, column=0)
-            cp._view_field_entries = {}
-            cp._current_display_range_binding = None
-            cp.plot_start_var = tk.StringVar(value="4.9")
-            cp.plot_range_var = tk.StringVar(value="1.0")
-
-            # Bind methods from the real class
-            from iSLAT.Modules.GUI.Widgets.ControlPanel import ControlPanel as CP
-            import types
-            for name in ('_rebuild_view_fields', '_create_view_field_entry',
-                         '_sync_display_range_from_binding', '_restore_display_range_from_islat',
-                         '_on_view_changed',
-                         '_update_display_range', '_format_value', '_set_var'):
-                if hasattr(CP, name):
-                    setattr(cp, name, types.MethodType(getattr(CP, name), cp))
-            return cp
-
-    def test_rebuild_clears_previous_fields(self, control_panel):
-        """_rebuild_view_fields should destroy old children."""
-        cp = control_panel
-        # Seed with a dummy child
-        import tkinter as tk
-        dummy = tk.Label(cp._view_fields_frame, text="old")
-        dummy.grid(row=0, column=0)
-        assert len(cp._view_fields_frame.winfo_children()) >= 1
-
-        # Rebuild with a None view (empty)
-        cp._rebuild_view_fields(None)
-        assert len(cp._view_fields_frame.winfo_children()) == 0
-        assert cp._current_display_range_binding is None
-
-    def test_rebuild_creates_entries_from_view_fields(self, control_panel):
-        """_rebuild_view_fields should create entries for view descriptors."""
-        cp = control_panel
-        view = MagicMock()
-        view.get_view_fields.return_value = [
-            {
-                "key": "test_field",
-                "label": "Test:",
-                "default": 42,
-                "tip": None,
-                "datatype": "int",
-                "width": 5,
-                "getter": lambda: 42,
-                "setter": lambda v: None,
-            }
-        ]
-        view.get_display_range_binding.return_value = None
-
-        cp._rebuild_view_fields(view)
-        assert "test_field" in cp._view_field_entries
-        entry, var, getter, setter, dtype = cp._view_field_entries["test_field"]
-        assert var.get() == "42"
-        assert dtype == "int"
-
-    def test_rebuild_stores_display_range_binding(self, control_panel):
-        """_rebuild_view_fields should store the view's display-range binding."""
-        cp = control_panel
-        binding = {"getter": lambda: (5.0, 25.0), "setter": MagicMock()}
-        view = MagicMock()
-        view.get_view_fields.return_value = []
-        view.get_display_range_binding.return_value = binding
-
-        cp._rebuild_view_fields(view)
-        assert cp._current_display_range_binding is binding
-
-    def test_on_view_changed_calls_rebuild(self, control_panel):
-        """_on_view_changed should call _rebuild_view_fields."""
-        cp = control_panel
-        view = MagicMock()
-        view.get_view_fields.return_value = []
-        view.get_display_range_binding.return_value = None
-
-        with patch.object(type(cp), '_rebuild_view_fields', wraps=cp._rebuild_view_fields) if hasattr(type(cp), '_rebuild_view_fields') else patch.object(cp, '_rebuild_view_fields', wraps=cp._rebuild_view_fields):
-            cp._on_view_changed(MagicMock(), view)
-        # The binding should reflect the new view
-        assert cp._current_display_range_binding is None
-
-
-# ======================================================================
-# Display-range routing
-# ======================================================================
-
-class TestDisplayRangeBinding:
-    """Test _update_display_range respects the active binding."""
-
-    @pytest.fixture
-    def tk_root(self):
-        try:
-            import tkinter as tk
-            root = tk.Tk()
-            root.withdraw()
-            yield root
-            root.destroy()
-        except Exception:
-            pytest.skip("Tk display not available")
-
-    def test_routes_through_binding_setter(self, tk_root):
-        """When a binding is active, _update_display_range should call its setter."""
-        import tkinter as tk
-        setter = MagicMock()
-
-        # Minimal stand-in
-        cp = MagicMock()
-        cp.plot_start_var = tk.StringVar(tk_root, value="5.0")
-        cp.plot_range_var = tk.StringVar(tk_root, value="20.0")
-        cp._current_display_range_binding = {
-            "getter": lambda: (5.0, 25.0),
-            "setter": setter,
-        }
-        cp.islat = _make_mock_islat()
-
-        # Call the real method
-        from iSLAT.Modules.GUI.Widgets.ControlPanel import ControlPanel
-        ControlPanel._update_display_range(cp)
-        setter.assert_called_once_with(5.0, 25.0)
-
-    def test_falls_back_to_islat_display_range(self, tk_root):
-        """When no binding, _update_display_range should write islat.display_range."""
-        import tkinter as tk
-
-        cp = MagicMock()
-        cp.plot_start_var = tk.StringVar(tk_root, value="5.0")
-        cp.plot_range_var = tk.StringVar(tk_root, value="1.0")
-        cp._current_display_range_binding = None
-        cp.islat = _make_mock_islat()
-        cp.islat._display_range = None  # force update
-
-        from iSLAT.Modules.GUI.Widgets.ControlPanel import ControlPanel
-        ControlPanel._update_display_range(cp)
-        # Should have set islat.display_range
-        assert cp.islat.display_range == (5.0, 6.0)
-
-    def test_sync_display_range_from_binding(self, tk_root):
-        """_sync_display_range_from_binding should populate GUI vars from binding."""
-        import tkinter as tk
-
-        cp = MagicMock()
-        cp.plot_start_var = tk.StringVar(tk_root, value="0")
-        cp.plot_range_var = tk.StringVar(tk_root, value="0")
-        cp._current_display_range_binding = {
-            "getter": lambda: (10.0, 22.0),
-            "setter": MagicMock(),
-        }
-
-        def _set_var(var, val):
-            cp.updating = True
-            var.set(str(val))
-            cp.updating = False
-        cp._set_var = _set_var
-        cp._format_value = lambda v, p=None: str(round(v, 6))
-
-        from iSLAT.Modules.GUI.Widgets.ControlPanel import ControlPanel
-        ControlPanel._sync_display_range_from_binding(cp)
-        assert float(cp.plot_start_var.get()) == pytest.approx(10.0)
-        assert float(cp.plot_range_var.get()) == pytest.approx(12.0)
-
-    def test_restore_display_range_from_islat(self, tk_root):
-        """_restore_display_range_from_islat should reset GUI vars from islat.display_range."""
-        import tkinter as tk
-
-        cp = MagicMock()
-        cp.plot_start_var = tk.StringVar(tk_root, value="10.0")
-        cp.plot_range_var = tk.StringVar(tk_root, value="12.0")
-        cp.islat = _make_mock_islat()
-        cp.islat.display_range = (4.9, 5.9)
-
-        def _set_var(var, val):
-            cp.updating = True
-            var.set(str(val))
-            cp.updating = False
-        cp._set_var = _set_var
-        cp._format_value = lambda v, p=None: str(round(v, 6))
-
-        from iSLAT.Modules.GUI.Widgets.ControlPanel import ControlPanel
-        ControlPanel._restore_display_range_from_islat(cp)
-        assert float(cp.plot_start_var.get()) == pytest.approx(4.9)
-        assert float(cp.plot_range_var.get()) == pytest.approx(1.0)
-
-    def test_view_switch_reverts_display_range(self, tk_root):
-        """Switching from FSP (binding) to 3-panel (no binding) should revert to islat.display_range."""
-        import tkinter as tk
-        from tkinter import ttk
-
-        cp = MagicMock()
-        cp.plot_start_var = tk.StringVar(tk_root, value="4.9")
-        cp.plot_range_var = tk.StringVar(tk_root, value="1.0")
-        cp.islat = _make_mock_islat()
-        cp.islat.display_range = (4.9, 5.9)
-        cp._view_fields_frame = ttk.Frame(tk_root)
-        cp._view_field_entries = {}
-        cp._current_display_range_binding = None
-
-        def _set_var(var, val):
-            cp.updating = True
-            var.set(str(val))
-            cp.updating = False
-        cp._set_var = _set_var
-        cp._format_value = lambda v, p=None: str(round(v, 6))
-
-        from iSLAT.Modules.GUI.Widgets.ControlPanel import ControlPanel
-
-        # Simulate FSP view with binding — sets display range to wider range
-        fsp_view = MagicMock()
-        fsp_view.get_view_fields.return_value = []
-        fsp_view.get_display_range_binding.return_value = {
-            "getter": lambda: (5.0, 28.0),
-            "setter": MagicMock(),
-        }
-
-        for name in ('_rebuild_view_fields', '_create_view_field_entry',
-                      '_sync_display_range_from_binding', '_restore_display_range_from_islat'):
-            if hasattr(ControlPanel, name):
-                import types
-                setattr(cp, name, types.MethodType(getattr(ControlPanel, name), cp))
-
-        cp._rebuild_view_fields(fsp_view)
-        assert float(cp.plot_start_var.get()) == pytest.approx(5.0)
-        assert float(cp.plot_range_var.get()) == pytest.approx(23.0)
-
-        # Now switch to 3-panel view (no binding) — should revert to islat.display_range
-        three_panel_view = MagicMock()
-        three_panel_view.get_view_fields.return_value = []
-        three_panel_view.get_display_range_binding.return_value = None
-
-        cp._rebuild_view_fields(three_panel_view)
-        assert float(cp.plot_start_var.get()) == pytest.approx(4.9)
-        assert float(cp.plot_range_var.get()) == pytest.approx(1.0)
+        assert surface.get_field("field_a") is None
+        assert surface.get_field("field_b") is field_b

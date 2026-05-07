@@ -543,8 +543,8 @@ class TestMainPlotGridBorrowedAxes:
     def borrowed_setup(self):
         """Create a figure with 3 pre-existing axes and a MainPlotGrid in borrowed mode."""
         fig = plt.figure(figsize=(12, 8))
-        from iSLAT.Modules.Plotting.BasePlot import BasePlot
-        ax1, ax2, ax3 = BasePlot.create_three_panel_axes(fig)
+        from iSLAT.Modules.Plotting.MainPlotGrid import MainPlotGrid as _MPG
+        ax1, ax2, ax3 = _MPG.create_three_panel_axes(fig)
         wave, flux, err = make_wave_flux(n=200)
         yield fig, ax1, ax2, ax3, wave, flux, err
         plt.close(fig)
@@ -915,7 +915,6 @@ class TestThreePanelView:
         assert view.ax1 is mock_controller.ax1
         assert view.ax2 is mock_controller.ax2
         assert view.ax3 is mock_controller.ax3
-        assert view._renderer is mock_controller.plot_renderer
         assert view._islat is mock_controller.islat
 
     def test_has_tagged_artists(self, mock_controller):
@@ -946,10 +945,10 @@ class TestThreePanelViewGrid:
     def rich_controller(self):
         """A mock controller with real axes AND realistic islat data."""
         from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
-        from iSLAT.Modules.Plotting.BasePlot import BasePlot
+        from iSLAT.Modules.Plotting.MainPlotGrid import MainPlotGrid as _MPG
 
         fig = plt.figure(figsize=(12, 8))
-        ax1, ax2, ax3 = BasePlot.create_three_panel_axes(fig)
+        ax1, ax2, ax3 = _MPG.create_three_panel_axes(fig)
 
         wave, flux, err = make_wave_flux(n=200)
         mol = _make_test_molecule()
@@ -1129,10 +1128,10 @@ class TestThreePanelViewThreshold:
         """Controller with real axes, molecule data, and configurable
         ``user_settings`` so we can set/change the threshold."""
         from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
-        from iSLAT.Modules.Plotting.BasePlot import BasePlot
+        from iSLAT.Modules.Plotting.MainPlotGrid import MainPlotGrid as _MPG
 
         fig = plt.figure(figsize=(12, 8))
-        ax1, ax2, ax3 = BasePlot.create_three_panel_axes(fig)
+        ax1, ax2, ax3 = _MPG.create_three_panel_axes(fig)
 
         wave, flux, err = make_wave_flux(n=200)
         mol = _make_test_molecule()
