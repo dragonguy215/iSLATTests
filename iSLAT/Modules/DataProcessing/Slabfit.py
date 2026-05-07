@@ -714,9 +714,9 @@ class SlabModel:
 
         elif input_type == 'intensity':
             _INTENSITY_ATTR_MAP = {
-                'temp':  't_kin',
-                'n_mol': 'n_mol',
-                'broad': 'dv',
+                'temp':  '_t_kin',
+                'n_mol': '_n_mol',
+                'broad': '_dv',
             }
             for param_name, attr in _INTENSITY_ATTR_MAP.items():
                 if param_name in result.parameters and hasattr(src, attr):

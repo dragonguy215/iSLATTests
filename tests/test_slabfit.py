@@ -99,9 +99,12 @@ def real_molecule(mll):
 
 @pytest.fixture
 def real_intensity(mll):
-    """A real Intensity object with calc_intensity called to populate attrs."""
+    """A minimal Intensity object with pre-set parameters (no partition data needed)."""
     inten = Intensity(mll)
-    inten.calc_intensity(t_kin=500.0, n_mol=1e17, dv=1.0)
+    # Set private backing attrs directly — avoids needing HITRAN partition data
+    inten._t_kin = 500.0
+    inten._n_mol = 1e17
+    inten._dv = 1.0
     return inten
 
 
@@ -641,9 +644,9 @@ class TestUpdateSourceParameters:
     def test_molecule_calls_bulk_update(self, make_slab, mock_molecule):
         slab = make_slab(source=mock_molecule)
         result = self._make_result()
-        with patch.object(mock_molecule, 'bulk_update_parameters') as mock_bulk:
+        with patch.object(Molecule, 'bulk_update_parameters', autospec=True) as mock_bulk:
             slab.update_source_parameters(result)
-        mock_bulk.assert_called_once_with(result.parameters)
+        mock_bulk.assert_called_once_with(mock_molecule, result.parameters)
 
     def test_intensity_sets_attributes(self, tmp_path, mock_intensity):
         slab = SlabModel(
@@ -727,10 +730,10 @@ class TestDeprecatedAPI:
             parameters={'temp': 300.0, 'n_mol': 5e16, 'radius': 1.5},
             chi2_final=0.0, iterations=0, function_calls=0, convergence_flag=0,
         )
-        with patch.object(mock_molecule, 'bulk_update_parameters') as mock_bulk:
+        with patch.object(Molecule, 'bulk_update_parameters', autospec=True) as mock_bulk:
             with pytest.warns(DeprecationWarning, match="update_molecule_parameters"):
                 slab.update_molecule_parameters(result)
-        mock_bulk.assert_called_once_with(result.parameters)
+        mock_bulk.assert_called_once_with(mock_molecule, result.parameters)
 
     def test_update_molecule_parameters_with_legacy_dict(self, make_slab, mock_molecule):
         slab = make_slab(source=mock_molecule)
@@ -743,10 +746,10 @@ class TestDeprecatedAPI:
             'function_calls': 20,
             'convergence_flag': 0,
         }
-        with patch.object(mock_molecule, 'bulk_update_parameters') as mock_bulk:
+        with patch.object(Molecule, 'bulk_update_parameters', autospec=True) as mock_bulk:
             with pytest.warns(DeprecationWarning):
                 slab.update_molecule_parameters(legacy)
-        call_args = mock_bulk.call_args[0][0]
+        call_args = mock_bulk.call_args[0][1]  # [0] is self, [1] is the dict arg
         assert call_args['temp'] == pytest.approx(400.0)  # key remapped
         assert call_args['n_mol'] == pytest.approx(3e17)
         assert call_args['radius'] == pytest.approx(2.0)
@@ -787,8 +790,8 @@ class TestSaveResults:
         assert Path(output_path).exists()
         content = Path(output_path).read_text()
         assert 'temp' in content
-        assert '3.50' in content  # part of 350.0
-        assert '0.42' in content
+        assert '350' in content  # temp value formatted with :.6g
+        assert '4.2' in content  # chi2 0.42 formatted as 4.200000e-01
 
     def test_saves_legacy_json_dict(self, make_slab, tmp_path):
         slab = make_slab()
