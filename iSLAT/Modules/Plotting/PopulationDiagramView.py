@@ -132,6 +132,56 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
                 f"generate_plot failed: {exc}",
             )
 
+    def _refresh_plot(self) -> None:
+        """Re-render onto the *existing* figure/axes without destroying the canvas.
+
+        Called by :meth:`update_model_plot` and
+        :meth:`on_molecule_parameter_changed` when the view is already
+        active.  Clears only the axes content so the Tk canvas widget
+        stays packed and visible.
+        """
+        if self._fig is None:
+            # No figure yet — fall back to a full build.
+            self._build_plot()
+            return
+
+        mol = self._get_active_molecule()
+        mols = self._get_molecules()
+
+        for ax in self._fig.axes:
+            ax.clear()
+
+        ax = self._fig.axes[0] if self._fig.axes else self._fig.add_subplot(111)
+
+        if mol is not None:
+            self._plot = PopulationDiagramPlot(
+                molecule=mol, ax=ax, theme=self._pm.theme,
+            )
+        elif mols is not None and len(mols) > 0:
+            self._plot = PopulationDiagramPlot(
+                molecules=mols, ax=ax, theme=self._pm.theme,
+            )
+        else:
+            self._plot = None
+            ax.set_title("Population Diagram")
+            ax.set_xlabel("Upper energy level  $E_u$  (K)")
+            ax.set_ylabel(r"$\ln \left(\frac{4\pi F}{h\nu\,A_u\,g_u}\right)$")
+            ax.text(
+                0.5, 0.5, "No molecule selected",
+                ha="center", va="center",
+                transform=ax.transAxes,
+                color="gray", fontsize=12,
+            )
+            return
+
+        try:
+            self._plot.generate_plot()
+        except Exception as exc:
+            debug_config.warning(
+                "population_diagram_view",
+                f"_refresh_plot generate_plot failed: {exc}",
+            )
+
     def _ensure_canvas(self) -> None:
         """Build (or rebuild) the :class:`FigureCanvasTkAgg`."""
         if self._canvas is not None:
@@ -272,10 +322,10 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
         """Re-render the population diagram from current iSLAT data."""
         self._needs_refresh = True
         if self._initialised:
-            self._build_plot()
+            # Re-render in-place so the packed canvas widget stays intact.
+            self._refresh_plot()
             self._needs_refresh = False
-            self._ensure_canvas()
-            self.apply_theme(self._pm.theme)
+            self._apply_theme_to_fig()
             if self._canvas is not None:
                 self._canvas.draw_idle()
 
@@ -329,7 +379,14 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
         """Re-render when any molecule parameter changes."""
         if parameter_name == "is_visible":
             return
-        self.update_model_plot()
+        if not self._initialised or self._fig is None:
+            self._needs_refresh = True
+            return
+        # Refresh in-place — do NOT destroy and recreate the canvas.
+        self._refresh_plot()
+        self._apply_theme_to_fig()
+        if self._canvas is not None:
+            self._canvas.draw_idle()
 
     def on_molecule_deleted(self, molecule_name: str) -> None:
         """Re-render after a molecule is deleted."""

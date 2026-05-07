@@ -251,6 +251,34 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         self._do_update_model_plot()
         self._needs_refresh = False
 
+    def _update_spectrum_panel_only(self) -> None:
+        """Re-render ax1 (spectrum overview) without touching ax2 or ax3.
+
+        Used by :meth:`on_molecule_parameter_changed` so that an in-progress
+        line-inspection or population-diagram selection is preserved.
+        """
+        islat = self._islat
+        if not hasattr(islat, 'molecules_dict') or len(islat.molecules_dict) == 0:
+            return
+
+        mol_dict = islat.molecules_dict
+        wave_data_obs = islat.wave_data_original
+        wave_data = mol_dict.apply_stellar_rv(wave_data_obs)
+        islat.wave_data = wave_data
+
+        grid = self._ensure_grid()
+        grid.wave_data = wave_data
+        grid.flux_data = islat.flux_data
+        grid.molecules = mol_dict
+        grid.active_molecule = getattr(islat, 'active_molecule', None)
+        grid.error_data = getattr(islat, 'err_data', None)
+        grid.wave_data_obs = wave_data_obs
+
+        # Re-render only the spectrum panel — leaves inspection + pop panels alone.
+        grid._render_spectrum_panel()
+        grid.apply_theme_to_figure()
+        self._pm.make_span_selector()
+
     def _do_update_model_plot(self) -> None:
         """Internal full re-render via the composed :class:`MainPlotGrid`.
 
@@ -469,8 +497,8 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         molecule = mol_dict[molecule_name]
 
         if molecule.is_visible:
-            # Re-render the full spectrum panel
-            self._do_update_model_plot()
+            # Re-render only the spectrum panel (ax1) to avoid wiping ax2/ax3.
+            self._update_spectrum_panel_only()
 
         active_mol = getattr(self._islat, 'active_molecule', None)
         is_active = (active_mol is not None
@@ -481,14 +509,15 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
             for m in getattr(self._islat, 'comparison_molecules', [])
         ]
 
-        if is_active or is_comparison:
-            sel = current_selection or self._current_selection
-            if sel is not None:
-                xmin, xmax = sel
-                self.on_selection(xmin, xmax)
-            else:
+        sel = current_selection or self._current_selection
+        if sel is not None:
+            # Always restore line inspection + pop diagram after spectrum update
+            # so that ax2/ax3 are not left blank.
+            self.on_selection(*sel)
+        else:
+            if is_active or is_comparison:
                 self._render_population_diagram_base()
-                self._canvas.draw_idle()
+            self._canvas.draw_idle()
 
     def on_molecule_deleted(self, molecule_name: str) -> None:
         """A molecule was removed — clear and rebuild everything."""

@@ -208,7 +208,8 @@ class TestExtractLineInfoFromSelection:
         main_plot = MagicMock()
         main_plot.current_selection = (14.0, 16.0)
         expected_info = {'lam': 15.0, 'inten': 1e-15}
-        main_plot.selected_line = expected_info
+        # The implementation delegates to active_view.get_selected_line() first.
+        main_plot.active_view.get_selected_line.return_value = expected_info
 
         result, error = svc.extract_line_info_from_selection(main_plot, save_type="selected")
         assert result is expected_info
@@ -218,7 +219,8 @@ class TestExtractLineInfoFromSelection:
         svc = LineSaveService()
         main_plot = MagicMock()
         main_plot.current_selection = (14.0, 16.0)
-        main_plot.selected_line = None
+        # Return None from active_view so the fallback path is exercised.
+        main_plot.active_view.get_selected_line.return_value = None
         main_plot.flux_integral.return_value = (1e-15, 1e-17)
 
         wave = np.linspace(10, 20, 500)
