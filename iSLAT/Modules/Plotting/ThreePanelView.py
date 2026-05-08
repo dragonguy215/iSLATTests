@@ -703,6 +703,83 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         if picked_value:
             self.selected_line = picked_value
             self._display_line_info(picked_value)
+
+            # Shift+click on a scatter point → trigger a line-inspection
+            # selection centred on the picked wavelength, exactly as if the
+            # user had drawn a span in the full-spectrum view.
+            mouse_event = getattr(event, 'mouseevent', None)
+            key = getattr(mouse_event, 'key', None) if mouse_event is not None else None
+            is_shift = key is not None and 'shift' in str(key).lower()
+            artist_axes = getattr(event.artist, 'axes', None)
+            is_scatter_pick = (
+                hasattr(event.artist, 'get_offsets')
+                and artist_axes is self.ax3
+            )
+            if is_shift and is_scatter_pick:
+                lam = picked_value.get('lam')
+                if lam is not None:
+                    self._trigger_inspection_from_wavelength(float(lam))
+                    return  # draw_idle will be called inside the trigger
+
+        # Shift+click on a base (non-active) scatter point on ax3 —
+        # picked_value will be None here because the artist is not in
+        # active_lines, but the scatter may still carry a wavelength tag.
+        mouse_event = getattr(event, 'mouseevent', None)
+        key = getattr(mouse_event, 'key', None) if mouse_event is not None else None
+        is_shift = key is not None and 'shift' in str(key).lower()
+        artist_axes = getattr(event.artist, 'axes', None)
+        is_ax3_scatter = (
+            hasattr(event.artist, 'get_offsets')
+            and artist_axes is self.ax3
+        )
+        if is_shift and is_ax3_scatter:
+            wav_arr = getattr(event.artist, '_islat_scatter_wavelengths', None)
+            ind = getattr(event, 'ind', None)
+            if wav_arr is not None and ind is not None and len(ind) > 0:
+                lam = float(wav_arr[ind[0]])
+                self._trigger_inspection_from_wavelength(lam)
+                return
+
+        self._canvas.draw_idle()
+
+    def _trigger_inspection_from_wavelength(self, lam: float) -> None:
+        """Centre the line-inspection panel on *lam* and trigger on_selection.
+
+        The window width is derived (in priority order) from:
+        1. The current inspection selection width (``_current_selection``).
+        2. The current ax2 x-span (if ax2 has been rendered).
+        3. A default of ±1 % of the wavelength (~3 resolution elements at R~100).
+
+        Delegates to ``plot_manager.onselect`` so the full selection pipeline
+        runs (current_selection stored, fit result cleared, active view
+        notified) exactly as a span-drag from the full-spectrum panel does.
+        """
+        # Determine half-window
+        if self._current_selection is not None:
+            sel_xmin, sel_xmax = self._current_selection
+            half_w = (sel_xmax - sel_xmin) / 2.0
+        else:
+            try:
+                x0, x1 = self.ax2.get_xlim()
+                half_w = (x1 - x0) / 2.0 if (x1 - x0) > 0 else lam * 0.01
+            except Exception:
+                half_w = lam * 0.01
+
+        # Clamp half_w to a minimum of 0.001 µm to avoid degenerate selections
+        half_w = max(half_w, 0.001)
+
+        xmin = lam - half_w
+        xmax = lam + half_w
+
+        # Delegate through the plot_manager so the selection state is fully
+        # updated (current_selection, toggle_state, fit_result cleared …)
+        pm = self._pm
+        if hasattr(pm, 'onselect'):
+            pm.onselect(xmin, xmax)
+        else:
+            # Fallback: call on_selection directly on this view
+            self.on_selection(xmin, xmax)
+
         self._canvas.draw_idle()
 
     def _handle_line_pick_event(self, event: Any) -> Any:

@@ -713,14 +713,20 @@ class PopulationDiagramPlot(BasePlot):
             y_arr = self._get_axis_array(cdata, self._y_prop)
             if x_arr is None or y_arr is None:
                 continue
-            ax.scatter(
+            sc = ax.scatter(
                 x_arr,
                 y_arr,
                 s=0.5 if single else 5,
                 color=color,
                 label=cdata["name"],
                 alpha=0.8,
+                picker=True,
             )
+            # Tag with per-point wavelengths so shift+click can look up
+            # the line wavelength regardless of the current x/y axis choice.
+            wav = cdata.get("wavelength")
+            if wav is not None:
+                sc._islat_scatter_wavelengths = np.asarray(wav)
 
     def _render_component_legend(self, ax: Axes) -> None:
         """Add a legend showing component names and colours."""
@@ -908,7 +914,16 @@ class PopulationDiagramPlot(BasePlot):
             cmap=cmap_obj,
             norm=norm,
             alpha=0.8,
+            picker=True,
         )
+        # Concatenate wavelengths in the same order as eu_cat / rd_cat
+        # so that event.ind[0] maps back to the correct line.
+        _wav_parts = [
+            cd["wavelength"] for cd in self._component_data
+            if cd.get("wavelength") is not None
+        ]
+        if _wav_parts:
+            sc._islat_scatter_wavelengths = np.concatenate(_wav_parts)
 
         # Add a colourbar and track it for later removal
         label = self._property_label(display_prop)
