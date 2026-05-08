@@ -119,6 +119,9 @@ class iSLATPlot:
         self._fit_lines_grid_view: FitLinesPlotGridView = FitLinesPlotGridView(self)
         self.active_view: PlotView = self._three_panel_view
         self.is_full_spectrum: bool = False
+        # Name of the view that was active before entering Full Spectrum mode,
+        # used to restore the correct view when toggling back.
+        self._pre_fullspectrum_view_name: str = "Three Panel"
 
         # Ordered dict of all switchable views (name → PlotView).
         # The order determines the order shown in the Views dropdown.
@@ -809,12 +812,8 @@ class iSLATPlot:
                 )
 
     def load_full_spectrum(self):
-        """Activate the full-spectrum view (called by toggle_full_spectrum)."""
-        old_view = self.active_view
-        self._three_panel_view.deactivate()
-        self._full_spectrum_view.activate(self.parent_frame)
-        self.active_view = self._full_spectrum_view
-        self._notify_view_change(old_view, self.active_view)
+        """Activate the full-spectrum view (delegates to switch_view)."""
+        self.switch_view("Full Spectrum")
 
     def toggle_summed_spectrum(self):
         """Toggle visibility of the summed spectral flux."""
@@ -843,16 +842,26 @@ class iSLATPlot:
             self._full_spectrum_view.toggle_residuals(self.residual_toggle)
 
     def toggle_full_spectrum(self):
-        """Toggle between the regular three-panel view and the full spectrum view."""
-        self.is_full_spectrum = not self.is_full_spectrum
-        debug_config.info("main_plot", f"toggle_full_spectrum: is_full_spectrum = {self.is_full_spectrum}")
+        """Toggle between the full-spectrum view and the previously active view.
 
-        if self.is_full_spectrum:
-            self.load_full_spectrum()
+        * If the full-spectrum view is **not** currently active, the current
+          view name is remembered and the display switches to Full Spectrum.
+        * If the full-spectrum view **is** currently active, the display
+          returns to whichever view was active before (falling back to
+          ``"Three Panel"`` if that view is no longer available).
+        """
+        if self.active_view is not self._full_spectrum_view:
+            # Remember where we came from, then switch to Full Spectrum.
+            self._pre_fullspectrum_view_name = self.active_view_name
+            self.switch_view("Full Spectrum")
         else:
-            # Switch back to three-panel view
-            old_view = self.active_view
-            self._full_spectrum_view.deactivate()
-            self.active_view = self._three_panel_view
-            self._three_panel_view.activate(self.parent_frame)
-            self._notify_view_change(old_view, self.active_view)
+            # Return to the previous view (or Three Panel as a safe fallback).
+            return_to = self._pre_fullspectrum_view_name
+            if return_to not in self._views or return_to == "Full Spectrum":
+                return_to = "Three Panel"
+            self.switch_view(return_to)
+
+        debug_config.info(
+            "main_plot",
+            f"toggle_full_spectrum: active view → '{self.active_view_name}'",
+        )
