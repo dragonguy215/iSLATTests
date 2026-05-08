@@ -383,7 +383,7 @@ class FitLinesPlotGridView(PlotView):
 
         # --- Configure figure size ------------------------------------------
         fig_width = SUBPLOT_WIDTH_INCHES * plot_grid.cols
-        fig_height = SUBPLOT_HEIGHT_INCHES * plot_grid.rows
+        fig_height = SUBPLOT_WIDTH_INCHES * plot_grid.rows  # same as width → square cells
         plot_grid.fig.set_size_inches(fig_width, fig_height)
         plot_grid.fig.set_dpi(150)
         # Disable any active layout engine before calling subplots_adjust,
@@ -408,18 +408,30 @@ class FitLinesPlotGridView(PlotView):
 
         # Compact font sizes for dense subplot grids
         for ax in plot_grid.axs.flat:
-            ax.tick_params(axis="both", labelsize=6, pad=1)
+            ax.tick_params(axis="both", labelsize=5, pad=1)
+            ax.tick_params(axis="x", rotation=0)
+            ax.tick_params(axis="y", rotation=45)
+            for lbl in ax.get_yticklabels():
+                lbl.set_ha("right")
+                lbl.set_va("center")
             ax.title.set_fontsize(7)
             ax.title.set_position((0.5, 1.0))
             if ax.yaxis.label:
-                ax.yaxis.label.set_fontsize(6)
+                ax.yaxis.label.set_fontsize(5)
+            if ax.xaxis.label:
+                ax.xaxis.label.set_fontsize(5)
 
         self._apply_theme_to_fig(plot_grid.fig)
 
         # --- Embed matplotlib figure ----------------------------------------
+        dpi = plot_grid.fig.get_dpi()
+        px_w = int(fig_width * dpi)
+        px_h = int(SUBPLOT_WIDTH_INCHES * plot_grid.rows * dpi)
         fig_canvas = FigureCanvasTkAgg(plot_grid.fig, master=inner_frame)
         fig_canvas.draw()
-        fig_canvas.get_tk_widget().pack(fill="both", expand=True)
+        widget = fig_canvas.get_tk_widget()
+        widget.config(width=px_w, height=px_h)
+        widget.pack(fill="none", expand=False)
         self._tab_canvases.append(fig_canvas)
 
         # First tab's canvas / figure become the primary references

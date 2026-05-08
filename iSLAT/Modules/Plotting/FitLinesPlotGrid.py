@@ -173,15 +173,23 @@ class FitLinesPlotGrid(CompositePlot):
                     print(f"Error plotting line {idx+1}: {e}")
 
             # Compact tick labels to prevent overlap
-            ax.tick_params(axis='both', labelsize=7, pad=1)
-            ax.xaxis.set_major_locator(MaxNLocator(nbins=4, prune='both'))
-            ax.yaxis.set_major_locator(MaxNLocator(nbins=4, prune='both'))
-
-            ax.set_xlabel("λ (μm)", fontsize=7, labelpad=1)
-
             col = idx % self.cols
+            ax.tick_params(axis='both', labelsize=5, pad=1)
+            ax.tick_params(axis='x', rotation=0)
+            ax.tick_params(axis='y', rotation=45)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=4, prune='both'))
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=3, prune='both'))
+            for lbl in ax.get_yticklabels():
+                lbl.set_ha('right')
+                lbl.set_va('center')
+
             if col == 0:
-                ax.set_ylabel("Flux (Jy)", fontsize=7, labelpad=1)
+                ax.set_xlabel("λ (μm)", fontsize=5, labelpad=1)
+            else:
+                ax.set_xlabel("")
+
+            if col == 0:
+                ax.set_ylabel("Flux (Jy)", fontsize=5, labelpad=1)
 
         # Hide unused subplots
         for idx in range(n_plots, self.rows * self.cols):
