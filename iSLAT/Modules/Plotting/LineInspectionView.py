@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
     from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict
     from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
+    from typing import Dict
 
 try:
     from iSLAT.Modules.Debug import debug_config
@@ -61,6 +62,13 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
         self._plot: Optional[LineInspectionPlot] = None
         self._current_selection: Optional[Tuple[float, float]] = None
 
+        # Active line vline entries: [vline, text, None, info_dict]
+        self.active_lines: List[Any] = []
+        self.selected_line: Optional[Any] = None
+
+        # matplotlib pick event connection id
+        self._pick_cid: Optional[int] = None
+
     # ==================================================================
     # Internal helpers
     # ==================================================================
@@ -78,6 +86,10 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
             plt.close(self._fig)
             self._fig = None
             self._plot = None
+
+        # Clear active lines from any previous render
+        self.active_lines.clear()
+        self.selected_line = None
 
         self._fig = plt.Figure(figsize=(10, 5), constrained_layout=True)
         ax = self._fig.add_subplot(111)
@@ -142,11 +154,170 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
                 theme=self._pm.theme,
             )
             self._plot.generate_plot()
+
+            # Render active line vline markers when line data is available
+            if line_data and mol is not None:
+                import numpy as np
+                data_mask = (wave >= xmin) & (wave <= xmax)
+                data_region_y = flux[data_mask]
+                max_y = (
+                    float(np.nanmax(data_region_y))
+                    if len(data_region_y) > 0
+                    else 1.0
+                )
+                threshold = getattr(self._pm, '_line_threshold', 0.0)
+                mol_color = getattr(mol, 'color', None) or 'green'
+                self._plot.render_active_lines(
+                    line_data, self.active_lines,
+                    max_y=max_y,
+                    threshold=threshold,
+                    color=mol_color,
+                    molecule_name=getattr(mol, 'name', ''),
+                    molecule_color=mol_color,
+                )
         except Exception as exc:
             debug_config.warning(
                 "line_inspection_view",
                 f"LineInspectionPlot.generate_plot failed: {exc}",
             )
+
+    # ==================================================================
+    # PlotView — display range sync
+    # ==================================================================
+
+    def _get_display_range(self) -> Tuple[float, float]:
+        """Return the current selection bounds for the Plot Start/Range controls."""
+        if self._current_selection is not None:
+            return self._current_selection
+        return (0.0, 0.0)
+
+    def _set_display_range(self, start: float, end: float) -> None:
+        """Move the inspection window to [start, end] via a new on_selection call."""
+        self.on_selection(float(start), float(end))
+
+    def _register_control_fields(self) -> None:
+        """Register a :class:`DisplayRangeField` that routes the Plot Start / Plot Range
+        controls in the control panel to this view's inspection window."""
+        bus = getattr(self._pm, 'control_bus', None)
+        if bus is None:
+            return
+        from iSLAT.Modules.GUI.ControlField import DisplayRangeField
+        bus.unregister_owner(self)
+        bus.register(
+            DisplayRangeField(
+                "_liv_display_range",
+                getter=self._get_display_range,
+                setter=self._set_display_range,
+                owner=self,
+            ),
+            "control_panel",
+        )
+
+    # ==================================================================
+    # Pick event — active line interaction
+    # ==================================================================
+
+    def _connect_pick_event(self) -> None:
+        """Connect a pick-event handler to the current canvas (idempotent)."""
+        if self._canvas is None or self._pick_cid is not None:
+            return
+        self._pick_cid = self._canvas.mpl_connect('pick_event', self._on_pick_line)
+
+    def _disconnect_pick_event(self) -> None:
+        """Disconnect the pick-event handler."""
+        if self._canvas is not None and self._pick_cid is not None:
+            try:
+                self._canvas.mpl_disconnect(self._pick_cid)
+            except Exception:
+                pass
+        self._pick_cid = None
+
+    def _on_pick_line(self, event: Any) -> None:
+        """Highlight the clicked active-line vline and display its info."""
+        picked_artist = event.artist
+        picked_value = None
+
+        # Reset all vlines to their default colour
+        for vline, text_obj, _sc, value in self.active_lines:
+            mol_color = (
+                value.get('molecule_color', 'green') if value else 'green'
+            )
+            if vline is not None:
+                vline.set_color(mol_color)
+            if text_obj is not None:
+                text_obj.set_color(mol_color)
+            if picked_artist is vline:
+                picked_value = value
+
+        # Highlight the picked vline
+        if picked_value is not None:
+            for vline, text_obj, _sc, value in self.active_lines:
+                if value is picked_value:
+                    if vline is not None:
+                        vline.set_color('orange')
+                    if text_obj is not None:
+                        text_obj.set_color('orange')
+
+            self.selected_line = picked_value
+            self._display_line_info(picked_value)
+
+        if self._canvas is not None:
+            self._canvas.draw_idle()
+
+    def _display_line_info(self, value: "Dict[str, Any]") -> None:
+        """Push line info for *value* to the GUI data field."""
+        islat = self._islat
+        from .LineInspectionPlot import LineInspectionPlot as _LIP
+        from iSLAT.Modules.DataProcessing.spectral_utils import flux_integral
+
+        data_flux = None
+        model_flux = None
+        sel = self._current_selection
+        if sel is not None:
+            xmin, xmax = sel
+            err_data = getattr(islat, 'err_data', None)
+            line_flux, _ = flux_integral(
+                lam=islat.wave_data, flux=islat.flux_data,
+                lam_min=xmin, lam_max=xmax, err=err_data,
+            )
+            data_flux = line_flux[0] if isinstance(line_flux, (list, tuple)) else line_flux
+            active_mol = getattr(islat, 'active_molecule', None)
+            if active_mol is not None:
+                mol_wave, mol_flux_arr = active_mol.get_flux(return_wavelengths=True)
+                model_flux, _ = flux_integral(
+                    lam=mol_wave, flux=mol_flux_arr,
+                    lam_min=xmin, lam_max=xmax, err=None,
+                )
+
+        class _L:
+            pass
+        _l = _L()
+        _l.lam      = value.get('lam')
+        _l.e_up     = value.get('e_up',     value.get('e'))
+        _l.e_low    = value.get('e_low')
+        _l.a_stein  = value.get('a_stein',  value.get('a'))
+        _l.g_up     = value.get('g_up',     value.get('g'))
+        _l.g_low    = value.get('g_low')
+        _l.lev_up   = value.get('up_lev')
+        _l.lev_low  = value.get('low_lev')
+
+        info = _LIP.get_line_info(
+            _l,
+            intensity=value.get('intensity', value.get('inten', 0)),
+            tau=value.get('tau'),
+            data_flux_in_range=data_flux,
+            model_flux_in_range=model_flux,
+            molecule=getattr(islat, 'active_molecule', None),
+        )
+        info_str = _LIP.format_line_info(info)
+
+        if (hasattr(islat, 'GUI') and hasattr(islat.GUI, 'data_field') and
+                islat.GUI.data_field is not None):
+            try:
+                if hasattr(islat.GUI.data_field, 'text') and islat.GUI.data_field.text.winfo_exists():
+                    islat.GUI.data_field.insert_text(info_str, clear_after=True)
+            except Exception as exc:
+                debug_config.warning("line_inspection_view", f"data_field update failed: {exc}")
 
     # ==================================================================
     # PlotView — lifecycle
@@ -170,6 +341,7 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
         self._ensure_canvas()
         self.apply_theme(self._pm.theme)
         self._register_control_fields()
+        self._connect_pick_event()
 
         if self._canvas is not None:
             self._canvas.get_tk_widget().pack(
@@ -184,6 +356,26 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
     def build_context_menu(self, event: Any, canvas_widget: Any) -> Any:
         """Return the line-inspection right-click menu."""
         return self._build_line_inspection_menu(canvas_widget)
+
+    def deactivate(self) -> None:
+        """Unregister controls, disconnect pick event, and unpack the canvas."""
+        self._disconnect_pick_event()
+        bus = getattr(self._pm, 'control_bus', None)
+        if bus is not None:
+            bus.unregister_owner(self)
+        if self._canvas is not None:
+            try:
+                self._canvas.get_tk_widget().pack_forget()
+            except Exception:
+                pass
+
+    def clear_active_lines(self) -> None:
+        """Clear vline markers from the plot."""
+        if self._plot is not None:
+            self._plot.clear_active_lines(self.active_lines)
+        else:
+            self.active_lines.clear()
+        self.selected_line = None
 
     # ==================================================================
     # PlotView — core rendering
@@ -205,6 +397,10 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
             self._ensure_canvas()
             self.apply_theme(self._pm.theme)
             if self._canvas is not None:
+                if self._parent_frame is not None:
+                    self._canvas.get_tk_widget().pack(
+                        fill="both", expand=True, padx=0, pady=0
+                    )
                 self._canvas.draw_idle()
 
     # ==================================================================
@@ -221,6 +417,10 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
             self._ensure_canvas()
             self.apply_theme(self._pm.theme)
             if self._canvas is not None:
+                if self._parent_frame is not None:
+                    self._canvas.get_tk_widget().pack(
+                        fill="both", expand=True, padx=0, pady=0
+                    )
                 self._canvas.draw_idle()
 
     def clear_selection(self) -> None:
@@ -232,6 +432,10 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
             self._needs_refresh = False
             self._ensure_canvas()
             if self._canvas is not None:
+                if self._parent_frame is not None:
+                    self._canvas.get_tk_widget().pack(
+                        fill="both", expand=True, padx=0, pady=0
+                    )
                 self._canvas.draw_idle()
 
     # ==================================================================
