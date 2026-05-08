@@ -77,6 +77,19 @@ class PlotGridWindow(tk.Toplevel):
         plot_grid.fig.set_size_inches(fig_width, fig_height)
         plot_grid.fig.set_dpi(150)
         
+        # Disable any active layout engine before calling subplots_adjust
+        try:
+            plot_grid.fig.set_layout_engine(None)
+        except Exception:
+            try:
+                plot_grid.fig.set_constrained_layout(False)
+            except Exception:
+                pass
+            try:
+                plot_grid.fig.set_tight_layout(False)
+            except Exception:
+                pass
+
         # Compact subplot spacing with enough room for titles/labels
         plot_grid.fig.subplots_adjust(
             left=0.06, right=0.98,

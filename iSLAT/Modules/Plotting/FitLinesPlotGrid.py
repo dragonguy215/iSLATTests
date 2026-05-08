@@ -140,30 +140,37 @@ class FitLinesPlotGrid(CompositePlot):
             xmin = self.fit_csv_dict[idx]['xmin']
             xmax = self.fit_csv_dict[idx]['xmax']
 
-            if fitted_wave is None or fitted_flux is None:
-                ax.set_title(f"Line {idx+1}: Fit Error", fontsize=9, pad=2)
-                continue
+            # Build a species/wavelength label for the title regardless of fit status
+            species_label = self.fit_csv_dict[idx].get('species', '')
+            lam_val = self.fit_csv_dict[idx].get('lam', None)
+            if lam_val is not None:
+                try:
+                    line_title = f"{species_label} {float(lam_val):.2f}"
+                except (TypeError, ValueError):
+                    line_title = f"Line {idx + 1}"
+            else:
+                line_title = f"Line {idx + 1}"
 
-            line_color = 'lime' if self.fit_csv_dict[idx]['Fit_det'] else 'red'
-            try:
-                SpectrumPanel.plot_gaussian_fit(
-                    ax, gauss_fit, fitted_wave, fitted_flux,
-                    color=line_color, uncertainty_sigma=self.fit_line_uncertainty,
-                )
-                ax.set_title(
-                    f"{self.fit_csv_dict[idx]['species']} "
-                    f"{self.fit_csv_dict[idx]['lam']:.2f}",
-                    fontsize=9, pad=2,
-                )
-                # y-limits relative to the observed flux in the fit window
-                panel_flux = panel.flux_data
-                if len(panel_flux) > 0:
-                    y_min = np.min(panel_flux) - 0.1 * np.abs(np.min(panel_flux))
-                    y_max = np.max(panel_flux) + 0.1 * np.abs(np.max(panel_flux))
-                    ax.set_ylim(y_min, y_max)
-            except Exception as e:
-                ax.set_title("Plot Error", fontsize=9, pad=2)
-                print(f"Error plotting line {idx+1}: {e}")
+            if fitted_wave is None or fitted_flux is None:
+                # No fit result — show the spectrum slice without a Gaussian overlay
+                ax.set_title(line_title, fontsize=9, pad=2)
+            else:
+                line_color = 'lime' if self.fit_csv_dict[idx].get('Fit_det', False) else 'red'
+                try:
+                    SpectrumPanel.plot_gaussian_fit(
+                        ax, gauss_fit, fitted_wave, fitted_flux,
+                        color=line_color, uncertainty_sigma=self.fit_line_uncertainty,
+                    )
+                    ax.set_title(line_title, fontsize=9, pad=2)
+                    # y-limits relative to the observed flux in the fit window
+                    panel_flux = panel.flux_data
+                    if len(panel_flux) > 0:
+                        y_min = np.min(panel_flux) - 0.1 * np.abs(np.min(panel_flux))
+                        y_max = np.max(panel_flux) + 0.1 * np.abs(np.max(panel_flux))
+                        ax.set_ylim(y_min, y_max)
+                except Exception as e:
+                    ax.set_title(line_title, fontsize=9, pad=2)
+                    print(f"Error plotting line {idx+1}: {e}")
 
             # Compact tick labels to prevent overlap
             ax.tick_params(axis='both', labelsize=7, pad=1)

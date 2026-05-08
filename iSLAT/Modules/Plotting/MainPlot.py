@@ -17,6 +17,7 @@ from .ThreePanelView import ThreePanelView
 from .FullSpectrumView import FullSpectrumView
 from .PopulationDiagramView import PopulationDiagramView
 from .LineInspectionView import LineInspectionView
+from .FitLinesPlotGridView import FitLinesPlotGridView
 from iSLAT.Modules.DataTypes.Molecule import Molecule
 from iSLAT.Modules.GUI.InteractionHandler import InteractionHandler
 from iSLAT.Modules.DataProcessing.FittingEngine import FittingEngine
@@ -115,6 +116,7 @@ class iSLATPlot:
         self._full_spectrum_view: PlotView = FullSpectrumView(self)
         self._population_diagram_view: PlotView = PopulationDiagramView(self)
         self._line_inspection_view: PlotView = LineInspectionView(self)
+        self._fit_lines_grid_view: FitLinesPlotGridView = FitLinesPlotGridView(self)
         self.active_view: PlotView = self._three_panel_view
         self.is_full_spectrum: bool = False
 
@@ -125,6 +127,7 @@ class iSLATPlot:
             "Full Spectrum": self._full_spectrum_view,
             "Population Diagram": self._population_diagram_view,
             "Line Inspection": self._line_inspection_view,
+            "Fit Lines Grid": self._fit_lines_grid_view,
         }
 
         # View-change callbacks — notified when active_view switches

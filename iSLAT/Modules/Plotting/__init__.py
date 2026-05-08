@@ -72,6 +72,7 @@ from .ThreePanelView import ThreePanelView
 from .FullSpectrumView import FullSpectrumView
 from .PopulationDiagramView import PopulationDiagramView
 from .LineInspectionView import LineInspectionView
+from .FitLinesPlotGridView import FitLinesPlotGridView
 
 __all__ = [
     "BasePlot",
@@ -98,6 +99,8 @@ __all__ = [
     "ThreePanelView",
     "FullSpectrumView",
     "PopulationDiagramView",
+    "LineInspectionView",
+    "FitLinesPlotGridView",
     "ResidualSpectrumPlot",
     "OpticalDepthPanel",
     "OpticalDepthSpectrumPlot",

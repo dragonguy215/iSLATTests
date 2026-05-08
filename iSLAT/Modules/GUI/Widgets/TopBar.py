@@ -625,22 +625,31 @@ class TopBar(ResizableFrame):
             for msg in progress_msgs:
                 self.data_field.insert_text(msg, clear_after=False)
             
-            if plot_grid:
-                from iSLAT.Modules.Plotting.FitLinesPlotGrid import FitLinesPlotGrid
-                if spectrum_name is None:
-                    spectrum_name = getattr(self.islat, 'loaded_spectrum_name', 'unknown')
-                
-                plot = FitLinesPlotGrid(
+            # Always build a FitLinesPlotGrid so the Fit Lines Grid view
+            # reflects the latest results whether or not it is currently active.
+            from iSLAT.Modules.Plotting.FitLinesPlotGrid import FitLinesPlotGrid
+            _sname = spectrum_name or getattr(self.islat, 'loaded_spectrum_name', 'unknown')
+            try:
+                _grid = FitLinesPlotGrid(
                     fit_data=fit_data,
                     wave_data=wavedata,
                     flux_data=fluxdata,
                     err_data=err_data,
                     fit_line_uncertainty=self.config.get('fit_line_uncertainty', 3.0),
-                    spectrum_name=spectrum_name
+                    spectrum_name=_sname,
                 )
-                plot.generate_plot()
-                return plot
-            
+                _grid.generate_plot()
+                # Push into the embedded view so it refreshes immediately
+                _grid_view = getattr(self.main_plot, '_fit_lines_grid_view', None)
+                if _grid_view is not None:
+                    _grid_view.set_plot_grids([_grid])
+            except Exception as _e:
+                print(f"Warning: could not build FitLinesPlotGrid: {_e}")
+                _grid = None
+
+            if plot_grid:
+                return _grid
+
             if plot_results:
                 from iSLAT.Modules.Plotting.SpectrumPanel import SpectrumPanel
                 uncertainty_sigma = self.config.get('fit_line_uncertainty', 3.0)
