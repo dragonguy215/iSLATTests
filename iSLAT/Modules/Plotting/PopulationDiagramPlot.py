@@ -435,24 +435,51 @@ class PopulationDiagramPlot(BasePlot):
         all_x_data = np.concatenate([a for a in _all_x_arrs if a is not None]) if any(a is not None for a in _all_x_arrs) else cat_valid_x
         all_y_data = np.concatenate([a for a in _all_y_arrs if a is not None]) if any(a is not None for a in _all_y_arrs) else cat_valid_y
 
-        # X limits
-        if self._x_prop == "eu":
-            ax.set_xlim(np.nanmin(all_x_data) - 50, np.nanmax(cat_valid_x))
-        else:
-            _xr = np.nanmax(cat_valid_x) - np.nanmin(all_x_data)
-            _xpad = _xr * 0.05 if _xr > 0 else max(abs(np.nanmin(all_x_data)) * 0.05, 1)
-            ax.set_xlim(np.nanmin(all_x_data) - _xpad, np.nanmax(cat_valid_x) + _xpad)
-
-        # Y limits
-        if self._y_prop == "rd_yax":
-            ax.set_ylim(np.nanmin(cat_valid_y), np.nanmax(all_y_data) + 0.5)
-        else:
-            _yr = np.nanmax(all_y_data) - np.nanmin(cat_valid_y)
-            _ypad = _yr * 0.05 if _yr > 0 else max(abs(np.nanmin(cat_valid_y)) * 0.05, 1)
-            ax.set_ylim(np.nanmin(cat_valid_y) - _ypad, np.nanmax(all_y_data) + _ypad)
-
+        # Set scale BEFORE computing limits so matplotlib never receives
+        # non-positive limits on a log axis (which causes the squish bug).
         ax.set_xscale("log" if self._x_log else "linear")
         ax.set_yscale("log" if self._y_log else "linear")
+
+        # For log axes restrict the data used for limit computation to
+        # strictly positive values; fall back to auto-limits if none exist.
+        if self._x_log:
+            pos_x = cat_valid_x[cat_valid_x > 0]
+            pos_all_x = all_x_data[all_x_data > 0]
+            if len(pos_x) == 0 or len(pos_all_x) == 0:
+                ax.autoscale(axis="x")
+            else:
+                _xlo = np.nanmin(pos_all_x)
+                _xhi = np.nanmax(pos_x)
+                _factor = (_xhi / _xlo) ** 0.05 if _xlo > 0 and _xhi > _xlo else 1.05
+                ax.set_xlim(_xlo / _factor, _xhi * _factor)
+        else:
+            # X limits (linear)
+            if self._x_prop == "eu":
+                ax.set_xlim(np.nanmin(all_x_data) - 50, np.nanmax(cat_valid_x))
+            else:
+                _xr = np.nanmax(cat_valid_x) - np.nanmin(all_x_data)
+                _xpad = _xr * 0.05 if _xr > 0 else max(abs(np.nanmin(all_x_data)) * 0.05, 1)
+                ax.set_xlim(np.nanmin(all_x_data) - _xpad, np.nanmax(cat_valid_x) + _xpad)
+
+        if self._y_log:
+            pos_y = cat_valid_y[cat_valid_y > 0]
+            pos_all_y = all_y_data[all_y_data > 0]
+            if len(pos_y) == 0 or len(pos_all_y) == 0:
+                ax.autoscale(axis="y")
+            else:
+                _ylo = np.nanmin(pos_y)
+                _yhi = np.nanmax(pos_all_y)
+                _factor = (_yhi / _ylo) ** 0.05 if _ylo > 0 and _yhi > _ylo else 1.05
+                ax.set_ylim(_ylo / _factor, _yhi * _factor)
+        else:
+            # Y limits (linear)
+            if self._y_prop == "rd_yax":
+                ax.set_ylim(np.nanmin(cat_valid_y), np.nanmax(all_y_data) + 0.5)
+            else:
+                _yr = np.nanmax(all_y_data) - np.nanmin(cat_valid_y)
+                _ypad = _yr * 0.05 if _yr > 0 else max(abs(np.nanmin(cat_valid_y)) * 0.05, 1)
+                ax.set_ylim(np.nanmin(cat_valid_y) - _ypad, np.nanmax(all_y_data) + _ypad)
+
         ax.set_ylabel(self._get_axis_label(self._y_prop), color=fg, labelpad=-1)
         ax.set_xlabel(self._get_axis_label(self._x_prop), color=fg)
 
