@@ -179,6 +179,10 @@ class PopulationDiagramContextMixin:
         initial_vmin = initial_vmax = initial_pmin = initial_pmax = ""
         initial_log_scale = False
 
+        # Properties that naturally span orders of magnitude benefit from
+        # a log colour scale — pre-tick the checkbox for these.
+        _LOG_SUGGESTED = {"intens", "tau", "a_stein"}
+
         if current_mapping:
             prop_val = current_mapping.get("prop", "e_up")
             if prop_val in PROP_VALUES:
@@ -193,6 +197,10 @@ class PopulationDiagramContextMixin:
             v = current_mapping.get("pmax")
             initial_pmax = str(v) if v is not None else ""
             initial_log_scale = bool(current_mapping.get("log_scale", False))
+        else:
+            # No existing mapping: suggest log scale for log-distributed props
+            initial_prop = PROP_VALUES[initial_prop_idx]
+            initial_log_scale = initial_prop in _LOG_SUGGESTED
 
         win = tk.Toplevel(parent_widget)
         win.title("Population Diagram \u2014 Color By")
@@ -203,8 +211,19 @@ class PopulationDiagramContextMixin:
 
         tk.Label(win, text="Color by property:").grid(row=0, column=0, sticky="w", **pad)
         prop_var = tk.StringVar(value=PROP_LABELS[initial_prop_idx])
-        ttk.Combobox(win, textvariable=prop_var, values=PROP_LABELS,
-                     state="readonly", width=32).grid(row=0, column=1, sticky="ew", **pad)
+        log_scale_var = tk.BooleanVar(value=initial_log_scale)
+
+        def _on_prop_changed(*_):
+            lbl = prop_var.get()
+            if lbl in PROP_LABELS:
+                pval = PROP_VALUES[PROP_LABELS.index(lbl)]
+                if pval in _LOG_SUGGESTED:
+                    log_scale_var.set(True)
+
+        prop_combo = ttk.Combobox(win, textvariable=prop_var, values=PROP_LABELS,
+                     state="readonly", width=32)
+        prop_combo.grid(row=0, column=1, sticky="ew", **pad)
+        prop_combo.bind("<<ComboboxSelected>>", _on_prop_changed)
 
         tk.Label(win, text="Colormap:").grid(row=1, column=0, sticky="w", **pad)
         cmap_var = tk.StringVar(value=initial_cmap)
@@ -235,7 +254,6 @@ class PopulationDiagramContextMixin:
         tk.Spinbox(win, from_=0, to=100, increment=1, textvariable=pmax_var,
                    width=8).grid(row=7, column=1, sticky="w", **pad)
 
-        log_scale_var = tk.BooleanVar(value=initial_log_scale)
         tk.Checkbutton(win, text="Log scale colorbar",
                        variable=log_scale_var).grid(row=8, column=0, columnspan=2,
                                                     sticky="w", **pad)

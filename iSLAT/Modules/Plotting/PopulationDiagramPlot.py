@@ -868,6 +868,7 @@ class PopulationDiagramPlot(BasePlot):
         all_x: List[np.ndarray] = []
         all_y: List[np.ndarray] = []
         all_vals: List[np.ndarray] = []
+        all_wav: List[np.ndarray] = []
 
         for cdata in self._component_data:
             vals = cdata.get(internal_key)
@@ -875,9 +876,32 @@ class PopulationDiagramPlot(BasePlot):
             y_arr = self._get_axis_array(cdata, self._y_prop)
             if vals is None or x_arr is None or y_arr is None:
                 continue
+            vals_arr = np.asarray(vals, dtype=float)
+
+            # Apply the valid_mask so that only lines above the 1%-of-max
+            # flux threshold are plotted and used for scale computation.
+            # Without this, near-zero dim lines dominate the vmin/vmax for
+            # log-distributed properties (intens, tau, a_stein) making all
+            # the visible points appear as the same colour.
+            mask = cdata.get("valid_mask")
+            if mask is not None:
+                mask = np.asarray(mask, dtype=bool)
+                x_arr = x_arr[mask]
+                y_arr = y_arr[mask]
+                vals_arr = vals_arr[mask]
+                wav_arr = cdata.get("wavelength")
+                if wav_arr is not None:
+                    all_wav.append(np.asarray(wav_arr)[mask])
+            else:
+                wav_arr = cdata.get("wavelength")
+                if wav_arr is not None:
+                    all_wav.append(np.asarray(wav_arr))
+
+            if len(x_arr) == 0:
+                continue
             all_x.append(x_arr)
             all_y.append(y_arr)
-            all_vals.append(np.asarray(vals, dtype=float))
+            all_vals.append(vals_arr)
 
         if not all_vals:
             self._render_by_component(ax)
@@ -887,19 +911,31 @@ class PopulationDiagramPlot(BasePlot):
         rd_cat = np.concatenate(all_y)
         val_cat = np.concatenate(all_vals)
 
-        # Percentile cutoffs override explicit vmin/vmax when set
+        # Percentile cutoffs override explicit vmin/vmax when set.
+        # Use only finite values so that -inf / nan (from log of 0) don't
+        # corrupt the scale.
+        finite_vals = val_cat[np.isfinite(val_cat)]
+        if len(finite_vals) == 0:
+            self._render_by_component(ax)
+            return
+
         if pmin is not None:
-            vmin = float(np.nanpercentile(val_cat, float(pmin)))
+            vmin = float(np.nanpercentile(finite_vals, float(pmin)))
         elif vmin is None:
-            vmin = float(np.nanmin(val_cat))
+            vmin = float(np.nanmin(finite_vals))
         if pmax is not None:
-            vmax = float(np.nanpercentile(val_cat, float(pmax)))
+            vmax = float(np.nanpercentile(finite_vals, float(pmax)))
         elif vmax is None:
-            vmax = float(np.nanmax(val_cat))
+            vmax = float(np.nanmax(finite_vals))
 
         if log_scale:
-            # LogNorm requires strictly positive limits
-            safe_vmin = max(vmin, 1e-30) if vmin is not None else max(float(np.nanmin(val_cat[val_cat > 0])), 1e-30)
+            # LogNorm requires strictly positive limits; derive from the
+            # positive-only subset if vmin ended up ≤ 0.
+            pos_vals = finite_vals[finite_vals > 0]
+            if len(pos_vals) == 0:
+                pos_vals = np.array([1e-30])
+            safe_vmin = max(vmin, float(np.nanmin(pos_vals))) if vmin <= 0 else vmin
+            safe_vmin = max(safe_vmin, 1e-300)
             safe_vmax = max(vmax, safe_vmin * 10)
             norm = LogNorm(vmin=safe_vmin, vmax=safe_vmax)
         else:
@@ -916,12 +952,8 @@ class PopulationDiagramPlot(BasePlot):
             alpha=0.8,
             picker=True,
         )
-        # Concatenate wavelengths in the same order as eu_cat / rd_cat
-        # so that event.ind[0] maps back to the correct line.
-        _wav_parts = [
-            cd["wavelength"] for cd in self._component_data
-            if cd.get("wavelength") is not None
-        ]
+        # Wavelengths are already masked and concatenated above in all_wav.
+        _wav_parts = all_wav
         if _wav_parts:
             sc._islat_scatter_wavelengths = np.concatenate(_wav_parts)
 
@@ -945,7 +977,14 @@ class PopulationDiagramPlot(BasePlot):
             y_arr = self._get_axis_array(cdata, self._y_prop)
             if x_arr is None or y_arr is None:
                 continue
+            mask = cdata.get("valid_mask")
+            if mask is not None:
+                mask = np.asarray(mask, dtype=bool)
+                x_arr = x_arr[mask]
+                y_arr = y_arr[mask]
             n = len(x_arr)
+            if n == 0:
+                continue
             if prop == "component":
                 labels = np.full(n, cdata["name"], dtype=object)
             else:
@@ -953,7 +992,10 @@ class PopulationDiagramPlot(BasePlot):
                 if vals is None:
                     labels = np.full(n, "unknown", dtype=object)
                 else:
-                    labels = np.asarray(vals, dtype=str)
+                    vals_arr = np.asarray(vals, dtype=str)
+                    if mask is not None:
+                        vals_arr = vals_arr[mask]
+                    labels = vals_arr
             all_x.append(x_arr)
             all_y.append(y_arr)
             all_labels.append(labels)
