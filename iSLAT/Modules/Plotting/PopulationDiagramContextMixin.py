@@ -131,8 +131,183 @@ class PopulationDiagramContextMixin:
             label=("\u2713 " if not _all_mode else "  ") + "Show Active Molecule Only",
             command=_show_active_molecule_only,
         )
+        menu.add_separator()
+
+        # --- Save active lines as line list ----------------------------
+        _active_info = self._get_active_lines_info(pdp)
+
+        def _save_line_list():
+            self._save_active_lines_as_line_list(canvas_widget)
+
+        menu.add_command(
+            label="Save Active Lines as Line List\u2026",
+            command=_save_line_list,
+            state="normal" if _active_info else "disabled",
+        )
+
+        # ------------------------------------------------------------------
+        # View switching
+        # ------------------------------------------------------------------
+        pm = getattr(self, '_pm', None)
+        if pm is not None and hasattr(pm, 'switch_view'):
+            menu.add_separator()
+
+            active_name = getattr(pm, 'active_view_name', None)
+
+            if active_name == "Three Panel":
+                # Inside the three-panel layout — offer to pop out to standalone views
+                def _to_population_diagram():
+                    pm.switch_view("Population Diagram")
+
+                def _to_line_inspection():
+                    pm.switch_view("Line Inspection")
+
+                menu.add_command(
+                    label="Switch to Population Diagram View",
+                    command=_to_population_diagram,
+                )
+                menu.add_command(
+                    label="Switch to Line Inspection View",
+                    command=_to_line_inspection,
+                )
+            else:
+                # Already in a standalone view — offer to go back or cross-navigate
+                def _to_three_panel():
+                    pm.switch_view("Three Panel")
+
+                def _to_line_inspection():
+                    pm.switch_view("Line Inspection")
+
+                menu.add_command(
+                    label="Switch to Three Panel View",
+                    command=_to_three_panel,
+                )
+                menu.add_command(
+                    label="Switch to Line Inspection View",
+                    command=_to_line_inspection,
+                )
 
         return menu
+
+    # ------------------------------------------------------------------
+    # Save active lines as line list
+    # ------------------------------------------------------------------
+
+    def _get_active_lines_info(self, pdp: Any) -> list:
+        """Return the list of ``info_dict`` entries for currently active lines.
+
+        Tries, in order:
+        1. ``self.active_lines`` — populated by :class:`ThreePanelView`.
+        2. ``pdp._active_lines_cache`` — populated by the standalone
+           :class:`PopulationDiagramView`.
+
+        Returns an empty list when no active lines are available.
+        """
+        # ThreePanelView path
+        own_lines = getattr(self, "active_lines", None)
+        if own_lines:
+            return [entry[3] for entry in own_lines if entry[3] is not None]
+
+        # Standalone PopulationDiagramView path
+        if pdp is not None:
+            cache = getattr(pdp, "_active_lines_cache", None)
+            if cache:
+                cached_entries = cache.get("active_lines", [])
+                if cached_entries:
+                    return [entry[3] for entry in cached_entries if entry[3] is not None]
+
+        return []
+
+    def _save_active_lines_as_line_list(self, parent_widget: Any) -> None:
+        """Open a save-as dialog and write the currently active lines to a
+        CSV line list file compatible with iSLAT's fitting workflow.
+
+        Each row contains the columns produced by
+        :meth:`LineSaveService.format_line_for_save`:
+        ``species``, ``lam``, ``xmin``, ``xmax``, ``lev_up``,
+        ``lev_low``, ``tau``, ``intens``, ``a_stein``,
+        ``e_up``, ``g_up``, ``e_low``, ``g_low``.
+        """
+        try:
+            import tkinter as tk
+            from tkinter import filedialog, messagebox
+            import pandas as pd
+        except ImportError:
+            return
+
+        # Resolve the active pdp so we can read its cache
+        pdp = getattr(self, "_plot", None)
+        info_list = self._get_active_lines_info(pdp)
+
+        if not info_list:
+            messagebox.showinfo(
+                "No Active Lines",
+                "No highlighted lines are available to save.\n"
+                "Select a wavelength range first to activate lines.",
+                parent=parent_widget,
+            )
+            return
+
+        # Build rows — derive xmin/xmax as a ±0.015 µm window if not present
+        _DEFAULT_HALF_WIN = 0.015
+        rows = []
+        for info in info_list:
+            lam = info.get("lam")
+            if lam is None:
+                continue
+            lam = float(lam)
+            rows.append({
+                "species":  info.get("molecule_name", ""),
+                "lam":      lam,
+                "xmin":     float(info.get("xmin", lam - _DEFAULT_HALF_WIN)),
+                "xmax":     float(info.get("xmax", lam + _DEFAULT_HALF_WIN)),
+                "lev_up":   info.get("up_lev", ""),
+                "lev_low":  info.get("low_lev", ""),
+                "tau":      info.get("tau", 0.0),
+                "intens":   info.get("intensity", info.get("inten", 0.0)),
+                "a_stein":  info.get("a_stein", 0.0),
+                "e_up":     info.get("e_up", 0.0),
+                "g_up":     info.get("g_up", 1.0),
+                "e_low":    info.get("e_low", 0.0),
+                "g_low":    info.get("g_low", 1.0),
+            })
+
+        if not rows:
+            messagebox.showinfo(
+                "No Valid Lines",
+                "None of the active lines contained wavelength data.",
+                parent=parent_widget,
+            )
+            return
+
+        df = pd.DataFrame(rows)
+
+        filepath = filedialog.asksaveasfilename(
+            title="Save Active Lines as Line List",
+            defaultextension=".csv",
+            filetypes=[
+                ("CSV files", "*.csv"),
+                ("All files", "*.*"),
+            ],
+            initialfile="active_lines.csv",
+            parent=parent_widget,
+        )
+        if not filepath:
+            return
+
+        try:
+            df.to_csv(filepath, index=False)
+            messagebox.showinfo(
+                "Saved",
+                f"Saved {len(df)} line(s) to:\n{filepath}",
+                parent=parent_widget,
+            )
+        except Exception as exc:
+            messagebox.showerror(
+                "Save Failed",
+                f"Could not write file:\n{exc}",
+                parent=parent_widget,
+            )
 
     # ------------------------------------------------------------------
     # Color By dialog
