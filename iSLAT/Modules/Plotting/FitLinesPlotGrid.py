@@ -177,7 +177,7 @@ class FitLinesPlotGrid(CompositePlot):
             ax.xaxis.set_major_locator(MaxNLocator(nbins=4, prune='both'))
             ax.yaxis.set_major_locator(MaxNLocator(nbins=4, prune='both'))
 
-            ax.set_xlabel("Wavelength (μm)", fontsize=7, labelpad=1)
+            ax.set_xlabel("λ (μm)", fontsize=7, labelpad=1)
 
             col = idx % self.cols
             if col == 0:

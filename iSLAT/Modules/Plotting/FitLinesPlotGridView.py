@@ -107,6 +107,7 @@ class FitLinesPlotGridView(PlotView):
 
         self._initialised: bool = False
         self._needs_refresh: bool = True
+        self._show_model_lines: bool = False
 
     # ==================================================================
     # Public API
@@ -361,16 +362,6 @@ class FitLinesPlotGridView(PlotView):
         plot_grid : FitLinesPlotGrid
             The grid whose figure to embed.
         """
-        # --- Save toolbar ---------------------------------------------------
-        toolbar_frame = ttk.Frame(parent)
-        toolbar_frame.pack(fill="x", side="top", pady=2)
-
-        btn_save = ttk.Button(
-            toolbar_frame, text="Save Figure",
-            command=lambda pg=plot_grid: self._save_figure(pg),
-        )
-        btn_save.pack(side="left", padx=5)
-
         # --- Scrollable area ------------------------------------------------
         canvas_frame = ttk.Frame(parent)
         canvas_frame.pack(fill="both", expand=True)
@@ -459,23 +450,86 @@ class FitLinesPlotGridView(PlotView):
         scroll_canvas.bind("<Enter>", bind_mousewheel)
         scroll_canvas.bind("<Leave>", unbind_mousewheel)
 
-    def _save_figure(self, plot_grid: FitLinesPlotGrid) -> None:
-        """Open a save-as dialog and write *plot_grid*'s figure to disk."""
-        from tkinter import filedialog
+    # ==================================================================
+    # Overlay helpers — molecule model lines
+    # ==================================================================
 
-        filetypes = [
-            ("PNG files", "*.png"),
-            ("PDF files", "*.pdf"),
-            ("SVG files", "*.svg"),
-            ("All files", "*.*"),
-        ]
-        filepath = filedialog.asksaveasfilename(
-            defaultextension=".png",
-            filetypes=filetypes,
-            initialfile=f"{plot_grid.spectrum_name}_fit_grid",
-        )
-        if filepath:
-            plot_grid.fig.savefig(filepath, dpi=300, bbox_inches="tight")
+    def _apply_model_line_overlays(self) -> None:
+        """Plot visible molecule model lines on every panel of every plot grid.
+
+        Mirrors the ``mol_cache`` rendering loop inside
+        :meth:`SpectrumPanel.generate_plot` so that overlays are
+        consistent in style.  Each plotted artist is tagged with
+        ``._molecule_name`` so it can be found by
+        :meth:`_remove_model_line_overlays`.
+        """
+        import numpy as np
+
+        mols_dict = getattr(self._islat, "molecules_dict", None)
+        if mols_dict is None:
+            return
+        visible_names = mols_dict.get_visible_molecules(return_objects=False)
+        if not visible_names:
+            return
+
+        for plot_grid in self._plot_grids:
+            for panel in plot_grid.iter_panels():
+                ax = getattr(panel, "ax", None)
+                if ax is None:
+                    continue
+                xlim = getattr(panel, "xlim", None)
+                if xlim is None:
+                    continue
+                xmin, xmax = xlim
+                for mol_name in visible_names:
+                    mol = mols_dict.get(mol_name)
+                    if mol is None:
+                        continue
+                    try:
+                        lam, flux = mol.get_flux(return_wavelengths=True)
+                    except Exception:
+                        continue
+                    mask = (lam >= xmin) & (lam <= xmax)
+                    if not np.any(mask):
+                        continue
+                    (line,) = ax.plot(
+                        lam[mask],
+                        flux[mask],
+                        linestyle="--",
+                        color=getattr(mol, "color", None),
+                        alpha=0.8,
+                        linewidth=0.8,
+                        label=getattr(mol, "displaylabel", mol_name),
+                        zorder=3,
+                    )
+                    line._molecule_name = mol_name  # type: ignore[attr-defined]
+
+    def _remove_model_line_overlays(self) -> None:
+        """Remove all molecule model line artists previously added by
+        :meth:`_apply_model_line_overlays` from every panel axes."""
+        for plot_grid in self._plot_grids:
+            for panel in plot_grid.iter_panels():
+                ax = getattr(panel, "ax", None)
+                if ax is None:
+                    continue
+                to_remove = [
+                    line for line in ax.lines
+                    if hasattr(line, "_molecule_name")
+                ]
+                for line in to_remove:
+                    try:
+                        line.remove()
+                    except Exception:
+                        pass
+
+    def _set_show_model_lines(self, value: bool) -> None:
+        """Toggle molecule model line overlays on or off."""
+        self._show_model_lines = value
+        if value:
+            self._apply_model_line_overlays()
+        else:
+            self._remove_model_line_overlays()
+        self.draw()
 
     # ==================================================================
     # PlotView — lifecycle
@@ -503,12 +557,35 @@ class FitLinesPlotGridView(PlotView):
         self.apply_theme(self._pm.theme)
         self._register_control_fields()
 
+    def _register_control_fields(self) -> None:
+        """Register a ``show_model_lines`` :class:`ToggleField` on the top bar."""
+        bus = getattr(self._pm, "control_bus", None)
+        if bus is None:
+            return
+
+        from iSLAT.Modules.GUI.ControlField import ToggleField
+
+        bus.unregister_owner(self)
+        bus.register(
+            ToggleField(
+                "show_model_lines",
+                "Model Lines",
+                getter=lambda: self._show_model_lines,
+                setter=self._set_show_model_lines,
+                owner=self,
+                tip="Toggle molecule model line overlays\non the fit-lines plot grid",
+            ),
+            "top_bar",
+        )
+
     def deactivate(self) -> None:
         """Tear down the view's widgets and unregister any ControlBus fields."""
         bus = getattr(self._pm, "control_bus", None)
         if bus is not None:
             bus.unregister_owner(self)
 
+        if self._show_model_lines:
+            self._remove_model_line_overlays()
         self._teardown_display()
 
     # ==================================================================
@@ -563,11 +640,15 @@ class FitLinesPlotGridView(PlotView):
         error_data: Optional[Any] = None,
         **kwargs: Any,
     ) -> None:
-        """No-op — fit-lines grids are self-contained and do not re-render on model changes.
+        """Refresh molecule model line overlays when the model changes.
 
-        Use :meth:`set_plot_grids` to push new grids into this view.
+        If ``show_model_lines`` is active the overlays are removed and
+        re-drawn so that changes in molecule parameters are reflected.
         """
-        pass
+        if self._show_model_lines and self._plot_grids:
+            self._remove_model_line_overlays()
+            self._apply_model_line_overlays()
+            self.draw()
 
     def on_molecule_visibility_changed(
         self,
@@ -616,8 +697,11 @@ class FitLinesPlotGridView(PlotView):
         parameter_name: str,
         current_selection: Optional[Tuple[float, float]] = None,
     ) -> None:
-        """No-op."""
-        pass
+        """Refresh molecule model line overlays when a parameter changes."""
+        if self._show_model_lines and self._plot_grids:
+            self._remove_model_line_overlays()
+            self._apply_model_line_overlays()
+            self.draw()
 
     def on_molecule_deleted(self, molecule_name: str) -> None:
         """No-op."""
