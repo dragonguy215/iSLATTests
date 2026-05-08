@@ -130,7 +130,7 @@ class iSLATPlot:
             "Full Spectrum": self._full_spectrum_view,
             "Population Diagram": self._population_diagram_view,
             "Line Inspection": self._line_inspection_view,
-            "Fit Lines Grid": self._fit_lines_grid_view,
+            "Line Grid": self._fit_lines_grid_view,
         }
 
         # View-change callbacks — notified when active_view switches

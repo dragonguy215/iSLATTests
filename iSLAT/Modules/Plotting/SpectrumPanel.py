@@ -57,7 +57,6 @@ class SpectrumPanel(SpectralPanel):
     **kwargs
         Forwarded to :class:`SpectralPanel` / :class:`BasePlot`.
     """
-
     def __init__(
         self,
         wave_data: np.ndarray,

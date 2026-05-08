@@ -22,7 +22,7 @@ class PlotGridWindow(tk.Toplevel):
                  **kwargs):
         super().__init__(parent)
         
-        self.title("Fit Lines Plot Grid Window")
+        self.title("Line Grid Window")
         self.geometry("1200x800")
         
         self.plot_grid_list = plot_grid_list if plot_grid_list is not None else []

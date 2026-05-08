@@ -17,7 +17,7 @@ Typical usage::
     plot_grid = FitLinesPlotGrid(fit_data=fit_data, ...)
     plot_grid.generate_plot()
     main_plot.fit_lines_grid_view.set_plot_grids([plot_grid])
-    main_plot.switch_view("Fit Lines Grid")
+    main_plot.switch_view("Line Grid")
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ except ImportError:
 
 # Size constants mirrored from PlotGridWindow
 SUBPLOT_WIDTH_INCHES = 1.8
-SUBPLOT_HEIGHT_INCHES = 1.5
+SUBPLOT_HEIGHT_INCHES = 1.8
 
 
 class FitLinesPlotGridView(PlotView):
@@ -230,7 +230,7 @@ class FitLinesPlotGridView(PlotView):
 
         self._placeholder_fig = plt.Figure(figsize=(8, 5), constrained_layout=True)
         ax = self._placeholder_fig.add_subplot(111)
-        ax.set_title("Fit Lines Plot Grid", fontsize=14)
+        ax.set_title("Line Grid", fontsize=14)
         ax.text(
             0.5, 0.5,
             "No fit data available.\n\nRun 'Fit Lines' to populate this view.",
@@ -712,12 +712,70 @@ class FitLinesPlotGridView(PlotView):
     # ==================================================================
 
     def sync_toggle_state(self, toggle_state: dict) -> None:
-        """No-op — no toggleable overlays in this view."""
-        pass
+        """Apply the summed-spectrum toggle state when this view becomes active."""
+        summed = toggle_state.get("summed", False)
+        if summed:
+            self.toggle_summed_spectrum(True)
 
     def toggle_summed_spectrum(self, visible: bool) -> None:
-        """No-op."""
-        pass
+        """Show or hide the summed model fill on all fit-lines panel axes."""
+        import numpy as _np
+        if not self._plot_grids:
+            return
+
+        # Check if any panel already has the summed fill rendered
+        all_axes = []
+        for plot_grid in self._plot_grids:
+            for panel in plot_grid.iter_panels():
+                ax = getattr(panel, "ax", None)
+                if ax is not None:
+                    all_axes.append((ax, panel))
+
+        if visible:
+            # Compute summed spectrum data once
+            wave = getattr(self._islat, "wave_data", None)
+            mols = getattr(self._islat, "molecules_dict", None)
+            s_wave, s_flux = None, None
+            if mols is not None and wave is not None and len(wave) > 0:
+                try:
+                    s_wave, s_flux = mols.get_summed_flux(wave)
+                except Exception as exc:
+                    debug_config.warning(
+                        "fit_lines_grid_view",
+                        f"toggle_summed_spectrum: get_summed_flux failed: {exc}",
+                    )
+
+            for ax, panel in all_axes:
+                existing = [c for c in ax.collections if hasattr(c, "_islat_summed")]
+                if existing:
+                    for coll in existing:
+                        coll.set_visible(True)
+                elif s_wave is not None and s_flux is not None:
+                    # Render the fill into this panel's range
+                    xlim = getattr(panel, "xlim", None)
+                    if xlim is None:
+                        xdata = getattr(panel, "wave_data", None)
+                        if xdata is not None and len(xdata) > 0:
+                            xlim = (float(xdata[0]), float(xdata[-1]))
+                    if xlim is not None:
+                        mask = (s_wave >= xlim[0]) & (s_wave <= xlim[1])
+                        if _np.any(mask):
+                            try:
+                                panel._plot_summed_spectrum(
+                                    ax, s_wave[mask], s_flux[mask], deduplicate=True
+                                )
+                            except Exception as exc:
+                                debug_config.warning(
+                                    "fit_lines_grid_view",
+                                    f"toggle_summed_spectrum: _plot_summed_spectrum failed: {exc}",
+                                )
+        else:
+            for ax, _ in all_axes:
+                for coll in ax.collections:
+                    if hasattr(coll, "_islat_summed"):
+                        coll.set_visible(False)
+
+        self.draw()
 
     def toggle_legend(self, visible: Optional[bool] = None) -> None:
         """No-op."""

@@ -155,6 +155,10 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
             )
             self._plot.generate_plot()
 
+            # Render summed spectrum overlay if the toggle is on
+            if getattr(self._pm, 'summed_toggle', False):
+                self._render_summed_overlay()
+
             # Render active line vline markers when line data is available
             if line_data and mol is not None:
                 import numpy as np
@@ -180,6 +184,63 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
                 "line_inspection_view",
                 f"LineInspectionPlot.generate_plot failed: {exc}",
             )
+
+    def _render_summed_overlay(self) -> None:
+        """Plot the summed model fill on the inspection axes."""
+        if self._plot is None or self._fig is None:
+            return
+        ax = self._plot.ax
+        if ax is None:
+            return
+        mols = self._get_molecules()
+        wave = getattr(self._islat, "wave_data", None)
+        if mols is None or wave is None or len(wave) == 0:
+            return
+        try:
+            from .BasePlot import BasePlot
+            BasePlot._clear_tagged_artists(ax, "_islat_summed", lines=False)
+            import numpy as _np
+            s_wave, s_flux = mols.get_summed_flux(wave)
+            if s_wave is not None and len(s_wave) > 0:
+                sel = self._current_selection
+                if sel is not None:
+                    mask = (s_wave >= sel[0]) & (s_wave <= sel[1])
+                    if _np.any(mask):
+                        self._plot._plot_summed_spectrum(
+                            ax, s_wave[mask], s_flux[mask], deduplicate=False
+                        )
+        except Exception as exc:
+            debug_config.warning("line_inspection_view", f"_render_summed_overlay failed: {exc}")
+
+    def toggle_summed_spectrum(self, visible: bool) -> None:
+        """Show or hide the summed model fill in the inspection plot."""
+        if self._plot is None or self._fig is None:
+            return
+        ax = self._plot.ax
+        if ax is None:
+            return
+        # Check if we already have the fill rendered
+        existing = [c for c in ax.collections if hasattr(c, '_islat_summed')]
+        if visible and not existing:
+            # Need to render it first
+            self._render_summed_overlay()
+        else:
+            for coll in existing:
+                coll.set_visible(visible)
+        if self._canvas is not None:
+            self._canvas.draw_idle()
+
+    def sync_toggle_state(self, toggle_state: dict) -> None:
+        """Apply the summed-spectrum toggle state when this view becomes active.
+
+        Because :meth:`_build_plot` already checks ``summed_toggle`` during
+        construction, this is only needed when the toggle is turned on *after*
+        the plot has been built (e.g. switching into this view while the
+        toggle is already set).
+        """
+        summed = toggle_state.get("summed", False)
+        if summed and self._initialised:
+            self.toggle_summed_spectrum(True)
 
     # ==================================================================
     # PlotView — display range sync

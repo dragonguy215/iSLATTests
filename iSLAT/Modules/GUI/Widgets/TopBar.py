@@ -214,6 +214,7 @@ class TopBar(ResizableFrame):
             "Three Panel":        "Standard 3-panel layout:\nfull spectrum, line inspection,\nand population diagram.",
             "Full Spectrum":      "Multi-panel full-spectrum view\nshowing the entire wavelength range.",
             "Population Diagram": "Standalone Boltzmann / rotation\ndiagram for the active molecule.",
+            "Line Grid":          "Grid of individual line fits\nfrom the most recent fit run.",
         })
         # ──────────────────────────────────────────────────────────────
 
@@ -625,7 +626,7 @@ class TopBar(ResizableFrame):
             for msg in progress_msgs:
                 self.data_field.insert_text(msg, clear_after=False)
             
-            # Always build a FitLinesPlotGrid so the Fit Lines Grid view
+            # Always build a FitLinesPlotGrid so the Line Grid view
             # reflects the latest results whether or not it is currently active.
             from iSLAT.Modules.Plotting.FitLinesPlotGrid import FitLinesPlotGrid
             _sname = spectrum_name or getattr(self.islat, 'loaded_spectrum_name', 'unknown')
