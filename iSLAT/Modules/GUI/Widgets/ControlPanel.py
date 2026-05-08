@@ -1247,6 +1247,10 @@ class ControlPanel(ttk.Frame):
             label="Filter Line List",
             command=lambda: self._filter_line_list_action(mol_name),
         )
+        menu.add_command(
+            label="Change Line List…",
+            command=lambda: self._change_line_list_action(mol_name),
+        )
         menu.add_separator()
         menu.add_command(
             label="Copy Parameters",
@@ -1305,6 +1309,54 @@ class ControlPanel(ttk.Frame):
             return
         from iSLAT.Modules.GUI.Widgets.LineListFilterWindow import LineListFilterWindow
         LineListFilterWindow(self, mol_obj, self.data_field, islat=self.islat)
+
+    def _change_line_list_action(self, mol_name: str) -> None:
+        """Open a file dialog to pick a new .par line-list file for *mol_name*."""
+        from tkinter import filedialog
+        import os
+        mol_obj = self.islat.molecules_dict.get(mol_name)
+        if mol_obj is None:
+            return
+        initial_dir = None
+        if getattr(mol_obj, 'filepath', None):
+            initial_dir = os.path.dirname(mol_obj.filepath)
+        filepath = filedialog.askopenfilename(
+            title=f"Select line list file for '{mol_name}'",
+            parent=self,
+            initialdir=initial_dir,
+            filetypes=[("HITRAN par files", "*.par"), ("All files", "*.*")],
+        )
+        if not filepath:
+            return
+        # ── Reset line list ──────────────────────────────────────────────────
+        mol_obj.filepath = filepath
+        mol_obj.lines = None          # cleared so _ensure_lines_loaded reloads
+        mol_obj._line_format = None   # let the loader auto-detect the new file
+
+        # ── Reset derived caches that depend on the line list ────────────────
+        mol_obj._molar_mass = None     # derived from the line list
+        if hasattr(mol_obj, '_thermal_broad'):
+            mol_obj._thermal_broad = None
+
+        # ── Invalidate intensity/spectrum caches ─────────────────────────────
+        mol_obj._initialize_caching_system()
+
+        # ── Recompute parameter hashes so dirty-flag checks work ─────────────
+        if hasattr(mol_obj, '_calculate_initial_parameter_hashes'):
+            mol_obj._calculate_initial_parameter_hashes()
+
+        msg = f"Line list for '{mol_name}' changed to: {os.path.basename(filepath)}"
+        if self.data_field is not None:
+            self.data_field.insert_text(msg)
+        else:
+            print(f"ControlPanel: {msg}")
+
+        # ── Redraw ────────────────────────────────────────────────────────────
+        if hasattr(self, 'plot') and self.plot is not None:
+            try:
+                self.plot.update_model_plot()
+            except Exception as e:
+                print(f"ControlPanel: plot update failed after line list change — {e}")
 
     def _edit_molecule_name(self, mol_name: str) -> None:
         """Prompt the user to rename a molecule (changes the dict key)."""
