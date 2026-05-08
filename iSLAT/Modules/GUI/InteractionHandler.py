@@ -200,7 +200,7 @@ class InteractionHandler:
         """Handle clicking on scatter points in population diagram"""
         # Get the indices of picked points
         indices = event.ind
-        if not indices:
+        if indices is None or len(indices) == 0:
             return
         
         # Get the first picked point index

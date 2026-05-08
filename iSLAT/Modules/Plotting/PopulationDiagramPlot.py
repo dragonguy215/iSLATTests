@@ -154,6 +154,9 @@ class PopulationDiagramPlot(BasePlot):
         self._all_molecules_mode: bool = False
         self._molecules_dict_ref = None   # weak reference target (MoleculeDict)
         self._molecules_change_cb = None  # registered callback handle
+        # Cache for the last render_active_lines call so active scatter can
+        # be restored after generate_plot clears the axes.
+        self._active_lines_cache: Optional[Dict[str, Any]] = None
 
     # ------------------------------------------------------------------
     # Public properties
@@ -227,50 +230,105 @@ class PopulationDiagramPlot(BasePlot):
         dist = distance * c.PARSEC_CM
         beam_s = area / dist ** 2
 
-        e_ups: List[float] = []
-        rd_yaxs: List[float] = []
-        value_data_list: List[Dict[str, Any]] = []
+        x_vals: List[float] = []
+        y_vals: List[float] = []
+        # Each entry: (info_dict, al_idx) where al_idx is the index into
+        # active_lines for the corresponding vline (= position among the
+        # threshold-passing lines in line_data order).
+        value_data_list: List[Tuple[Dict[str, Any], int]] = []
+
+        from iSLAT.Modules.Plotting.LineInspectionPlot import LineInspectionPlot as _LIP
+
+        mol_name = getattr(molecule, "name", "") if molecule else ""
+
+        # al_idx tracks position among threshold-passing lines so it stays
+        # aligned with what LineInspectionPlot.render_active_lines added to
+        # active_lines (it increments for every threshold-passing line,
+        # whether or not the pop-diagram NaN check also passes).
+        al_idx = 0
 
         for line, intensity, tau_val in line_data:
             frac = intensity / max_intensity
             if frac < threshold:
-                continue
+                continue  # skipped by both panels — al_idx unchanged
+
+            # This line passed threshold → a vline may exist at active_lines[al_idx].
+            current_al_idx = al_idx
+            al_idx += 1
+
             if any(
                 x is None
                 for x in [intensity, line.a_stein, line.g_up, line.lam]
             ):
-                continue
+                continue  # no scatter point for this line
 
             F = intensity * beam_s
             freq = c.SPEED_OF_LIGHT_MICRONS / line.lam
-            rd_yax = np.log(
-                4 * np.pi * F / (line.a_stein * c.PLANCK_CONSTANT * freq * line.g_up)
+            rd_yax = (
+                np.log(4 * np.pi * F / (line.a_stein * c.PLANCK_CONSTANT * freq * line.g_up))
+                if (F > 0 and line.a_stein > 0) else np.nan
             )
-            e_ups.append(line.e_up)
-            rd_yaxs.append(rd_yax)
 
-            from iSLAT.Modules.Plotting.LineInspectionPlot import LineInspectionPlot as _LIP
+            # Resolve x/y coordinates using current axis property settings so
+            # the scatter stays consistent after set_axes() or color_by() calls.
+            _LINE_MAP = {
+                "eu":         line.e_up,
+                "e_low":      line.e_low,
+                "rd_yax":     rd_yax,
+                "wavelength": line.lam,
+                "intens":     intensity,
+                "a_stein":    line.a_stein,
+                "g_up":       line.g_up,
+                "g_low":      line.g_low,
+                "tau":        tau_val,
+            }
+            xv = _LINE_MAP.get(self._x_prop)
+            yv = _LINE_MAP.get(self._y_prop)
+            try:
+                xv = float(xv) if xv is not None else None
+                yv = float(yv) if yv is not None else None
+            except (TypeError, ValueError):
+                xv = yv = None
+            if xv is None or yv is None or np.isnan(xv) or np.isnan(yv):
+                continue  # no scatter point for this line
+
+            x_vals.append(xv)
+            y_vals.append(yv)
+
             info = _LIP.get_line_info(line, intensity, tau_val)
-            info["rd_yax"] = rd_yax
+            info["rd_yax"] = rd_yax  # always store for data display
             info["intensity_percent"] = frac * 100
-            value_data_list.append(info)
+            info["molecule_name"] = mol_name  # needed for pick-highlight routing
+            value_data_list.append((info, current_al_idx))
 
-        if not e_ups:
+        if not x_vals:
             return None
 
         ax = self._ax
         sc = ax.scatter(
-            e_ups, rd_yaxs, s=30,
+            x_vals, y_vals, s=30,
             color=color, edgecolors="black", picker=True,
         )
 
-        for idx, info in enumerate(value_data_list):
-            info["_scatter_point_index"] = idx
-            if idx < len(active_lines):
-                active_lines[idx][2] = sc
-                active_lines[idx][3].update(info)
+        for scatter_idx, (info, al_idx) in enumerate(value_data_list):
+            info["_scatter_point_index"] = scatter_idx
+            if al_idx < len(active_lines):
+                # Update the existing vline entry with scatter artist + pop-diagram info
+                active_lines[al_idx][2] = sc
+                active_lines[al_idx][3].update(info)
             else:
+                # No corresponding vline (pop-diagram rendered standalone)
                 active_lines.append([None, None, sc, info])
+
+        # Cache params so generate_plot can restore the scatter after a
+        # full axes clear (e.g. when set_axes or color_by is called).
+        self._active_lines_cache = {
+            "line_data": line_data,
+            "active_lines": active_lines,
+            "molecule": molecule,
+            "threshold": threshold,
+            "color": color,
+        }
 
         return sc
 
@@ -293,6 +351,8 @@ class PopulationDiagramPlot(BasePlot):
                     except (ValueError, AttributeError):
                         pass
         active_lines.clear()
+        # Clear the cache so generate_plot won't re-render stale scatter.
+        self._active_lines_cache = None
 
     # ------------------------------------------------------------------
     # Plot generation
@@ -406,6 +466,27 @@ class PopulationDiagramPlot(BasePlot):
         # Legend for multi-component mode
         if len(self._component_data) > 1 and self._color_mapping is None:
             self._render_component_legend(ax)
+
+        # Re-render any previously plotted active-line scatter so it
+        # persists across axes changes and color_by calls.
+        if self._active_lines_cache is not None:
+            cache = self._active_lines_cache
+            al = cache["active_lines"]
+            # Do NOT call al.clear() here — that would destroy the vline
+            # entries added by LineInspectionPlot.render_active_lines,
+            # making the vlines in the inspection panel un-pickable after
+            # an axis change.  Instead, just null out the stale scatter
+            # references so render_active_lines updates them in-place.
+            for entry in al:
+                if len(entry) > 2:
+                    entry[2] = None
+            self.render_active_lines(
+                cache["line_data"],
+                al,
+                molecule=cache["molecule"],
+                threshold=cache["threshold"],
+                color=cache["color"],
+            )
 
         if self.fig is not None:
             self.apply_theme_to_figure()

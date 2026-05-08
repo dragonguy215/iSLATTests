@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-
 class LineInspectionContextMixin:
     """Mixin that supplies the line inspection panel right-click menu.
 

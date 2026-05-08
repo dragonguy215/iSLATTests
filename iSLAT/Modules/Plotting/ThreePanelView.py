@@ -721,6 +721,24 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         picked_artist = event.artist
         grid = self._ensure_grid()
 
+        # Rebuild _active_scatter_collections from active_lines before every
+        # pick so that a set_axes / color_by regeneration (which creates a
+        # new scatter artist via the cache replay) never leaves stale
+        # references that cause missed highlights or data-field updates.
+        self._active_scatter_collections = {}
+        for _entry in self.active_lines:
+            _sc = _entry[2] if len(_entry) > 2 else None
+            _val = _entry[3] if len(_entry) > 3 else None
+            if _sc is not None and _val is not None:
+                _mname = _val.get('molecule_name', '')
+                if _mname and _mname not in self._active_scatter_collections:
+                    # count all entries that share this scatter object
+                    _count = sum(
+                        1 for e in self.active_lines
+                        if len(e) > 2 and e[2] is _sc
+                    )
+                    self._active_scatter_collections[_mname] = (_sc, _count)
+
         # Determine which scatter collection (if any) was clicked
         scatter_point_clicked: Optional[int] = None
         for mol_name, (sc, _) in self._active_scatter_collections.items():
@@ -774,18 +792,94 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
                     colors[picked_scatter_idx] = mcolors.to_rgba('orange')
                 sc.set_facecolors(colors)
 
-        # Update the population diagram for the picked molecule without
-        # changing islat.active_molecule (so all other active molecules
-        # remain visible in the line inspection panel).
+        # Update the population diagram only when the pick belongs to a
+        # *different* molecule than the one currently shown (comparison pick).
+        # For same-molecule picks the scatter colour was already updated above;
+        # calling _render_population_diagram_with_lines here would call
+        # generate_plot → clear axes → replay cache, causing scatter doubling
+        # and compounding the title font size on every click.
         if picked_mol_name is not None:
-            mol_dict = getattr(self._islat, 'molecules_dict', {})
-            picked_mol = mol_dict.get(picked_mol_name) if mol_dict else None
-            if picked_mol is not None:
-                self.ax3.set_title(f'{picked_mol.displaylabel} Population diagram')
-                line_data = self._mol_line_data_cache.get(picked_mol_name, [])
-                self._render_population_diagram_with_lines(line_data, picked_mol)
+            active_mol = getattr(self._islat, 'active_molecule', None)
+            active_mol_name = getattr(active_mol, 'name', None)
+            if picked_mol_name != active_mol_name:
+                mol_dict = getattr(self._islat, 'molecules_dict', {})
+                picked_mol = mol_dict.get(picked_mol_name) if mol_dict else None
+                if picked_mol is not None:
+                    line_data = self._mol_line_data_cache.get(picked_mol_name, [])
+                    self._render_population_diagram_with_lines(line_data, picked_mol)
 
         return picked_value
+
+    def _reapply_selected_line_highlight(self) -> None:
+        """Re-apply the orange highlight for ``selected_line`` after a plot regeneration.
+
+        Called after ``set_axes`` / ``color_by`` replays the cache so the
+        previously-selected line stays highlighted rather than reverting to
+        the base molecule colour.
+        """
+        import matplotlib.colors as mcolors
+
+        if not self.active_lines or self.selected_line is None:
+            return
+
+        grid = self._ensure_grid()
+
+        # Rebuild _active_scatter_collections from the freshly-created artists.
+        self._active_scatter_collections = {}
+        for _entry in self.active_lines:
+            _sc = _entry[2] if len(_entry) > 2 else None
+            _val = _entry[3] if len(_entry) > 3 else None
+            if _sc is not None and _val is not None:
+                _mname = _val.get('molecule_name', '')
+                if _mname and _mname not in self._active_scatter_collections:
+                    _count = sum(
+                        1 for e in self.active_lines
+                        if len(e) > 2 and e[2] is _sc
+                    )
+                    self._active_scatter_collections[_mname] = (_sc, _count)
+
+        # Reset all vlines to their base molecule colour.
+        for line, text_obj, scatter, value in self.active_lines:
+            mol_color = (value.get('molecule_color') or
+                         grid._get_theme_value("active_scatter_line_color", 'green')) if value else 'green'
+            if line is not None:
+                line.set_color(mol_color)
+            if text_obj is not None:
+                text_obj.set_color(mol_color)
+
+        # Reset all scatter collections to their base colour.
+        for mol_name, (sc, count) in self._active_scatter_collections.items():
+            mol_dict = getattr(self._islat, 'molecules_dict', {})
+            mol = mol_dict.get(mol_name) if mol_dict else None
+            base_color = (getattr(mol, 'color', None) or
+                          grid._get_theme_value("active_scatter_line_color", 'green'))
+            if count > 0:
+                sc.set_facecolors([mcolors.to_rgba(base_color)] * count)
+
+        # Identify the selected entry by matching the wavelength key.
+        sel_lam = self.selected_line.get('lam')
+        for line, text_obj, scatter, value in self.active_lines:
+            if value is None or value.get('lam') != sel_lam:
+                continue
+            # Highlight the vline.
+            if line is not None:
+                line.set_color('orange')
+            if text_obj is not None:
+                text_obj.set_color('orange')
+            # Highlight the scatter point.
+            mol_name = value.get('molecule_name')
+            scatter_idx = value.get('_scatter_point_index')
+            if mol_name and mol_name in self._active_scatter_collections:
+                sc, count = self._active_scatter_collections[mol_name]
+                mol_dict = getattr(self._islat, 'molecules_dict', {})
+                mol = mol_dict.get(mol_name) if mol_dict else None
+                base_color = (getattr(mol, 'color', None) or
+                              grid._get_theme_value("active_scatter_line_color", 'green'))
+                colors = [mcolors.to_rgba(base_color)] * count
+                if scatter_idx is not None and scatter_idx < count:
+                    colors[scatter_idx] = mcolors.to_rgba('orange')
+                sc.set_facecolors(colors)
+            break
 
     def _highlight_strongest_line(self) -> None:
         """Find and highlight the strongest line in active_lines."""
@@ -1067,7 +1161,13 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
 
         if event.inaxes == self.ax3:
             pdp = getattr(self._grid, 'pop_diagram_panel', None) if self._grid is not None else None
-            draw_idle = self._pm.canvas.draw_idle
+            _raw_draw_idle = self._pm.canvas.draw_idle
+
+            def draw_idle():
+                """Re-highlight the selected line then refresh the canvas."""
+                self._reapply_selected_line_highlight()
+                _raw_draw_idle()
+
             return self._build_population_diagram_menu(pdp, canvas_widget, draw_idle)
 
         return None

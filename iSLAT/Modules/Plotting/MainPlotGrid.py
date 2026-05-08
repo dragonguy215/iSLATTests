@@ -1068,3 +1068,9 @@ class MainPlotGrid(CompositePlot):
                     except (ValueError, AttributeError):
                         pass
         active_lines.clear()
+
+        # Clear the pop-diagram scatter cache so the next generate_plot() call
+        # (e.g. from _render_population_diagram_base) does NOT re-render the
+        # active-line scatter that was just removed.
+        if self.pop_diagram_panel is not None:
+            self.pop_diagram_panel._active_lines_cache = None
