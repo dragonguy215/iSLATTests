@@ -65,7 +65,8 @@ class iSLAT:
         # === DATA CONTAINERS ===
         self.hitran_data = {}
         #self._hitran_file_cache = {}  # Cache for HITRAN file data to avoid re-reading
-        self.input_line_list: Optional[Union[str, PathLike]] = self._load_default_line_list()
+        self._input_line_list: Optional[Union[str, PathLike]] = self._load_default_line_list()
+        self._line_list_change_callbacks: list = []
         self.output_line_measurements = None
         
         # === SAMPLE SPECTRA ===
@@ -95,6 +96,36 @@ class iSLAT:
                 print(f"Warning: Default line list file not found: {default_line_list}")
         
         return None
+
+    # --- input_line_list property -----------------------------------------
+
+    @property
+    def input_line_list(self) -> Optional[str]:
+        """Path to the currently loaded input line list file."""
+        return self._input_line_list
+
+    @input_line_list.setter
+    def input_line_list(self, value: Optional[str]) -> None:
+        old = self._input_line_list
+        self._input_line_list = value
+        if old != value:
+            for cb in list(self._line_list_change_callbacks):
+                try:
+                    cb(value)
+                except Exception as exc:
+                    print(f"iSLAT: line-list callback error: {exc}")
+
+    def add_line_list_change_callback(self, cb) -> None:
+        """Register *cb* to be called with the new path when :attr:`input_line_list` changes."""
+        if cb not in self._line_list_change_callbacks:
+            self._line_list_change_callbacks.append(cb)
+
+    def remove_line_list_change_callback(self, cb) -> None:
+        """Unregister a previously registered line-list change callback."""
+        try:
+            self._line_list_change_callbacks.remove(cb)
+        except ValueError:
+            pass
 
     # === MOLECULE MANAGEMENT METHODS ===
     def _set_initial_active_molecule(self):

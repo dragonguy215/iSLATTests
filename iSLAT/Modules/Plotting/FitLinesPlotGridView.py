@@ -233,7 +233,7 @@ class FitLinesPlotGridView(PlotView):
         ax.set_title("Line Grid", fontsize=14)
         ax.text(
             0.5, 0.5,
-            "No fit data available.\n\nRun 'Fit Lines' to populate this view.",
+            "No line list loaded.\n\nLoad a line list to populate this view.",
             ha="center", va="center",
             transform=ax.transAxes,
             color="gray", fontsize=12,
@@ -434,6 +434,9 @@ class FitLinesPlotGridView(PlotView):
         widget.pack(fill="none", expand=False)
         self._tab_canvases.append(fig_canvas)
 
+        # Attach right-click context menu to this canvas.
+        self._connect_panel_context_menu(fig_canvas, plot_grid)
+
         # First tab's canvas / figure become the primary references
         if self._canvas is None:
             self._canvas = fig_canvas
@@ -599,14 +602,135 @@ class FitLinesPlotGridView(PlotView):
         if self._show_model_lines:
             self._remove_model_line_overlays()
         self._teardown_display()
+        # Force a full rebuild on the next activation so the widgets are
+        # recreated inside whatever parent frame activate() receives.
+        self._initialised = False
 
     # ==================================================================
     # PlotView — interaction context
     # ==================================================================
 
     def build_context_menu(self, event: Any, canvas_widget: Any) -> Any:
-        """No custom right-click menu for this view."""
+        """No custom right-click menu via the main InteractionHandler.
+
+        Context menus for individual panels are handled by per-canvas
+        ``button_press_event`` listeners attached in
+        :meth:`_connect_panel_context_menu`.
+        """
         return None
+
+    def _connect_panel_context_menu(
+        self,
+        fig_canvas: "FigureCanvasTkAgg",
+        plot_grid: FitLinesPlotGrid,
+    ) -> None:
+        """Attach a right-click context-menu handler to *fig_canvas*.
+
+        Builds an ``Axes → fit-index`` lookup from the grid's ``axs`` array
+        and ``fit_csv_dict``.  When the user right-clicks an individual
+        panel two actions are offered:
+
+        * **Open in Line Inspection** — switches to the standalone Line
+          Inspection view and calls ``on_selection(xmin, xmax)`` so the
+          panel's wavelength range is shown immediately.
+        * **Open in Three Panel (centered)** — switches to the Three Panel
+          view and centers the spectrum overview on the panel's line.
+        """
+        if tk is None or fig_canvas is None or plot_grid.axs is None:
+            return
+
+        # Build ax → (idx, fit_entry) lookup once.
+        ax_map: Dict[Any, Tuple[int, dict]] = {}
+        for idx, entry in plot_grid.fit_csv_dict.items():
+            if idx >= plot_grid.rows * plot_grid.cols:
+                break
+            row = idx // plot_grid.cols
+            col = idx % plot_grid.cols
+            try:
+                ax = plot_grid.axs[row, col]
+                ax_map[ax] = (idx, entry)
+            except (IndexError, KeyError):
+                pass
+
+        pm = self._pm
+
+        def _on_button_press(event):
+            if event.button != 3 or event.inaxes is None:
+                return
+            hit = ax_map.get(event.inaxes)
+            if hit is None:
+                return
+
+            idx, entry = hit
+            xmin = float(entry.get("xmin", 0.0))
+            xmax = float(entry.get("xmax", 0.0))
+            lam  = float(entry.get("lam",  (xmin + xmax) / 2.0))
+            species = str(entry.get("species", ""))
+            label = f"{species} {lam:.4f} μm" if species else f"{lam:.4f} μm"
+
+            def _open_line_inspection():
+                pm.switch_view("Line Inspection")
+                try:
+                    pm.active_view.on_selection(xmin, xmax)
+                except Exception as exc:
+                    debug_config.warning(
+                        "fit_lines_grid_view",
+                        f"_open_line_inspection: on_selection failed: {exc}",
+                    )
+
+            def _open_three_panel():
+                # Centre ax1 on the line; keep the current span if possible.
+                half_span = (xmax - xmin) / 2.0
+                try:
+                    cur_lo, cur_hi = pm.ax1.get_xlim()
+                    cur_half = (cur_hi - cur_lo) / 2.0
+                    if cur_half > 0:
+                        half_span = cur_half
+                except Exception:
+                    pass
+                new_lo = lam - half_span
+                new_hi = lam + half_span
+                pm.islat.display_range = (new_lo, new_hi)
+                pm.switch_view("Three Panel")
+                try:
+                    pm.ax1.set_xlim(new_lo, new_hi)
+                    pm.match_display_range(match_y=True)
+                except Exception as exc:
+                    debug_config.warning(
+                        "fit_lines_grid_view",
+                        f"_open_three_panel: range update failed: {exc}",
+                    )
+
+            try:
+                canvas_widget = fig_canvas.get_tk_widget()
+                menu = tk.Menu(canvas_widget, tearoff=0)
+                menu.add_command(
+                    label=f"Open in Line Inspection  [{label}]",
+                    command=_open_line_inspection,
+                )
+                menu.add_command(
+                    label=f"Open in Three Panel  [{label}]",
+                    command=_open_three_panel,
+                )
+                # Convert matplotlib canvas coords to screen coords.
+                x_root = canvas_widget.winfo_rootx() + int(event.x)
+                y_root = (
+                    canvas_widget.winfo_rooty()
+                    + int(canvas_widget.winfo_height() - event.y)
+                )
+                menu.tk_popup(x_root, y_root)
+            except Exception as exc:
+                debug_config.warning(
+                    "fit_lines_grid_view",
+                    f"_connect_panel_context_menu popup failed: {exc}",
+                )
+            finally:
+                try:
+                    menu.grab_release()
+                except Exception:
+                    pass
+
+        fig_canvas.mpl_connect("button_press_event", _on_button_press)
 
     # ==================================================================
     # PlotView — theme
@@ -794,12 +918,34 @@ class FitLinesPlotGridView(PlotView):
         pass
 
     def toggle_saved_lines(self, show: bool, loaded_lines: Any = None) -> None:
-        """No-op."""
-        pass
+        """Show or hide saved-line annotations on every panel."""
+        if not self._plot_grids:
+            return
+        for plot_grid in self._plot_grids:
+            for panel in plot_grid.iter_panels():
+                if not hasattr(panel, 'plot_saved_lines'):
+                    continue
+                if show and loaded_lines is not None:
+                    panel.plot_saved_lines(loaded_lines)
+                else:
+                    panel.remove_saved_lines()
+        self.draw()
 
     def toggle_atomic_lines(self, show: bool) -> None:
-        """No-op."""
-        pass
+        """Show or hide atomic-line markers on every panel."""
+        if not self._plot_grids:
+            return
+        islat = getattr(self, '_islat', None)
+        atomic_data = getattr(islat, 'atomic_lines', None) if islat is not None else None
+        for plot_grid in self._plot_grids:
+            for panel in plot_grid.iter_panels():
+                if not hasattr(panel, 'plot_atomic_lines'):
+                    continue
+                if show and atomic_data is not None:
+                    panel.plot_atomic_lines(atomic_data)
+                else:
+                    panel.remove_atomic_lines()
+        self.draw()
 
     # ==================================================================
     # PlotView — canvas / drawing

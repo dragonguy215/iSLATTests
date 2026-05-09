@@ -26,6 +26,68 @@ class LineInspectionContextMixin:
     application object with a ``GUI.top_bar`` attribute).
     """
 
+    def _toggle_inspection_summed(self, insp_ax: Any) -> None:
+        """Toggle the summed-model fill on *insp_ax* only.
+
+        If a fill tagged ``_islat_summed`` is already present it is shown
+        or hidden in-place.  If none exists the overlay is computed from
+        the current molecules and rendered for the first time.  The canvas
+        is redrawn after the change.
+
+        Parameters
+        ----------
+        insp_ax :
+            The matplotlib :class:`~matplotlib.axes.Axes` that hosts the
+            line-inspection panel (``ax2`` in Three Panel, the plot ``ax``
+            in standalone Line Inspection).
+        """
+        if insp_ax is None:
+            return
+
+        existing = [c for c in insp_ax.collections if hasattr(c, '_islat_summed')]
+        currently_visible = any(c.get_visible() for c in existing)
+
+        if existing:
+            # Just flip visibility — no re-render needed.
+            for c in existing:
+                c.set_visible(not currently_visible)
+        else:
+            # First-time render: compute summed flux over the visible x-range.
+            islat = getattr(self, '_islat', None)
+            mols = getattr(islat, 'molecules_dict', None) if islat is not None else None
+            wave = getattr(islat, 'wave_data', None) if islat is not None else None
+            if mols is None or wave is None:
+                return
+            try:
+                import numpy as np
+                xmin, xmax = insp_ax.get_xlim()
+                mask = (wave >= xmin) & (wave <= xmax)
+                if not np.any(mask):
+                    return
+                s_wave, s_flux = mols.get_summed_flux(wave[mask])
+                if s_wave is None or not np.any(s_flux > 0):
+                    return
+                # Use the SpectrumPanel helper if available; otherwise fill directly.
+                panel = getattr(self, '_plot', None)
+                if hasattr(panel, '_plot_summed_spectrum'):
+                    panel._plot_summed_spectrum(insp_ax, s_wave, s_flux, deduplicate=True)
+                else:
+                    fill = insp_ax.fill_between(s_wave, 0, s_flux,
+                                                color='lightgray', alpha=1.0,
+                                                label='Sum', zorder=1)
+                    fill._islat_summed = True
+            except Exception:
+                return
+
+        # Redraw via the plot manager canvas if available, else fall back.
+        pm = getattr(self, '_pm', None)
+        canvas = getattr(pm, 'canvas', None) or getattr(self, '_canvas', None)
+        if canvas is not None:
+            try:
+                canvas.draw_idle()
+            except Exception:
+                pass
+
     def _build_line_inspection_menu(self, canvas_widget: Any) -> Optional[Any]:
         """Return a populated ``tk.Menu`` for the line inspection panel.
 
@@ -115,11 +177,38 @@ class LineInspectionContextMixin:
                 pm.islat.display_range = (new_lo, new_hi)
             _refresh_ax1()
 
+        # Resolve the inspection axes — ax2 for ThreePanelView, or the
+        # standalone plot ax for LineInspectionView.
+        insp_ax = ax2 or getattr(getattr(self, '_plot', None), 'ax', None)
+
+        def _toggle_total_model():
+            self._toggle_inspection_summed(insp_ax)
+            # Reflect the new state in the menu label (best-effort).
+            existing = [
+                c for c in (insp_ax.collections if insp_ax is not None else [])
+                if hasattr(c, '_islat_summed')
+            ]
+            visible = any(c.get_visible() for c in existing)
+            try:
+                idx = menu.index("Show Total Model" if visible else "Hide Total Model")
+                menu.entryconfig(idx, label="Hide Total Model" if visible else "Show Total Model")
+            except Exception:
+                pass
+
         menu.add_command(label="Save Current Line",       command=_save_current_line)
         menu.add_command(label="Fit Current Line",        command=_fit_current_line)
         menu.add_command(label="Run Deblender",           command=_run_deblender)
         menu.add_separator()
         menu.add_command(label="Save All Lines in Range", command=_save_all_lines_in_range)
+
+        if insp_ax is not None:
+            existing = [c for c in insp_ax.collections if hasattr(c, '_islat_summed')]
+            summed_on = any(c.get_visible() for c in existing)
+            menu.add_separator()
+            menu.add_command(
+                label="Hide Total Model" if summed_on else "Show Total Model",
+                command=_toggle_total_model,
+            )
 
         if ax1 is not None and ax2 is not None:
             menu.add_separator()

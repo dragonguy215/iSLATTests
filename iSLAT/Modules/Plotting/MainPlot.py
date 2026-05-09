@@ -358,6 +358,10 @@ class iSLATPlot:
 
         # Register for active molecule changes
         self.islat.molecules_dict.add_active_molecule_change_callback(self._on_active_molecule_changed)
+
+        # Refresh the Line Grid view whenever the input line list changes
+        if hasattr(self.islat, 'add_line_list_change_callback'):
+            self.islat.add_line_list_change_callback(self._on_line_list_changed)
     
     def _on_active_molecule_changed(self, old_molecule, new_molecule):
         """Handle active molecule changes"""
@@ -841,6 +845,21 @@ class iSLATPlot:
         if self.is_full_spectrum:
             self._full_spectrum_view.toggle_residuals(self.residual_toggle)
 
+    def _on_line_list_changed(self, new_path) -> None:
+        """Callback fired when ``islat.input_line_list`` is assigned a new value.
+
+        Clears any stale fit grids and rebuilds the Line Grid preview from
+        the new line list.  If the view is currently active the display is
+        updated immediately; otherwise it is marked for refresh on next
+        activation.
+        """
+        view = self._fit_lines_grid_view
+        view._plot_grids = []
+        view._needs_refresh = True
+        if self.active_view_name == "Line Grid" and view._parent_frame is not None:
+            view._rebuild_display()
+            view._needs_refresh = False
+
     def toggle_full_spectrum(self):
         """Toggle between the full-spectrum view and the previously active view.
 
@@ -863,5 +882,28 @@ class iSLATPlot:
 
         debug_config.info(
             "main_plot",
-            f"toggle_full_spectrum: active view → '{self.active_view_name}'",
+            f"toggle_full_spectrum: active view \u2192 '{self.active_view_name}'",
+        )
+
+    def toggle_three_panel(self):
+        """Toggle between the three-panel view and the previously active view.
+
+        * If the three-panel view is **not** currently active, the current
+          view name is remembered and the display switches to Three Panel.
+        * If the three-panel view **is** currently active, the display
+          returns to whichever view was active before (falling back to
+          ``"Full Spectrum"`` if that view is no longer available).
+        """
+        if self.active_view_name != "Three Panel":
+            self._pre_threepanel_view_name = self.active_view_name
+            self.switch_view("Three Panel")
+        else:
+            return_to = getattr(self, '_pre_threepanel_view_name', None)
+            if return_to not in self._views or return_to == "Three Panel":
+                return_to = "Full Spectrum"
+            self.switch_view(return_to)
+
+        debug_config.info(
+            "main_plot",
+            f"toggle_three_panel: active view \u2192 '{self.active_view_name}'",
         )

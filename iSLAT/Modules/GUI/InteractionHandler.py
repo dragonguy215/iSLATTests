@@ -532,6 +532,11 @@ class InteractionHandler:
             self._toggle_residuals()
             return 'break'
 
+        # Handle 't' key for toggling three panel view
+        elif keysym == 't':
+            self._toggle_three_panel()
+            return 'break'
+
         # Handle 'n' key for advancing plot start by the current range
         # Shift+N = retreat (subtract range), plain N = advance (add range)
         elif keysym == 'n':
@@ -624,6 +629,11 @@ class InteractionHandler:
         """Toggle full spectrum mode on the main plot"""
         if hasattr(self.plot_manager, 'toggle_full_spectrum'):
             self.plot_manager.toggle_full_spectrum()
+
+    def _toggle_three_panel(self):
+        """Toggle three panel view on the main plot"""
+        if hasattr(self.plot_manager, 'toggle_three_panel'):
+            self.plot_manager.toggle_three_panel()
     
     def _toggle_summed_spectrum(self):
         """Toggle summed spectrum visibility on the main plot"""
