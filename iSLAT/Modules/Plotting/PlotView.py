@@ -297,12 +297,12 @@ class PlotView(ABC):
     # Interaction context
     # ------------------------------------------------------------------
     def build_context_menu(self, event: Any, canvas_widget: Any) -> Optional[Any]:
-        """Build and return a ``tk.Menu`` for a right-click at *event*, or ``None``.
+        """Build and return a ``tk.Menu`` for a right-click at *event*.
 
-        The default returns ``None`` (no context menu).  Views that provide
-        a right-click menu should override this and return a populated
-        ``tk.Menu``.  The caller (:class:`InteractionHandler`) is responsible
-        for positioning and displaying the menu via ``menu.tk_popup(x, y)``.
+        The default creates a minimal menu containing only "Save Figure".
+        Views that provide additional items should create their own menu,
+        append items, and call :meth:`_append_save_figure_item` before
+        returning.
 
         Parameters
         ----------
@@ -312,7 +312,22 @@ class PlotView(ABC):
             The Tk widget backing the active canvas (used to anchor the menu
             and compute screen coordinates).
         """
-        return None
+        try:
+            import tkinter as tk
+        except ImportError:
+            return None
+        menu = tk.Menu(canvas_widget, tearoff=0)
+        self._append_save_figure_item(menu)
+        return menu
+
+    def _append_save_figure_item(self, menu: Any) -> None:
+        """Append a ``Save Figure…`` command to *menu*.
+
+        Calls :meth:`save_figure` with a file-dialog so the user can choose
+        the destination and format.
+        """
+        menu.add_separator()
+        menu.add_command(label="Save Figure…", command=self.save_figure)
 
     def _register_control_fields(self) -> None:
         """Register this view's :class:`ControlField` objects on the :class:`ControlBus`.

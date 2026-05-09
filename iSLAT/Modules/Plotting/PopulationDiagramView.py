@@ -295,7 +295,10 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
     def build_context_menu(self, event: Any, canvas_widget: Any) -> Any:
         """Delegate to the shared population-diagram context menu builder."""
         draw_idle = self._canvas.draw_idle if self._canvas is not None else lambda: None
-        return self._build_population_diagram_menu(self._plot, canvas_widget, draw_idle)
+        menu = self._build_population_diagram_menu(self._plot, canvas_widget, draw_idle)
+        if menu is not None:
+            self._append_save_figure_item(menu)
+        return menu
 
     # ==================================================================
     # PlotView — theme

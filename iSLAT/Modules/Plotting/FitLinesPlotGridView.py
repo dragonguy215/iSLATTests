@@ -712,6 +712,8 @@ class FitLinesPlotGridView(PlotView):
                     label=f"Open in Three Panel  [{label}]",
                     command=_open_three_panel,
                 )
+                menu.add_separator()
+                menu.add_command(label="Save Figure…", command=self.save_figure)
                 # Convert matplotlib canvas coords to screen coords.
                 x_root = canvas_widget.winfo_rootx() + int(event.x)
                 y_root = (

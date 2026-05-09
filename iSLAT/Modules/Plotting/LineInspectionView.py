@@ -416,7 +416,10 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
 
     def build_context_menu(self, event: Any, canvas_widget: Any) -> Any:
         """Return the line-inspection right-click menu."""
-        return self._build_line_inspection_menu(canvas_widget)
+        menu = self._build_line_inspection_menu(canvas_widget)
+        if menu is not None:
+            self._append_save_figure_item(menu)
+        return menu
 
     def deactivate(self) -> None:
         """Unregister controls, disconnect pick event, and unpack the canvas."""

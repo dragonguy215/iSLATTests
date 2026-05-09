@@ -1234,7 +1234,10 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
             return None
 
         if event.inaxes == self.ax2:
-            return self._build_line_inspection_menu(canvas_widget)
+            menu = self._build_line_inspection_menu(canvas_widget)
+            if menu is not None:
+                self._append_save_figure_item(menu)
+            return menu
 
         if event.inaxes == self.ax3:
             pdp = getattr(self._grid, 'pop_diagram_panel', None) if self._grid is not None else None
@@ -1245,9 +1248,15 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
                 self._reapply_selected_line_highlight()
                 _raw_draw_idle()
 
-            return self._build_population_diagram_menu(pdp, canvas_widget, draw_idle)
+            menu = self._build_population_diagram_menu(pdp, canvas_widget, draw_idle)
+            if menu is not None:
+                self._append_save_figure_item(menu)
+            return menu
 
-        return None
+        # ax1 or unrecognised axes — minimal menu with just Save Figure
+        menu = tk.Menu(canvas_widget, tearoff=0)
+        self._append_save_figure_item(menu)
+        return menu
 
     # ------------------------------------------------------------------
     # Canvas / drawing
