@@ -633,10 +633,18 @@ class ControlPanel(ttk.Frame):
         self.data_field.insert_text(f"Deleting {mol_name}", clear_after = True)
 
         if mol_name == active_mol:
+            live_dict = getattr(self.islat, 'molecules_dict', {})
             new_active = self.islat.user_settings.get("default_active_molecule", "H2O")
-            print(f"setting {new_active} as active molecule")
-            self.data_field.insert_text(f"setting {new_active} as active molecule", clear_after = False)
-            self._set_active_molecule(mol_name=new_active)
+            # If the preferred default isn't present, pick any other molecule
+            if new_active not in live_dict or new_active == mol_name:
+                new_active = next(
+                    (k for k in live_dict if k != mol_name),
+                    None,
+                )
+            if new_active:
+                print(f"setting {new_active} as active molecule")
+                self.data_field.insert_text(f"setting {new_active} as active molecule", clear_after=False)
+                self._set_active_molecule(mol_name=new_active)
 
         frame.destroy()
 
@@ -1430,19 +1438,23 @@ class ControlPanel(ttk.Frame):
         print(f"Pasted parameters to '{mol_name}'.")
 
     def _set_active_molecule(self, mol_name):
-        selected_label = self.mol_dict[mol_name].displaylabel
+        """Set *mol_name* as the active molecule.
 
+        Looks up the molecule directly in ``islat.molecules_dict`` so that
+        molecules added after construction (e.g. via duplicate) are found
+        correctly.
+        """
+        live_dict = getattr(self.islat, 'molecules_dict', None)
+        if not live_dict:
+            return
         try:
-            if hasattr(self.islat, 'molecules_dict') and self.islat.molecules_dict:
-                for mol_name, mol_obj in self.islat.molecules_dict.items():
-                    display_label = getattr(mol_obj, 'displaylabel', mol_name)
-                    if display_label == selected_label:
-                        self.islat.active_molecule = mol_name
-                        return
-                
-                first_mol = next(iter(self.islat.molecules_dict.keys()), None)
-                if first_mol:
-                    self.islat.active_molecule = first_mol
+            if mol_name in live_dict:
+                self.islat.active_molecule = mol_name
+                return
+            # Fallback: set the first available molecule
+            first_mol = next(iter(live_dict.keys()), None)
+            if first_mol:
+                self.islat.active_molecule = first_mol
         except Exception as e:
             print(f"Error setting active molecule: {e}")
 
