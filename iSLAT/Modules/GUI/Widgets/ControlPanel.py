@@ -1328,22 +1328,9 @@ class ControlPanel(ttk.Frame):
         )
         if not filepath:
             return
-        # ── Reset line list ──────────────────────────────────────────────────
-        mol_obj.filepath = filepath
-        mol_obj.lines = None          # cleared so _ensure_lines_loaded reloads
-        mol_obj._line_format = None   # let the loader auto-detect the new file
 
-        # ── Reset derived caches that depend on the line list ────────────────
-        mol_obj._molar_mass = None     # derived from the line list
-        if hasattr(mol_obj, '_thermal_broad'):
-            mol_obj._thermal_broad = None
-
-        # ── Invalidate intensity/spectrum caches ─────────────────────────────
-        mol_obj._initialize_caching_system()
-
-        # ── Recompute parameter hashes so dirty-flag checks work ─────────────
-        if hasattr(mol_obj, '_calculate_initial_parameter_hashes'):
-            mol_obj._calculate_initial_parameter_hashes()
+        # Delegate all internal reset logic to the molecule itself
+        mol_obj.change_line_list(filepath)
 
         msg = f"Line list for '{mol_name}' changed to: {os.path.basename(filepath)}"
         if self.data_field is not None:
@@ -1357,6 +1344,14 @@ class ControlPanel(ttk.Frame):
                 self.plot.update_model_plot()
             except Exception as e:
                 print(f"ControlPanel: plot update failed after line list change — {e}")
+
+        # ── Refresh control panel display if this was the active molecule ─────
+        try:
+            active_mol = self._get_active_molecule_object()
+            if active_mol is not None and getattr(active_mol, 'name', None) == mol_name:
+                self._update_active_molecule_changes()
+        except Exception as e:
+            print(f"ControlPanel: panel refresh failed after line list change — {e}")
 
     def _edit_molecule_name(self, mol_name: str) -> None:
         """Prompt the user to rename a molecule (changes the dict key)."""

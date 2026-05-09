@@ -191,6 +191,37 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
             'flux': True
         }
         self._init_cache_stats()
+
+    def change_line_list(self, filepath: str) -> None:
+        """Assign a new line-list file and reset all derived state.
+
+        This is the canonical way to swap the line list on a live
+        :class:`Molecule` instance.  It resets every cache and object
+        that depends on the old lines so that the next spectrum
+        calculation automatically reloads from *filepath*.
+
+        Parameters
+        ----------
+        filepath : str
+            Absolute path to the new line-list file (.par or similar).
+        """
+        self.filepath = filepath
+        self._line_format = None   # let the loader auto-detect format
+
+        # Discard old line data and the Intensity object that references it
+        self.lines = None
+        self.intensity = None
+
+        # Reset properties derived from the line list
+        self._molar_mass = None
+        if hasattr(self, '_thermal_broad'):
+            self._thermal_broad = None
+
+        # Invalidate all computation caches and reset dirty flags
+        self._initialize_caching_system()
+
+        # Recompute parameter hashes from the current (non-line-list) params
+        self._calculate_initial_parameter_hashes()
     
     def _calculate_initial_parameter_hashes(self):
         self._param_hash_cache = {
