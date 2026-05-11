@@ -1,13 +1,10 @@
 """
-FitLinesPlotGridView — :class:`PlotView` for displaying a
-:class:`FitLinesPlotGrid` within the main iSLAT plotting area.
+FitLinesPlotGridView — :class:`PlotView` for displaying a :class:`FitLinesPlotGrid` within the main iSLAT plotting area.
 
-Shows a grid of individual line-fit results for the current fitting
-session.  When multiple grids are available (e.g. after a batch fit)
-they are presented in a :class:`ttk.Notebook` with one tab per grid,
-mirroring the layout of
-:class:`~iSLAT.Modules.GUI.PlotGridWindow.PlotGridWindow`.  Each tab is
-scrollable to accommodate grids that exceed the frame height.
+Shows a grid of individual line-fit results for the current fitting session. 
+When multiple grids are available (e.g. after a batch fit) they are presented in a :class:`ttk.Notebook` 
+with one tab per grid, mirroring the layout of :class:`~iSLAT.Modules.GUI.PlotGridWindow.PlotGridWindow`.
+Each tab is scrollable to accommodate grids that exceed the frame height.
 
 When no plot grids have been set a placeholder message is shown.
 
@@ -59,17 +56,14 @@ except ImportError:
 SUBPLOT_WIDTH_INCHES = 1.8
 SUBPLOT_HEIGHT_INCHES = 1.8
 
-
 class FitLinesPlotGridView(PlotView):
     """
     Embedded fit-lines plot grid view.
 
-    Renders one or more :class:`FitLinesPlotGrid` objects inside the main
-    iSLAT plotting area.  When multiple grids are available they are
-    presented in a :class:`ttk.Notebook` with one tab per grid,
-    mirroring the layout of
-    :class:`~iSLAT.Modules.GUI.PlotGridWindow.PlotGridWindow`.  Each tab
-    is scrollable to accommodate grids that exceed the frame height.
+    Renders one or more :class:`FitLinesPlotGrid` objects inside the main iSLAT plotting area.
+    When multiple grids are available they are presented in a :class:`ttk.Notebook` with one tab per grid,
+    mirroring the layout of :class:`~iSLAT.Modules.GUI.PlotGridWindow.PlotGridWindow`.
+    Each tab is scrollable to accommodate grids that exceed the frame height.
 
     When no plot grids have been set a placeholder message is displayed.
 

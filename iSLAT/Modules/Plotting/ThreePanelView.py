@@ -321,8 +321,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
             wave_data_obs=wave_data_obs,
         )
 
-        # Respect summed_toggle — hide the summed fill if the user
-        # toggled it off.
+        # Respect summed_toggle — hide the summed fill if the user toggled it off.
         if not self._pm.summed_toggle:
             BasePlot._clear_tagged_artists(
                 grid.ax_spectrum, "_islat_summed", lines=False,
