@@ -35,7 +35,6 @@ from iSLAT import Constants as c
 # Reuse the partition type from MoleculeLineList for consistency
 _PartitionType = namedtuple("partition", ["t", "q"])
 
-
 @dataclass(frozen=True, slots=True)
 class ReadResult:
     """Uniform container returned by every :class:`LineListReader`.
@@ -62,7 +61,6 @@ class ReadResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
     extra_columns: Dict[str, list] = field(default_factory=dict)
 
-
 # ---------------------------------------------------------------------------
 # LineListReader Protocol
 # ---------------------------------------------------------------------------
@@ -73,7 +71,6 @@ CORE_FIELD_NAMES = (
     "a_stein", "e_up", "e_low", "g_up", "g_low",
 )
 
-
 @runtime_checkable
 class LineListReader(Protocol):
     """Protocol that every line-list reader must satisfy."""
@@ -81,7 +78,6 @@ class LineListReader(Protocol):
     def read(self, filepath: Union[str, Path]) -> ReadResult:
         """Read a line-list file and return a :class:`ReadResult`."""
         ...
-
 
 # ---------------------------------------------------------------------------
 # Format auto-detection
@@ -92,7 +88,6 @@ _SAVED_LINES_MARKER_COLUMNS = frozenset({
     "Flux_data", "Err_data", "Fit_SN", "Flux_fit",
     "FWHM_fit", "Centr_fit", "Red-chisq",
 })
-
 
 def detect_format(filepath: Union[str, Path]) -> str:
     """Inspect *filepath* and return a format tag.
@@ -139,11 +134,9 @@ def detect_format(filepath: Union[str, Path]) -> str:
 
     raise ValueError(f"Cannot auto-detect format of {filepath}")
 
-
 # ---------------------------------------------------------------------------
 # HitranParReader
 # ---------------------------------------------------------------------------
-
 class HitranParReader:
     """Reader for HITRAN ``.par`` fixed-width line-list files.
 
@@ -190,7 +183,6 @@ class HitranParReader:
             extra_columns={},
         )
 
-
 # ---------------------------------------------------------------------------
 # CsvLineListReader
 # ---------------------------------------------------------------------------
@@ -213,7 +205,6 @@ _CSV_COLUMN_MAP: Dict[str, str] = {
     "wavelength": "lam",
     "einstein_a": "a_stein",
 }
-
 
 class CsvLineListReader:
     """Reader for iSLAT-convention CSV line lists.
@@ -319,7 +310,6 @@ class CsvLineListReader:
             extra_columns=extra_columns,
         )
 
-
 # ---------------------------------------------------------------------------
 # SavedLinesReader
 # ---------------------------------------------------------------------------
@@ -342,7 +332,6 @@ _SAVED_COLUMN_MAP: Dict[str, str] = {
     "low_lev":  "lev_low",
     "wavelength": "lam",
 }
-
 
 class SavedLinesReader:
     """Reader for LINESAVES CSV files (fit-result columns preserved).
@@ -442,7 +431,6 @@ class SavedLinesReader:
             extra_columns=extra_columns,
         )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -465,7 +453,6 @@ def _safe_int(value: str, default: int = 0) -> int:
         return int(float(value))
     except (ValueError, TypeError):
         return default
-
 
 # ---------------------------------------------------------------------------
 # Default reader registry — importable by MoleculeLineList

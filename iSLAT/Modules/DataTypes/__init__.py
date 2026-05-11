@@ -5,6 +5,10 @@ __all__ = [
     "MoleculeDict",
     "MoleculeLineList",
     "MoleculeLine",
+    "QuantumField",
+    "QuantumStateSchema",
+    "GenericDelimitedSchema",
+    "QuantumStateRegistry",
 ]
 
 _LAZY_IMPORTS = {
@@ -14,6 +18,10 @@ _LAZY_IMPORTS = {
     "MoleculeDict": ".MoleculeDict",
     "MoleculeLineList": ".MoleculeLineList",
     "MoleculeLine": ".MoleculeLine",
+    "QuantumField": ".QuantumStateSchema",
+    "QuantumStateSchema": ".QuantumStateSchema",
+    "GenericDelimitedSchema": ".QuantumStateSchema",
+    "QuantumStateRegistry": ".QuantumStateSchema",
 }
 
 def __getattr__(name):

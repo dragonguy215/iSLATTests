@@ -72,7 +72,8 @@ class MoleculeLineList(WavelengthRangeMixin):
                  '_frequencies_cache', '_a_stein_cache', '_e_up_cache', '_e_low_cache',
                  '_g_up_cache', '_g_low_cache', '_data_loaded', '_filename', '_raw_lines_data',
                  '_pandas_df_cache', '_molar_mass', '_wavelength_range', '_filtered_raw_data',
-                 '_lev_up_cache', '_lev_low_cache', '_extra_fields', '_source_format')
+                 '_lev_up_cache', '_lev_low_cache', '_extra_fields', '_source_format',
+                 '_quantum_cache')
     
     # Class-level reader registry — populated lazily to avoid circular imports
     _reader_registry: ClassVar[Dict[str, Any]] = {}
@@ -137,6 +138,7 @@ class MoleculeLineList(WavelengthRangeMixin):
         self._g_low_cache = None
         self._lev_up_cache = None
         self._lev_low_cache = None
+        self._quantum_cache: dict = {}
         
         # Lazy loading - only load data when needed
         if filename:
@@ -661,6 +663,62 @@ class MoleculeLineList(WavelengthRangeMixin):
         self._lev_low_cache = None
         self._pandas_df_cache = None  # Invalidate DataFrame cache too
         self._filtered_raw_data = None  # Force re-filter on next access
+        self._quantum_cache.clear()
+
+    # ─────────────────────────────────────────────────────────────────
+    # Quantum-state access
+    # ─────────────────────────────────────────────────────────────────
+
+    @property
+    def quantum_schema(self):
+        """Return the :class:`~.QuantumStateSchema.QuantumStateSchema` for this molecule.
+
+        The schema is looked up in :class:`~.QuantumStateSchema.QuantumStateRegistry`
+        using :attr:`molecule_id`.  Importing :mod:`~.HITRANQuantumSchemas`
+        here (on first access) registers all HITRAN schemas as a side-effect
+        while keeping startup cost zero when the feature is not used.
+        """
+        import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401 — register side-effect
+        from .QuantumStateSchema import QuantumStateRegistry
+        return QuantumStateRegistry.get_schema(self.molecule_id)
+
+    def get_quantum_numbers(self, state: str = 'upper') -> dict:
+        """Return a dict of named quantum-number arrays for all lines.
+
+        Parsing results are cached per *state* and invalidated together
+        with all other caches when line data changes.
+
+        Parameters
+        ----------
+        state : ``'upper'`` or ``'lower'``
+            Which level labels to parse.
+
+        Returns
+        -------
+        dict[str, numpy.ndarray]
+            Mapping of field name → 1-D array aligned with the line data.
+
+        Raises
+        ------
+        ValueError
+            If *state* is not ``'upper'`` or ``'lower'``.
+        """
+        if state not in ('upper', 'lower'):
+            raise ValueError(f"state must be 'upper' or 'lower', got {state!r}")
+
+        if state in self._quantum_cache:
+            return self._quantum_cache[state]
+
+        self._ensure_data_loaded()
+        col = 'lev_up' if state == 'upper' else 'lev_low'
+        if self._raw_lines_data is not None:
+            labels = self._raw_lines_data[col]
+        else:
+            labels = np.array([getattr(l, col) for l in self.lines], dtype='U64')
+
+        result = self.quantum_schema.parse_bulk(labels)
+        self._quantum_cache[state] = result
+        return result
 
     def _get_column(self, column_name: str, cache_attr: str) -> np.ndarray:
         """Generic cached column accessor.

@@ -132,7 +132,38 @@ class MoleculeLine:
             'g_up': self.g_up,
             'g_low': self.g_low
         }
-    
+
+    def get_quantum_dict(self, state: str = 'upper', schema=None) -> dict:
+        """Return the parsed quantum numbers for one level of this line.
+
+        Parameters
+        ----------
+        state : ``'upper'`` or ``'lower'``
+            Which level label to parse.
+        schema : QuantumStateSchema, optional
+            Schema to use for parsing.  If *None*, the schema is looked up
+            from :class:`~.QuantumStateSchema.QuantumStateRegistry` using
+            :attr:`molecule_id`.
+
+        Returns
+        -------
+        dict[str, Any]
+            Mapping of field name → typed value for the requested level.
+
+        Raises
+        ------
+        ValueError
+            If *state* is not ``'upper'`` or ``'lower'``.
+        """
+        if state not in ('upper', 'lower'):
+            raise ValueError(f"state must be 'upper' or 'lower', got {state!r}")
+        label: str = self.lev_up if state == 'upper' else self.lev_low
+        if schema is None:
+            import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401
+            from .QuantumStateSchema import QuantumStateRegistry
+            schema = QuantumStateRegistry.get_schema(self.molecule_id)
+        return schema.parse_label(label or '')
+
     @property
     def line_data(self) -> 'LineDataView':
         """
