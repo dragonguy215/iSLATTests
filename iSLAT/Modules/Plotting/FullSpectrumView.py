@@ -829,7 +829,10 @@ class FullSpectrumView(ToggleMixin, PlotView):
             return
         # Delegate to FullSpectrumPlot's mol-cache helper so colour/style
         # stays consistent with the rest of the composed plot.
-        mol_cache, _labels, _colors = self._plot._build_mol_cache()
+        # _build_mol_cache returns a list of (lam, flux, color, label, name) tuples;
+        # convert to a dict keyed by name for O(1) lookup.
+        mol_cache_list, _labels, _colors = self._plot._build_mol_cache()
+        mol_cache = {tup[4]: tup[:4] for tup in mol_cache_list}
         entry = mol_cache.get(getattr(molecule, "name", None))
         if entry is None:
             # Molecule not in cache — trigger a full inplace refresh instead.
