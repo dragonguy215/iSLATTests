@@ -23,7 +23,6 @@ def _get_spectral_utils():
         _spectral_utils_cache = (make_bins, spectres)
     return _spectral_utils_cache
 
-
 def _ci_get(data: dict, key: str):
     """Look up *key* in *data* with a case-insensitive fallback.
 

@@ -11,7 +11,6 @@ from unittest.mock import MagicMock
 
 from iSLAT.Modules.DataProcessing.LineSaveService import LineSaveService
 
-
 # ============================================================================
 # Construction
 # ============================================================================
@@ -22,7 +21,6 @@ class TestLineSaveServiceInit:
     def test_can_instantiate(self):
         svc = LineSaveService()
         assert svc is not None
-
 
 # ============================================================================
 # create_default_line_info
@@ -57,11 +55,9 @@ class TestCreateDefaultLineInfo:
         assert info['a'] == 0.0
         assert info['g'] == 1.0
 
-
 # ============================================================================
 # format_line_for_save
 # ============================================================================
-
 class TestFormatLineForSave:
     """Tests for formatting line info for file output."""
 
@@ -105,11 +101,9 @@ class TestFormatLineForSave:
         assert result['g_up'] == 1.0
         assert result['g_low'] == 1.0
 
-
 # ============================================================================
 # get_selection_bounds
 # ============================================================================
-
 class TestGetSelectionBounds:
     """Tests for selection bounds logic."""
 
@@ -148,11 +142,9 @@ class TestGetSelectionBounds:
         # xmax uses fallback for single-element array
         assert xmax == pytest.approx(15.0 + 0.01)
 
-
 # ============================================================================
 # extract_line_info_from_selection
 # ============================================================================
-
 class TestExtractLineInfoFromSelection:
     """Tests for extracting line info from plot selection."""
 

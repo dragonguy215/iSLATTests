@@ -152,6 +152,25 @@ class FullSpectrumView(ToggleMixin, PlotView):
         if self._canvas is not None:
             self._canvas.draw_idle()
 
+    def _get_data_density(self) -> bool:
+        return self._pm.toggle_state.get("data_density", False)
+
+    def _set_data_density(self, value: bool) -> None:
+        from .SpectralPanel import XScaling
+        value = bool(value)
+        if value == self._pm.toggle_state.get("data_density", False):
+            return
+        self._pm.toggle_state["data_density"] = value
+        if self._plot is None:
+            return
+        self._plot.x_scaling = XScaling.DATA_DENSITY if value else XScaling.WAVELENGTH
+        self._plot._compute_panel_layout()
+        self.span_selectors.clear()
+        self._plot.generate_plot()
+        self._install_span_selectors()
+        if self._canvas is not None:
+            self._canvas.draw_idle()
+
     # ==================================================================
     # Convenience accessors (delegate to composed plot)
     # ==================================================================
@@ -261,6 +280,12 @@ class FullSpectrumView(ToggleMixin, PlotView):
         figsize = self._compute_interactive_figsize(wave)
 
         show_residuals = self._pm.toggle_state.get("show_residuals", False)
+        from .SpectralPanel import XScaling
+        x_scaling = (
+            XScaling.DATA_DENSITY
+            if self._pm.toggle_state.get("data_density", False)
+            else XScaling.WAVELENGTH
+        )
 
         if show_residuals:
             model_flux = self._compute_model_flux(wave_obs, wave)
@@ -274,6 +299,7 @@ class FullSpectrumView(ToggleMixin, PlotView):
                 wave_data_obs=wave_obs,
                 figsize=figsize,
                 theme=self._pm.theme,
+                x_scaling=x_scaling,
             )
         else:
             # The composed plot handles all rendering via BasePlot helpers.
@@ -286,6 +312,7 @@ class FullSpectrumView(ToggleMixin, PlotView):
                 wave_data_obs=wave_obs,
                 figsize=figsize,
                 theme=self._pm.theme,
+                x_scaling=x_scaling,
             )
         return plot
 
@@ -618,6 +645,21 @@ class FullSpectrumView(ToggleMixin, PlotView):
                 setter=_residuals_setter,
                 owner=self,
                 tip="Toggle residual sub-panels on/off\nin full spectrum mode\nKeybind: R",
+            ),
+            "top_bar",
+        )
+
+        bus.register(
+            ToggleField(
+                "data_density", "Data Density X-Scale",
+                getter=self._get_data_density,
+                setter=self._set_data_density,
+                owner=self,
+                tip=(
+                    "Toggle X-axis scaling mode.\n"
+                    "OFF: equal wavelength width per panel (default).\n"
+                    "ON:  equal data-point count per panel (DATA_DENSITY)."
+                ),
             ),
             "top_bar",
         )

@@ -82,6 +82,7 @@ class iSLATPlot:
             "summed":       True,
             "legend":       True,
             "show_residuals": False,
+            "data_density": False,       # XScaling.DATA_DENSITY when True
             "current_selection": None,   # (xmin, xmax) or None
         }
 

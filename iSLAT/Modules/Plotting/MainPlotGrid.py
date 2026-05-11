@@ -92,7 +92,6 @@ class MainPlotGrid(CompositePlot):
     ax_popdiagram : Axes, optional
         Pre-existing axes for the population-diagram panel.
     """
-
     def __init__(
         self,
         wave_data: np.ndarray,
