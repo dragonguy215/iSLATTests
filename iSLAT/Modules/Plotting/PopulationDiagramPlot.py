@@ -229,13 +229,20 @@ class PopulationDiagramPlot(BasePlot):
         x_vals: List[float] = []
         y_vals: List[float] = []
         # Each entry: (info_dict, al_idx) where al_idx is the index into
-        # active_lines for the corresponding vline (= position among the
-        # threshold-passing lines in line_data order).
+        # active_lines for the corresponding vline (= position among the threshold-passing lines in line_data order).
         value_data_list: List[Tuple[Dict[str, Any], int]] = []
 
         from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
 
         mol_name = getattr(molecule, "name", "") if molecule else ""
+
+        # Resolve molecule_id once for quantum-field axis lookups.
+        _mol_id: Optional[str] = None
+        if molecule is not None:
+            _ll = getattr(molecule, "line_list", None)
+            _mol_id = getattr(_ll, "molecule_id", None) if _ll is not None else None
+            if _mol_id is None:
+                _mol_id = getattr(molecule, "molecule_id", None)
 
         # al_idx tracks position among threshold-passing lines so it stays
         # aligned with what LineInspectionPlot.render_active_lines added to
@@ -287,7 +294,11 @@ class PopulationDiagramPlot(BasePlot):
                 "fwhm_convolved_kms":    info.get("fwhm_convolved_kms"),
             }
             xv = _LINE_MAP.get(self._x_prop)
+            if xv is None:
+                xv = self._resolve_qn_for_line(self._x_prop, line, _mol_id)
             yv = _LINE_MAP.get(self._y_prop)
+            if yv is None:
+                yv = self._resolve_qn_for_line(self._y_prop, line, _mol_id)
             try:
                 xv = float(xv) if xv is not None else None
                 yv = float(yv) if yv is not None else None
@@ -1289,10 +1300,77 @@ class PopulationDiagramPlot(BasePlot):
         """Human-readable axis label for a given property name.
 
         Delegates to :attr:`~iSLAT.Modules.DataTypes.Intensity.Intensity.AXIS_LABELS`
-        so the label registry is stored on the data object.
+        so the label registry is stored on the data object.  Quantum-field
+        props (``"qn_upper:FIELD"``, ``"qn_lower:FIELD"``, or bare field
+        names like ``"J"``) are formatted as ``"FIELD (upper/lower)"``.
         """
+        if prop.startswith("qn_upper:"):
+            return f"{prop[len('qn_upper:'):]} (upper)"
+        if prop.startswith("qn_lower:"):
+            return f"{prop[len('qn_lower:'):]} (lower)"
         from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
-        return _Intensity.get_axis_label(prop)
+        label = _Intensity.get_axis_label(prop)
+        # If the label equals the prop key it was not found in AXIS_LABELS;
+        # it may be a bare quantum-field name — return it as-is (e.g. "J").
+        return label
+
+    # ------------------------------------------------------------------
+    # Quantum-field helpers (shared by axis and color_by)
+    # ------------------------------------------------------------------
+
+    # Properties stored directly as float arrays in component data dicts.
+    _KNOWN_CONTINUOUS_PROPS: frozenset = frozenset({
+        "eu", "rd_yax", "wavelength", "intens", "a_stein",
+        "g_up", "g_low", "e_low", "tau",
+        "fwhm_instrumental_kms", "fwhm_convolved_kms",
+    })
+
+    @staticmethod
+    def _parse_qn_prop(prop: str) -> Tuple[Optional[str], str]:
+        """Parse *prop* into ``(qn_field, qn_state)``.
+
+        Returns ``(None, 'upper')`` for standard (non-quantum) properties.
+        Bare names that are not in the known-continuous set are treated as
+        upper-state quantum fields (matching the ``color_by`` convention).
+        """
+        _KNOWN = PopulationDiagramPlot._KNOWN_CONTINUOUS_PROPS
+        if prop in _KNOWN:
+            return None, "upper"
+        if prop.startswith("qn_upper:"):
+            return prop[len("qn_upper:"):], "upper"
+        if prop.startswith("qn_lower:"):
+            return prop[len("qn_lower:"):], "lower"
+        return prop, "upper"
+
+    def _resolve_qn_for_line(
+        self,
+        prop: str,
+        line: "MoleculeLine",
+        mol_id: Optional[str] = None,
+    ) -> Optional[float]:
+        """Return the quantum-field value for *prop* on a single line.
+
+        Used by :meth:`render_active_lines` and :meth:`_render_highlights`
+        to support quantum-number axis properties on individual lines.
+
+        Returns ``None`` when the field is absent or the value is the
+        sentinel ``-999``.
+        """
+        qn_field, qn_state = self._parse_qn_prop(prop)
+        if qn_field is None:
+            return None
+        try:
+            import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401
+            from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
+            _mid = mol_id or getattr(line, "molecule_id", None)
+            schema = QuantumStateRegistry.get_schema(_mid)
+            qd = line.get_quantum_dict(qn_state, schema=schema)
+            val = qd.get(qn_field)
+            if val is None or val == -999:
+                return None
+            return float(val)
+        except Exception:
+            return None
 
     @staticmethod
     def _get_axis_array(
@@ -1300,14 +1378,46 @@ class PopulationDiagramPlot(BasePlot):
     ) -> Optional[np.ndarray]:
         """Extract a property array from a component data dict.
 
-        Returns ``None`` if the property is absent or cannot be cast to float.
+        Handles both standard property keys stored in *cdata* and quantum
+        field names (e.g. ``"qn_upper:J"``, ``"qn_lower:v"``, or bare
+        names like ``"J"``), which are parsed from the ``lev_up`` /
+        ``lev_low`` labels using the molecule's quantum-state schema.
+
+        Returns ``None`` if the property is absent or cannot be resolved.
         """
+        # Direct key lookup (covers all standard properties)
         arr = cdata.get(prop)
-        if arr is None:
+        if arr is not None:
+            try:
+                return np.asarray(arr, dtype=float)
+            except (ValueError, TypeError):
+                pass  # fall through to quantum-field parsing
+
+        # Quantum-field parsing
+        qn_field, qn_state = PopulationDiagramPlot._parse_qn_prop(prop)
+        if qn_field is None:
+            return None  # known-continuous prop with no data
+
+        lev_key = "lev_up" if qn_state == "upper" else "lev_low"
+        lev_arr = cdata.get(lev_key)
+        if lev_arr is None:
             return None
+
+        mol_id = cdata.get("molecule_id")
         try:
-            return np.asarray(arr, dtype=float)
-        except (ValueError, TypeError):
+            from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
+            import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401
+            schema = QuantumStateRegistry.get_schema(mol_id)
+            labels = np.asarray(lev_arr, dtype="U64")
+            parsed = schema.parse_bulk(labels)
+            field_vals = parsed.get(qn_field)
+            if field_vals is None:
+                return None
+            float_vals = np.asarray(field_vals, dtype=float)
+            # Replace integer sentinel values with NaN
+            float_vals = np.where(float_vals == -999, np.nan, float_vals)
+            return float_vals
+        except Exception:
             return None
 
     def set_axes(
@@ -1324,9 +1434,20 @@ class PopulationDiagramPlot(BasePlot):
         Parameters
         ----------
         x_prop : str
-            Property key to use for the X axis (e.g. ``'eu'``, ``'wavelength'``).
+            Property key to use for the X axis.  Supported values include
+            all standard keys (``'eu'``, ``'wavelength'``, ``'a_stein'``,
+            ``'intens'``, ``'tau'``, ``'g_up'``, ``'g_low'``,
+            ``'e_low'``, ``'rd_yax'``, ``'fwhm_instrumental_kms'``,
+            ``'fwhm_convolved_kms'``) as well as quantum-number field
+            names in the same formats accepted by :meth:`color_by`:
+
+            * A bare field name, e.g. ``"J"``, ``"v"``, ``"Ka"``
+              (defaults to the upper state).
+            * ``"qn_upper:FIELD"`` — explicitly select the upper state.
+            * ``"qn_lower:FIELD"`` — explicitly select the lower state.
+
         y_prop : str
-            Property key to use for the Y axis (e.g. ``'rd_yax'``, ``'intens'``).
+            Property key to use for the Y axis.  Same options as *x_prop*.
         x_log : bool
             Whether to use a logarithmic scale for the X axis.
         y_log : bool
@@ -1382,6 +1503,14 @@ class PopulationDiagramPlot(BasePlot):
             # so all physics computation lives on the data object.
             _hl_info = _Intensity.get_line_info(line_obj, intensity, tau, molecule=_hl_mol)
 
+            # Resolve molecule_id for quantum-field axis lookups.
+            _hl_mol_id: Optional[str] = None
+            if _hl_mol is not None:
+                _hl_ll = getattr(_hl_mol, "line_list", None)
+                _hl_mol_id = getattr(_hl_ll, "molecule_id", None) if _hl_ll is not None else None
+                if _hl_mol_id is None:
+                    _hl_mol_id = getattr(_hl_mol, "molecule_id", None)
+
             def _resolve(prop: str) -> Optional[float]:
                 """Map a property key to a scalar value for this line."""
                 _LINE_MAP = {
@@ -1398,10 +1527,13 @@ class PopulationDiagramPlot(BasePlot):
                     "fwhm_convolved_kms":    _hl_info.get("fwhm_convolved_kms"),
                 }
                 val = _LINE_MAP.get(prop)
-                try:
-                    return float(val) if val is not None else None
-                except (TypeError, ValueError):
-                    return None
+                if val is not None:
+                    try:
+                        return float(val)
+                    except (TypeError, ValueError):
+                        return None
+                # Fall back to quantum-field resolution
+                return self._resolve_qn_for_line(prop, line_obj, _hl_mol_id)
 
             xv = _resolve(self._x_prop)
             yv = _resolve(self._y_prop)

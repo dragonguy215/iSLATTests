@@ -526,10 +526,27 @@ class PopulationDiagramContextMixin:
             (_ML.get_text(k), k if k != "lam" else "wavelength")
             for k in ("e_up", "e_low", "lam", "a_stein", "g_up", "g_low")
         ]
+        # Quantum field options — populated from the molecule's schema when
+        # pdp has component_data with a recognised molecule_id.
+        _QUANTUM_AXIS: list = []
+        if pdp is not None:
+            try:
+                import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401
+                from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
+                _comp_data = getattr(pdp, 'component_data', [])
+                _mol_ids = [c.get('molecule_id') for c in _comp_data if c.get('molecule_id')]
+                if _mol_ids:
+                    _schema = QuantumStateRegistry.get_schema(_mol_ids[0])
+                    for _f in list(_schema.global_fields) + list(_schema.local_fields):
+                        _QUANTUM_AXIS.append((f"{_f.name} — upper state (quantum)", f"qn_upper:{_f.name}"))
+                        _QUANTUM_AXIS.append((f"{_f.name} — lower state (quantum)", f"qn_lower:{_f.name}"))
+            except Exception:
+                pass
+
         AXIS_OPTIONS = [
             (label, "eu" if key == "e_up" else key)
             for label, key in (_AXIS_EXTRA + _FROM_REG_AXIS)
-        ]
+        ] + _QUANTUM_AXIS
         AXIS_LABELS = [o[0] for o in AXIS_OPTIONS]
         AXIS_VALUES = [o[1] for o in AXIS_OPTIONS]
 
