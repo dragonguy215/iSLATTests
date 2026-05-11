@@ -12,7 +12,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 from iSLAT.Modules.DataProcessing.LineListMaker import LineListMaker
 from iSLAT.Modules.GUI.Tooltips import CreateToolTip
@@ -207,6 +207,78 @@ class LineListFilterWindow(tk.Toplevel):
         self._entries["vib_band"] = (vib_var, n_modes_var)
         self._vib_hint = _hint
 
+        # ── Quantum Field filter ─────────────────────────────────────
+        qf_sep_row = vib_sep_row + 2
+        ttk.Separator(ctrl_lf, orient="horizontal").grid(
+            row=qf_sep_row, column=0, columnspan=3, sticky="ew", pady=4)
+
+        _qf_tip = ("Filter by a specific parsed quantum number field (e.g. J, v, Ka, v1).\n"
+                   "Pick the field name and whether to look at the upper or lower level.\n"
+                   "Fill 'Exact Value' for an equality test, or 'Range Min'/'Max' for a\n"
+                   "numeric range.  Leave all blank to skip this filter.")
+
+        # Populate field-name suggestions from molecule schema when available.
+        _qf_field_names: list = []
+        try:
+            import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401
+            from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
+            _ll = getattr(self.mol_obj, 'line_list', None)
+            _mid = getattr(_ll, 'molecule_id', None)
+            if _mid:
+                _schema = QuantumStateRegistry.get_schema(_mid)
+                for _f in list(_schema.global_fields) + list(_schema.local_fields):
+                    _qf_field_names.append(_f.name)
+        except Exception:
+            pass
+
+        qf_row = qf_sep_row + 1
+        qf_name_lbl = ttk.Label(ctrl_lf, text="Quantum Field")
+        qf_name_lbl.grid(row=qf_row, column=0, sticky="w", padx=4, pady=2)
+        CreateToolTip(qf_name_lbl, _qf_tip)
+
+        qf_field_var = tk.StringVar()
+        qf_field_combo = ttk.Combobox(
+            ctrl_lf, textvariable=qf_field_var,
+            values=_qf_field_names, state="normal", width=8,
+        )
+        qf_field_combo.grid(row=qf_row, column=1, padx=4, pady=2, sticky="ew")
+        CreateToolTip(qf_field_combo,
+                      "Quantum field name (e.g. J, v, Ka, v1).\n"
+                      "Leave blank to skip this filter.")
+
+        qf_state_var = tk.StringVar(value="upper")
+        qf_state_combo = ttk.Combobox(
+            ctrl_lf, textvariable=qf_state_var,
+            values=["upper", "lower"], state="readonly", width=7,
+        )
+        qf_state_combo.grid(row=qf_row, column=2, padx=4, pady=2, sticky="w")
+        CreateToolTip(qf_state_combo,
+                      "Parse the quantum field from the upper or lower level label.")
+
+        qf_exact_lbl = ttk.Label(ctrl_lf, text="  Exact Value")
+        qf_exact_lbl.grid(row=qf_row + 1, column=0, sticky="w", padx=4, pady=2)
+        CreateToolTip(qf_exact_lbl,
+                      "Exact quantum number value to match.\n"
+                      "When filled, overrides the Min/Max range entries.")
+        qf_exact_var = tk.StringVar()
+        qf_exact_entry = ttk.Entry(ctrl_lf, textvariable=qf_exact_var, width=10)
+        qf_exact_entry.grid(row=qf_row + 1, column=1, padx=4, pady=2, sticky="ew")
+        CreateToolTip(qf_exact_entry, "E.g. '5' for J=5.")
+
+        qf_min_lbl = ttk.Label(ctrl_lf, text="  Range Min")
+        qf_min_lbl.grid(row=qf_row + 2, column=0, sticky="w", padx=4, pady=2)
+        CreateToolTip(qf_min_lbl, "Minimum quantum number value (inclusive, used when Exact Value is blank).")
+        qf_min_var = tk.StringVar()
+        qf_min_entry = ttk.Entry(ctrl_lf, textvariable=qf_min_var, width=10)
+        qf_min_entry.grid(row=qf_row + 2, column=1, padx=4, pady=2, sticky="ew")
+        CreateToolTip(qf_min_entry, "Minimum (inclusive) quantum number value.")
+        qf_max_var = tk.StringVar()
+        qf_max_entry = ttk.Entry(ctrl_lf, textvariable=qf_max_var, width=10)
+        qf_max_entry.grid(row=qf_row + 2, column=2, padx=4, pady=2, sticky="ew")
+        CreateToolTip(qf_max_entry, "Maximum (inclusive) quantum number value.")
+
+        self._entries["qn_field"] = (qf_field_var, qf_state_var, qf_exact_var, qf_min_var, qf_max_var)
+
         # ── Active filters listbox ───────────────────────────────────
         af_lf = ttk.LabelFrame(outer, text="Active Filters", padding=6)
         af_lf.grid(row=1, column=0, sticky="nsew", pady=(0, 6))
@@ -341,6 +413,43 @@ class LineListFilterWindow(tk.Toplevel):
                 self._maker.reset()
                 return
 
+        # Quantum field filter
+        qn_entry = self._entries.get("qn_field")
+        if qn_entry is not None:
+            qf_field_var, qf_state_var, qf_exact_var, qf_min_var, qf_max_var = qn_entry
+            field = qf_field_var.get().strip()
+            if field:
+                state = qf_state_var.get() or "upper"
+                exact_text = qf_exact_var.get().strip()
+                if exact_text:
+                    # Try numeric coercion, fall back to string.
+                    try:
+                        exact_val: Any = int(exact_text)
+                    except ValueError:
+                        try:
+                            exact_val = float(exact_text)
+                        except ValueError:
+                            exact_val = exact_text
+                    try:
+                        self._maker.filter_quantum_field(field, value=exact_val, state=state)
+                    except Exception as e:
+                        messagebox.showerror(
+                            "Quantum Field Error", str(e), parent=self)
+                        self._maker.reset()
+                        return
+                else:
+                    lo = self._parse_float(qf_min_var.get())
+                    hi = self._parse_float(qf_max_var.get())
+                    if lo is not None or hi is not None:
+                        try:
+                            self._maker.filter_quantum_field(
+                                field, min_val=lo, max_val=hi, state=state)
+                        except Exception as e:
+                            messagebox.showerror(
+                                "Quantum Field Error", str(e), parent=self)
+                            self._maker.reset()
+                            return
+
         self._refresh_status()
 
     def _reset_all(self):
@@ -358,6 +467,15 @@ class LineListFilterWindow(tk.Toplevel):
         # Clear vibrational band (restore hint)
         vib_var, _ = self._entries["vib_band"]
         vib_var.set("")
+        # Clear quantum field entries
+        qn_entry = self._entries.get("qn_field")
+        if qn_entry is not None:
+            qf_field_var, qf_state_var, qf_exact_var, qf_min_var, qf_max_var = qn_entry
+            qf_field_var.set("")
+            qf_state_var.set("upper")
+            qf_exact_var.set("")
+            qf_min_var.set("")
+            qf_max_var.set("")
         self._refresh_status()
 
     def _remove_selected_filter(self):

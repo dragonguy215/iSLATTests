@@ -142,10 +142,10 @@ class BasePlot(ABC):
         return self.theme.get(key, default)
 
     def apply_theme_to_figure(self, fig: Optional[MplFigure] = None) -> None:
-        """Apply theme background / foreground colours to a figure and all its axes.
+        """Apply theme background / foreground colors to a figure and all its axes.
 
-        This sets the figure face colour, axes face colour, tick colours,
-        label colours, title colours, and spine colours from the theme
+        This sets the figure face color, axes face color, tick colors,
+        label colors, title colors, and spine colors from the theme
         dictionary.  Call this after ``generate_plot()`` (or at the end
         of it) to get a fully themed figure without manual per-axes work.
 
@@ -171,7 +171,7 @@ class BasePlot(ABC):
             for spine in ax.spines.values():
                 spine.set_color(fg)
 
-            # Recolour tagged data artists so they match the new theme
+            # Recolor tagged data artists so they match the new theme
             summed_color = self._get_theme_value("summed_spectra_color", "lightgray")
             for artist in ax.lines:
                 if getattr(artist, '_islat_observed', False):
@@ -226,7 +226,7 @@ class BasePlot(ABC):
 
     @staticmethod
     def get_molecule_color(molecule: "Molecule") -> str:
-        """Return the colour associated with a molecule."""
+        """Return the color associated with a molecule."""
         color = getattr(molecule, "color", None)
         return color if color else "blue"
 
@@ -241,13 +241,13 @@ class BasePlot(ABC):
         bbox_to_anchor: Tuple[float, float] = (0.5, 0.99),
         use_figure_transform: bool = True,
     ) -> None:
-        """Create (or replace) a text-only, per-molecule-coloured legend.
+        """Create (or replace) a text-only, per-molecule-colored legend.
 
-        Each entry is shown as bold coloured text with no visible handle
-        patch, giving a compact colour key above the plot.  The legend
+        Each entry is shown as bold colored text with no visible handle
+        patch, giving a compact color key above the plot.  The legend
         texts are tagged with ``_islat_mol_color = True`` so that
         :meth:`apply_theme_to_figure` will not overwrite them with the
-        foreground colour.
+        foreground color.
 
         When *ncols* is ``None`` (the default), the number of columns is
         auto-computed so that the legend does not exceed the width of the
@@ -288,7 +288,7 @@ class BasePlot(ABC):
 
         handles = [Patch(facecolor='none', edgecolor='none') for _ in mol_colors]
 
-        # Place the legend centred on the full figure width, pinned
+        # Place the legend centered on the full figure width, pinned
         # near the top of the figure so it sits above all panels.
         fig = ax.get_figure()
         transform = fig.transFigure if use_figure_transform else ax.transAxes
@@ -693,7 +693,7 @@ class BasePlot(ABC):
         tag : str
             Attribute name stamped onto every created artist.
         lam_color, range_color : str
-            Colours for the centre-wavelength and range-boundary markers.
+            colors for the center-wavelength and range-boundary markers.
         alpha : float
             Transparency of the markers.
         """

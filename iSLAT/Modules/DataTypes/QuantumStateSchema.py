@@ -1,26 +1,20 @@
-# -*- coding: utf-8 -*-
 """
 Quantum state schema infrastructure for iSLAT.
 
 Provides the abstract base class, quantum field definitions, a registry, and a
-generic fallback schema for any line catalog that has not registered a specific
-molecule schema.
+generic fallback schema for any line catalog that has not registered a specific molecule schema.
 
-The iSLAT ``.par`` label format encodes an upper- or lower-state quantum
-description as a single compact string::
+The iSLAT ``.par`` label format encodes an upper- or lower-state quantum description as a single compact string::
 
     "<global_quanta>|<local_quanta>"
 
 where each part is derived from the HITRAN ``global_upper/lower_quanta`` and
-``local_upper/lower_quanta`` columns by replacing internal whitespace runs with
-underscores::
+``local_upper/lower_quanta`` columns by replacing internal whitespace runs with underscores::
 
     "_".join(field.strip().split())
 
-Concrete schemas (e.g. in :mod:`~iSLAT.Modules.DataTypes.HITRANQuantumSchemas`)
-know how many fields to expect in each part and how to map tokens onto named
-quantum numbers.  Non-HITRAN catalogs can register their own schemas at any time
-via :meth:`QuantumStateRegistry.register`.
+Concrete schemas (e.g. in :mod:`~iSLAT.Modules.DataTypes.HITRANQuantumSchemas`) know how many fields to expect in each part and how to map tokens onto named quantum numbers. 
+Non-HITRAN catalogs can register their own schemas at any time via :meth:`QuantumStateRegistry.register`.
 
 Public API
 ----------
@@ -45,7 +39,6 @@ __all__ = [
     "QuantumStateRegistry",
 ]
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  QuantumField
 # ═══════════════════════════════════════════════════════════════════
@@ -69,7 +62,6 @@ class QuantumField(NamedTuple):
     dtype: Literal['int', 'float', 'str']
     description: str = ""
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Internal helpers
 # ═══════════════════════════════════════════════════════════════════
@@ -82,7 +74,6 @@ _FLOAT_SENTINEL: float = float('nan')
 
 #: Sentinel returned for missing/unparseable string fields.
 _STR_SENTINEL: str = ''
-
 
 def _coerce(value: str, dtype: Literal['int', 'float', 'str']) -> Any:
     """Convert a string token to *dtype*, returning a sentinel on failure.
@@ -119,11 +110,9 @@ def _coerce(value: str, dtype: Literal['int', 'float', 'str']) -> Any:
             return _FLOAT_SENTINEL
         return str(value)
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  QuantumStateSchema  (abstract base)
 # ═══════════════════════════════════════════════════════════════════
-
 class QuantumStateSchema(ABC):
     """Abstract base for quantum state parsing schemas.
 
@@ -266,11 +255,9 @@ class QuantumStateSchema(ABC):
         l = [f.name for f in self.local_fields]
         return f"{self.__class__.__name__}(global={g}, local={l})"
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  _DelimitedSchema  — shared parsing logic for ``_``-delimited labels
 # ═══════════════════════════════════════════════════════════════════
-
 class _DelimitedSchema(QuantumStateSchema):
     """Shared ``_``-delimited parsing logic.
 
@@ -327,11 +314,9 @@ class _DelimitedSchema(QuantumStateSchema):
         return '_'.join(p for p in g_parts if p != '') + '|' + \
                '_'.join(p for p in l_parts if p != '')
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  GenericDelimitedSchema  — catalog-agnostic fallback
 # ═══════════════════════════════════════════════════════════════════
-
 class GenericDelimitedSchema(QuantumStateSchema):
     """Fallback schema for molecules without a registered specific schema.
 
@@ -394,11 +379,9 @@ class GenericDelimitedSchema(QuantumStateSchema):
         l_parts = [str(qdict[k]) for k in l_keys]
         return '_'.join(g_parts) + '|' + '_'.join(l_parts)
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  QuantumStateRegistry
 # ═══════════════════════════════════════════════════════════════════
-
 class QuantumStateRegistry:
     """Central registry mapping molecule identifiers to parsing schemas.
 

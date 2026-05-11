@@ -171,7 +171,7 @@ class SpectrumPanel(SpectralPanel):
         error_data : np.ndarray, optional
             Error bars.
         color : str, optional
-            Line / marker colour.  Defaults to the theme foreground.
+            Line / marker color.  Defaults to the theme foreground.
         label : str
             Legend label.
         deduplicate : bool
@@ -299,7 +299,7 @@ class SpectrumPanel(SpectralPanel):
         fitted_wave, fitted_flux : np.ndarray
             Wavelength / flux arrays produced by the fit.
         color : str
-            Line and fill colour.
+            Line and fill color.
         linewidth : float
             Width of the fit curve.
         zorder : int
@@ -360,7 +360,7 @@ class SpectrumPanel(SpectralPanel):
             ``(gauss_fits, fitted_waves, fitted_fluxes)`` — each element is
             an iterable of per-fit values in the same order.
         color : str
-            Line and fill colour applied to every fit.
+            Line and fill color applied to every fit.
         linewidth : float
             Width of each fit curve.
         zorder : int
@@ -373,7 +373,7 @@ class SpectrumPanel(SpectralPanel):
             When *True* vertical dashed lines are drawn at the min/max
             wavelength of each fitted range.
         range_marker_color : str
-            Colour of the range-marker lines.
+            color of the range-marker lines.
         range_marker_alpha : float
             Transparency of the range-marker lines.
         """

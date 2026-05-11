@@ -339,7 +339,24 @@ class PopulationDiagramContextMixin:
             for k in ("e_up", "e_low", "a_stein", "g_up", "g_low",
                       "lev_up", "lev_low", "freq", "lam")
         ]
-        PROP_OPTIONS = _EXTRA + _FROM_REG
+        # Quantum field options — populated from the molecule's schema when
+        # pdp has component_data with a recognised molecule_id.
+        _QUANTUM: list = []
+        if pdp is not None:
+            try:
+                import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401 (registers all schemas)
+                from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
+                _comp_data = getattr(pdp, 'component_data', [])
+                _mol_ids = [c.get('molecule_id') for c in _comp_data if c.get('molecule_id')]
+                if _mol_ids:
+                    _schema = QuantumStateRegistry.get_schema(_mol_ids[0])
+                    for _f in list(_schema.global_fields) + list(_schema.local_fields):
+                        _QUANTUM.append((f"{_f.name} — upper state (quantum)", f"qn_upper:{_f.name}"))
+                        _QUANTUM.append((f"{_f.name} — lower state (quantum)", f"qn_lower:{_f.name}"))
+            except Exception:
+                pass
+
+        PROP_OPTIONS = _EXTRA + _FROM_REG + _QUANTUM
         PROP_LABELS  = [p[0] for p in PROP_OPTIONS]
         PROP_VALUES  = [p[1] for p in PROP_OPTIONS]
 
@@ -355,7 +372,7 @@ class PopulationDiagramContextMixin:
         initial_log_scale = False
 
         # Properties that naturally span orders of magnitude benefit from
-        # a log colour scale — pre-tick the checkbox for these.
+        # a log color scale — pre-tick the checkbox for these.
         _LOG_SUGGESTED = {"intens", "tau", "a_stein"}
 
         if current_mapping:

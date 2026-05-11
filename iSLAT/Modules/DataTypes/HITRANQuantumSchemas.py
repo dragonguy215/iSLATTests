@@ -2,8 +2,7 @@
 HITRAN-specific quantum state schemas for iSLAT.
 
 Implements :class:`~iSLAT.Modules.DataTypes.QuantumStateSchema.QuantumStateSchema`
-subclasses for all molecule classes described in HITRAN2024 supplementary
-material, Tables S1 (global quanta) and S2 (local quanta).
+subclasses for all molecule classes described in HITRAN2024 supplementary material, Tables S1 (global quanta) and S2 (local quanta).
 
 **Label encoding recap** — every iSLAT ``.par`` upper/lower state label is
 built from the HITRAN ``global_*_quanta`` and ``local_*_quanta`` API fields
@@ -30,8 +29,7 @@ Import this module once to activate all HITRAN schemas::
 
 References
 ----------
-HITRAN2024 supplementary material: Description of upper-state and lower-state
-quanta, v.2024.1 (Tables S1, S2).
+HITRAN2024 supplementary material: Description of upper-state and lower-state quanta, v.2024.1 (Tables S1, S2).
 """
 from __future__ import annotations
 
@@ -51,7 +49,6 @@ __all__: List[str] = []   # concrete classes are not part of the public API;
 
 # short alias
 _QF = QuantumField
-
 
 # ═══════════════════════════════════════════════════════════════════
 #  Shared local field sets  (Table S2 groups)
@@ -139,7 +136,6 @@ _LOCAL_G7B = (
     _QF('F',       'str',   'Hyperfine quantum number'),
 )
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Shared local token fixup helpers
 # ═══════════════════════════════════════════════════════════════════
@@ -164,7 +160,6 @@ def _split_j_sym(token: str) -> Tuple[str, str]:
         if token[i].isdigit():
             return token[:i + 1], token[i + 1:]
     return '', token
-
 
 def _fixup_group2a_local(tokens: List[str]) -> List[str]:
     """Resolve *J+Sym* merging in Group 2a lower-state local quanta.
@@ -191,7 +186,6 @@ def _fixup_group2a_local(tokens: List[str]) -> List[str]:
             tokens[2] = sym_str + tokens[2]  # prepend to existing (usually '')
     return tokens
 
-
 def _fixup_group7b_local(tokens: List[str]) -> List[str]:
     """Resolve *J(float)+Sym* merging for OH (Group 7b) local quanta.
 
@@ -210,14 +204,12 @@ def _fixup_group7b_local(tokens: List[str]) -> List[str]:
             tokens[2] = sym_str
     return tokens
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 1a — Simple diatomics
 #  Molecules: CO, HF, HCl, HBr, HI, N₂, NO⁺, H₂, CS
 #  Global Table S1 Class 1a: 13X  v I2
 #  Local  Table S2 Group 2a
 # ═══════════════════════════════════════════════════════════════════
-
 class DiatomicSimpleSchema(_DelimitedSchema):
     """Schema for simple closed-shell diatomic molecules (HITRAN Class 1a).
 
@@ -240,14 +232,12 @@ class DiatomicSimpleSchema(_DelimitedSchema):
     def _fixup_local_tokens(self, tokens: List[str]) -> List[str]:
         return _fixup_group2a_local(tokens)
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 1b — Open-shell diatomics (except OH, which is Group 7b)
 #  Molecules: O₂, NO, ClO, SO, S₂
 #  Global Table S1 Class 1b: 6X X A2  Ω A3  2X  v I2
 #  Local  Table S2 Group 6 (O₂, SO, S₂) or Group 7a (NO, ClO)
 # ═══════════════════════════════════════════════════════════════════
-
 class DiatomicOpenShell3SigmaSchema(_DelimitedSchema):
     """Schema for ³Σ open-shell diatomics (HITRAN Class 1b, Group 6).
 
@@ -281,7 +271,6 @@ class DiatomicOpenShell3SigmaSchema(_DelimitedSchema):
             tokens = [first[:i], first[i:]] + tokens[1:]
         return tokens
 
-
 class DiatomicOpenShell2PiSchema(_DelimitedSchema):
     """Schema for ²Π open-shell diatomics (HITRAN Class 1b, Group 7a).
 
@@ -314,7 +303,6 @@ class DiatomicOpenShell2PiSchema(_DelimitedSchema):
 
     def _fixup_local_tokens(self, tokens: List[str]) -> List[str]:
         return _fixup_group2a_local(tokens)
-
 
 class OHSchema(_DelimitedSchema):
     """Schema for OH (HITRAN Class 1b, Group 7b).
@@ -350,13 +338,11 @@ class OHSchema(_DelimitedSchema):
     def _fixup_local_tokens(self, tokens: List[str]) -> List[str]:
         return _fixup_group7b_local(tokens)
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 2a — CO₂
 #  Global: 6X v1 I2  v2 I2  l2 I2  v3 I2  r I1
 #  Local:  Group 2a  (m + F' for upper; 5X Br J Sym F for lower)
 # ═══════════════════════════════════════════════════════════════════
-
 class CO2Schema(_DelimitedSchema):
     """Schema for CO₂ (HITRAN Class 2a).
 
@@ -396,14 +382,12 @@ class CO2Schema(_DelimitedSchema):
     def _fixup_local_tokens(self, tokens: List[str]) -> List[str]:
         return _fixup_group2a_local(tokens)
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 2b — Other linear triatomics
 #  Molecules: N₂O, OCS, HCN, CS₂
 #  Global: 7X v1 I2  v2 I2  l2 I2  v3 I2
 #  Local:  Group 2a
 # ═══════════════════════════════════════════════════════════════════
-
 class LinearTriatomicSchema(_DelimitedSchema):
     """Schema for linear triatomic molecules except CO₂ (HITRAN Class 2b).
 
@@ -429,14 +413,12 @@ class LinearTriatomicSchema(_DelimitedSchema):
     def _fixup_local_tokens(self, tokens: List[str]) -> List[str]:
         return _fixup_group2a_local(tokens)
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 3 — Non-linear triatomic molecules
 #  Molecules: H₂O, O₃, SO₂, NO₂, HOCl, H₂S, HO₂, HOBr
 #  Global: 9X v1 I2  v2 I2  v3 I2
 #  Local:  Group 1 (J Ka Kc F Sym)
 # ═══════════════════════════════════════════════════════════════════
-
 class NonLinearTriatomicSchema(_DelimitedSchema):
     """Schema for non-linear triatomic molecules (HITRAN Class 3).
 
@@ -475,14 +457,12 @@ class NonLinearTriatomicSchema(_DelimitedSchema):
                 return [s[i * 2:(i + 1) * 2].strip() for i in range(n)]
         return tokens
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 4a — Pyramidal tetratomic molecules (simple variant)
 #  Molecules: PH₃, NF₃
 #  Global: 5X v1 I2  v2 I2  v3 I2  v4 I2  S A2
 #  Local:  Group 4a
 # ═══════════════════════════════════════════════════════════════════
-
 class PyramidalTetraatomicSchema(_DelimitedSchema):
     """Schema for pyramidal tetratomic molecules (HITRAN Class 4a).
 
@@ -506,13 +486,11 @@ class PyramidalTetraatomicSchema(_DelimitedSchema):
     )
     local_fields = _LOCAL_G4A
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 4b — Ammonia  (NH₃)
 #  Global: 1X v1 I1 v2 I1 v3 I1 v4 I1  1X l3 I1 l4 I1  1X l I1  1X Γvib A4
 #  Local:  Group 4b
 # ═══════════════════════════════════════════════════════════════════
-
 class NH3Schema(_DelimitedSchema):
     """Schema for ammonia isotopologues (HITRAN Class 4b).
 
@@ -567,7 +545,6 @@ class NH3Schema(_DelimitedSchema):
         result.extend(tokens[2:])
         return result
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 5a — Acetylene (C₂H₂)
 #  Global: 1X v1 I1 v2 I1 v3 I1  v4 I2 v5 I2  l4 I2 l5 I2  ± A1  1X  S A1
@@ -576,8 +553,6 @@ class NH3Schema(_DelimitedSchema):
 
 #: Regex for parsing the merged "l4 l5 [pm]" token in C₂H₂ global quanta.
 _C2H2_L4L5_RE = re.compile(r'^(-?\d+)(-\d+)?([+-]?)$')
-
-
 class C2H2Schema(_DelimitedSchema):
     """Schema for acetylene C₂H₂ (HITRAN Class 5a).
 
@@ -646,13 +621,11 @@ class C2H2Schema(_DelimitedSchema):
     def _fixup_local_tokens(self, tokens: List[str]) -> List[str]:
         return _fixup_group2a_local(tokens)
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 5b — C₄H₂
 #  Global: 1X v1..v9 I1 (9 packed digits)  1X Sym A1  1X S A2
 #  Local:  Group 2b (l6..l9 vibrational + Br J Sym)
 # ═══════════════════════════════════════════════════════════════════
-
 class C4H2Schema(QuantumStateSchema):
     """Schema for diacetylene C₄H₂ (HITRAN Class 5b, Group 2b).
 
@@ -723,13 +696,11 @@ class C4H2Schema(QuantumStateSchema):
 
         return result
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 5c — HC₃N
 #  Global: 2X v1..v7 I1  l5 I2  l6 I2  l7 I2
 #  Local:  Group 2a
 # ═══════════════════════════════════════════════════════════════════
-
 class HC3NSchema(_DelimitedSchema):
     """Schema for cyanoacetylene HC₃N (HITRAN Class 5c).
 
@@ -759,13 +730,11 @@ class HC3NSchema(_DelimitedSchema):
     def _fixup_local_tokens(self, tokens: List[str]) -> List[str]:
         return _fixup_group2a_local(tokens)
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 5d — C₂N₂ (using Plíva notation)
 #  Global: v1 I2 v2 I2 v3 I2 v4 I2 v5 I2 l I2 ± A1 r I1 S A1
 #  Local:  Group 2a
 # ═══════════════════════════════════════════════════════════════════
-
 class C2N2Schema(_DelimitedSchema):
     """Schema for cyanogen C₂N₂ (HITRAN Class 5d, Plíva notation).
 
@@ -794,14 +763,12 @@ class C2N2Schema(_DelimitedSchema):
     def _fixup_local_tokens(self, tokens: List[str]) -> List[str]:
         return _fixup_group2a_local(tokens)
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 6a — Asymmetric top (6 normal modes)
 #  Molecules: H₂CO, COF₂, COCl₂
 #  Global: 3X v1 I2  v2 I2  v3 I2  v4 I2  v5 I2  v6 I2
 #  Local:  Group 1
 # ═══════════════════════════════════════════════════════════════════
-
 class AsymTopSixModeSchema(_DelimitedSchema):
     """Schema for asymmetric-top molecules with six normal modes (Class 6a).
 
@@ -826,13 +793,11 @@ class AsymTopSixModeSchema(_DelimitedSchema):
     )
     local_fields = _LOCAL_G1
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 6b — H₂O₂
 #  Global: 3X v1 I2 v2 I2 v3 I2 n I1 τ I1 v5 I2 v6 I2
 #  Local:  Group 1
 # ═══════════════════════════════════════════════════════════════════
-
 class H2O2Schema(_DelimitedSchema):
     """Schema for hydrogen peroxide H₂O₂ (HITRAN Class 6b).
 
@@ -856,13 +821,11 @@ class H2O2Schema(_DelimitedSchema):
     )
     local_fields = _LOCAL_G1
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 7a — SO₃, CH₃ (planar symmetric)
 #  Global: v1 I2 v2 I2 v3 I2 l3 I2 v4 I2 l4 I2 Γvib A3
 #  Local:  Group 5a
 # ═══════════════════════════════════════════════════════════════════
-
 class SO3Schema(_DelimitedSchema):
     """Schema for SO₃ and CH₃ (HITRAN Class 7a, Group 5a).
 
@@ -886,14 +849,12 @@ class SO3Schema(_DelimitedSchema):
     )
     local_fields = _LOCAL_G5A
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 8 — Spherical top molecules
 #  Molecules: ¹²CH₄, ¹³CH₄, CF₄, GeH₄
 #  Global: 3X v1 I2 v2 I2 v3 I2 v4 I2 n A2 C A2
 #  Local:  Group 3
 # ═══════════════════════════════════════════════════════════════════
-
 class SphericalTopSchema(_DelimitedSchema):
     """Schema for spherical-top molecules (HITRAN Class 8, Group 3).
 
@@ -955,7 +916,6 @@ class SphericalTopSchema(_DelimitedSchema):
             tokens = [first[:i], first[i:]] + tokens[1:]
         return tokens
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Class 9 — Explicit band molecules
 #  Molecules: CH₃D, HNO₃, CH₃Cl, C₂H₆, SF₆, HCOOH, ClONO₂,
@@ -963,7 +923,6 @@ class SphericalTopSchema(_DelimitedSchema):
 #  Global: free-text vibrational band label (up to 15 chars right-aligned)
 #  Local:  molecule-specific (asymmetric rotor or symmetric rotor)
 # ═══════════════════════════════════════════════════════════════════
-
 class ExplicitBandSchema(_DelimitedSchema):
     """Base schema for Class 9 molecules that use explicit band labels.
 
@@ -988,7 +947,6 @@ class ExplicitBandSchema(_DelimitedSchema):
         _QF('band', 'str', 'Vibrational band label (free text)'),
     )
     local_fields = _LOCAL_G1
-
 
 class ExplicitBandSymRotorSchema(ExplicitBandSchema):
     """Class 9 molecules with symmetric-rotor local quanta (C₂H₆, C₂H₆-like).
@@ -1016,14 +974,12 @@ class ExplicitBandSymRotorSchema(ExplicitBandSchema):
                 tokens = tokens[:2] + [tok[:i], tok[i:]] + tokens[3:]
         return tokens
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Additional asymmetric-top molecules not in Class 3 or 6a
 #  (larger asymmetric tops with Group 1 local quanta)
 #  Molecules: HCOOH, HOCl, H₂O₂ (already has dedicated schema),
 #             ClONO₂, HOBr, C₂H₄, COFCl, HONO, ClNO₂, HNO₃
 # ═══════════════════════════════════════════════════════════════════
-
 class LargeAsymTopSchema(_DelimitedSchema):
     """Schema for larger asymmetric-top molecules (Group 1 local quanta).
 
@@ -1044,13 +1000,10 @@ class LargeAsymTopSchema(_DelimitedSchema):
     )
     local_fields = _LOCAL_G1
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Registration block
 # ═══════════════════════════════════════════════════════════════════
-# This block runs exactly once when the module is first imported and registers
-# all HITRAN molecule schemas with QuantumStateRegistry.
-
+# This block runs exactly once when the module is first imported and registers all HITRAN molecule schemas with QuantumStateRegistry.
 def _register_all() -> None:
     """Register all HITRAN schemas with :class:`QuantumStateRegistry`."""
     reg = QuantumStateRegistry.register
@@ -1138,6 +1091,5 @@ def _register_all() -> None:
     _sym_rot = ExplicitBandSymRotorSchema()
     for mol in ('C2H6', 'CH3Cl', 'CH3Br'):
         reg(mol, _sym_rot)
-
 
 _register_all()

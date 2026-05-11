@@ -444,6 +444,94 @@ class LineListMaker:
                 mask &= self._df["lev_low"] == lev_low
         return self._apply_mask(mask)
 
+    def filter_quantum_field(
+        self,
+        field: str,
+        *,
+        value: Optional[Any] = None,
+        min_val: Optional[float] = None,
+        max_val: Optional[float] = None,
+        state: str = "upper",
+    ) -> "LineListMaker":
+        """Filter by a parsed quantum number field.
+
+        Uses the :class:`~iSLAT.Modules.DataTypes.QuantumStateSchema.QuantumStateRegistry`
+        to parse the ``lev_up`` or ``lev_low`` label column and keep only
+        rows where the specified quantum-number field matches the given
+        criterion.
+
+        Parameters
+        ----------
+        field : str
+            Quantum-field name as defined in the molecule's schema
+            (e.g. ``"J"``, ``"v"``, ``"Ka"``, ``"v1"``).
+        value : optional
+            Exact value to match (equality test).  For int/float fields
+            sentinels (-999 / NaN) are treated as *missing* and excluded.
+        min_val, max_val : float, optional
+            Range limits (inclusive) for numeric fields.  Can be combined
+            with each other but are ignored when *value* is given.
+        state : str
+            ``"upper"`` (default) to parse ``lev_up`` labels, or
+            ``"lower"`` to parse ``lev_low`` labels.
+
+        Returns
+        -------
+        LineListMaker
+            ``self`` for chaining.
+        """
+        self._record_filter(
+            "filter_quantum_field",
+            field=field, value=value,
+            min_val=min_val, max_val=max_val, state=state,
+        )
+
+        lev_col = "lev_up" if state == "upper" else "lev_low"
+        if lev_col not in self._df.columns:
+            warnings.warn(f"Column {lev_col!r} not in DataFrame — filter_quantum_field skipped.")
+            return self
+
+        # Lazy import so the quantum machinery is only loaded when needed.
+        from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
+        import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # register all schemas
+
+        schema = QuantumStateRegistry.get_schema(self._species)
+        labels = np.array(self._df[lev_col].fillna(""), dtype="U64")
+        parsed = schema.parse_bulk(labels)
+
+        if field not in parsed:
+            warnings.warn(
+                f"Quantum field {field!r} not found in schema for species "
+                f"{self._species!r} — filter_quantum_field skipped."
+            )
+            return self
+
+        field_vals = parsed[field]
+
+        # Build the mask -----------------------------------------------
+        if value is not None:
+            # Exact match (works for str, int, and float fields)
+            mask_arr = field_vals == value
+        else:
+            try:
+                numeric_vals = np.asarray(field_vals, dtype=float)
+            except (ValueError, TypeError):
+                warnings.warn(
+                    f"Quantum field {field!r} cannot be used with range "
+                    f"limits — convert to an exact value match instead."
+                )
+                return self
+            # Exclude sentinel values (-999 maps to NaN after int→float)
+            valid = np.isfinite(numeric_vals) & (numeric_vals != -999)
+            mask_arr = valid.copy()
+            if min_val is not None:
+                mask_arr &= numeric_vals >= min_val
+            if max_val is not None:
+                mask_arr &= numeric_vals <= max_val
+
+        mask = pd.Series(mask_arr, index=self._df.index)
+        return self._apply_mask(mask)
+
     def filter_species(self, *species: str) -> "LineListMaker":
         """Keep only rows matching one of the given species names.
 
@@ -881,6 +969,7 @@ class LineListMaker:
             "filter_gup": self.filter_gup,
             "filter_glow": self.filter_glow,
             "filter_quantum": self.filter_quantum,
+            "filter_quantum_field": self.filter_quantum_field,
             "filter_species": self.filter_species,
             "filter_vib_band": self.filter_vib_band,
         }

@@ -9,7 +9,7 @@ implementations:
   on an axes.
 * :class:`MoleculeColorLegend` — the default for stacked-panel plots
   (:class:`FullSpectrumPlot`, :class:`ResidualSpectrumPlot`).  Renders
-  a compact, text-only, per-molecule-colour legend above the panel
+  a compact, text-only, per-molecule-color legend above the panel
   area.
 
 Example
@@ -72,7 +72,7 @@ class LegendStrategy(ABC):
         labels : list[str]
             Display names (one per entry).
         colors : list[str]
-            Corresponding colour specs.
+            Corresponding color specs.
         fontsize : int
             Base font size for legend text.
         max_ncols : int, optional
@@ -89,9 +89,9 @@ class LegendStrategy(ABC):
 
     @abstractmethod
     def apply_theme(self, ax: Axes, theme: Dict[str, Any]) -> None:
-        """Re-colour legend text / frame to match the supplied theme.
+        """Re-color legend text / frame to match the supplied theme.
 
-        Implementations should **not** overwrite per-molecule colours
+        Implementations should **not** overwrite per-molecule colors
         (text entries tagged with ``_islat_mol_color``).
         """
 
@@ -154,7 +154,7 @@ class StandardLegend(LegendStrategy):
             leg.set_visible(visible)
 
     def apply_theme(self, ax: Axes, theme: Dict[str, Any]) -> None:
-        """Re-colour legend frame and text to match *theme*."""
+        """Re-color legend frame and text to match *theme*."""
         legend = ax.get_legend()
         if legend is None:
             return
@@ -168,19 +168,19 @@ class StandardLegend(LegendStrategy):
             text.set_color(fg)
 
 # ======================================================================
-# Concrete implementation — molecule colour legend
+# Concrete implementation — molecule color legend
 # ======================================================================
 class MoleculeColorLegend(LegendStrategy):
-    """Compact, text-only, per-molecule-coloured legend.
+    """Compact, text-only, per-molecule-colored legend.
 
-    Each entry is rendered as bold coloured text with an invisible
-    handle patch, giving a colour key above the plot.  The number of
+    Each entry is rendered as bold colored text with an invisible
+    handle patch, giving a color key above the plot.  The number of
     columns is determined at render time so that the legend fits within
     the *panel* width and does not overlap the panels or the title.
 
     Legend text objects are tagged with ``_islat_mol_color = True`` so
     that the theme system does not overwrite them with the foreground
-    colour.
+    color.
     """
 
     # ------------------------------------------------------------------
@@ -211,7 +211,7 @@ class MoleculeColorLegend(LegendStrategy):
         # Invisible handle patches (text-only appearance)
         handles = [Patch(facecolor="none", edgecolor="none") for _ in colors]
 
-        # Position the legend in figure coordinates, centred at x=0.5,
+        # Position the legend in figure coordinates, centered at x=0.5,
         # in the margin above the topmost panel.
         y_anchor = self._safe_y_anchor(fig)
 
@@ -229,7 +229,7 @@ class MoleculeColorLegend(LegendStrategy):
             frameon=False,
         )
 
-        # Tag each text entry with its molecule colour.
+        # Tag each text entry with its molecule color.
         for txt, col in zip(leg.get_texts(), colors):
             txt.set_color(col)
             txt._islat_mol_color = True  # type: ignore[attr-defined]
@@ -248,7 +248,7 @@ class MoleculeColorLegend(LegendStrategy):
 
     # ------------------------------------------------------------------
     def apply_theme(self, ax: Axes, theme: Dict[str, Any]) -> None:
-        """Re-colour legend frame / non-molecule text to match *theme*."""
+        """Re-color legend frame / non-molecule text to match *theme*."""
         legend = ax.get_legend()
         if legend is None:
             return

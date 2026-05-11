@@ -1,14 +1,10 @@
 """
 PopulationDiagramPlot — Boltzmann / rotation diagram.
 
-Plots ``ln(4πF / (hv A_u g_u))`` vs upper-state energy *E_u* using the
-computed intensity data from one or more :class:`Molecule` /
-:class:`Intensity` objects.
+Plots ``ln(4πF / (hv A_u g_u))`` vs upper-state energy *E_u* using the computed intensity data from one or more :class:`Molecule` / :class:`Intensity` objects.
 
-Supports **multi-molecule / multi-component** overlays with automatic
-colour coding, as well as **property-based colour mapping** (e.g.
-colour by upper-level energy, transition label, Einstein A coefficient,
-etc.).
+Supports **multi-molecule / multi-component** overlays with automatic color coding, as well as **property-based color mapping** 
+(e.g. color by upper-level energy, transition label, Einstein A coefficient, etc.).
 
 Can be used standalone (notebook / script) or embedded in a GUI layout.
 """
@@ -35,7 +31,7 @@ if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Intensity import Intensity
     from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine
 
-# Default colour cycle used when the caller does not supply colours.
+# Default color cycle used when the caller does not supply colors.
 _DEFAULT_COLORS: List[str] = [
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
     "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
@@ -50,11 +46,11 @@ class PopulationDiagramPlot(BasePlot):
     * A single :class:`Molecule` (original API, fully backward-compatible).
     * A single bare :class:`Intensity` together with physical metadata.
     * A *list* of :class:`Molecule` objects, each rendered in its own
-      colour.
+      color.
     * A :class:`MoleculeDict`, where every visible molecule is plotted.
 
     After the diagram has been generated, the points can optionally be
-    re-coloured based on a stored molecular property (e.g. upper-level
+    re-colored based on a stored molecular property (e.g. upper-level
     energy, transition label, Einstein-A coefficient) via
     :meth:`color_by`.
 
@@ -64,7 +60,7 @@ class PopulationDiagramPlot(BasePlot):
         Single molecule whose intensity data is used.  Mutually
         exclusive with *intensity* and *molecules*.
     molecules : list[Molecule] | MoleculeDict, optional
-        Multiple molecules to overlay.  Each is colour-coded
+        Multiple molecules to overlay.  Each is color-coded
         automatically (or by its ``.color`` attribute).  Mutually
         exclusive with *molecule* and *intensity*.
     intensity : Intensity, optional
@@ -75,7 +71,7 @@ class PopulationDiagramPlot(BasePlot):
         Display name used in the title when *intensity* is given
         directly.  Ignored when *molecule* / *molecules* is provided.
     color : str, optional
-        Marker colour when *intensity* is given directly.
+        Marker color when *intensity* is given directly.
     radius : float, optional
         Emitting radius in AU — required when *intensity* is given
         directly.  Defaults to ``1.0``.
@@ -140,7 +136,7 @@ class PopulationDiagramPlot(BasePlot):
         # Cached per-component data (populated by generate_plot)
         self._component_data: List[Dict[str, Any]] = []
 
-        # Active colour-map state (set by color_by / clear_color_mapping)
+        # Active color-map state (set by color_by / clear_color_mapping)
         self._color_mapping: Optional[Dict[str, Any]] = None
         # Tracked colorbar so it can be removed on the next regeneration
         self._colorbar = None
@@ -205,7 +201,7 @@ class PopulationDiagramPlot(BasePlot):
         threshold : float
             Fraction (0-1) of max intensity below which lines are excluded.
         color : str
-            Scatter point colour.
+            Scatter point color.
 
         Returns
         -------
@@ -552,8 +548,8 @@ class PopulationDiagramPlot(BasePlot):
                 mol_seq = list(mol_seq.values())
             for idx, mol in enumerate(mol_seq):
                 components.append(self._mol_to_component(mol, idx=idx))
-            # Ensure distinct colours when multiple components share a
-            # colour — assign from the default cycle in that case.
+            # Ensure distinct colors when multiple components share a
+            # color — assign from the default cycle in that case.
             if len(components) > 1:
                 self._deduplicate_colors(components)
             return components
@@ -577,8 +573,8 @@ class PopulationDiagramPlot(BasePlot):
 
     @staticmethod
     def _deduplicate_colors(components: List[Dict[str, Any]]) -> None:
-        """Assign distinct colours from the default cycle when components
-        would otherwise share the same colour."""
+        """Assign distinct colors from the default cycle when components
+        would otherwise share the same color."""
         seen: Dict[str, int] = {}
         has_duplicates = False
         for comp in components:
@@ -668,9 +664,19 @@ class PopulationDiagramPlot(BasePlot):
         if data is None:
             return None
 
+        # Resolve molecule_id for quantum-field color mapping.
+        mol_id = None
+        if mol is not None:
+            ll = getattr(mol, "line_list", None)
+            if ll is not None:
+                mol_id = getattr(ll, "molecule_id", None)
+            if mol_id is None:
+                mol_id = getattr(mol, "molecule_id", None)
+
         return {
-            "name":  comp["name"],
-            "color": comp["color"],
+            "name":      comp["name"],
+            "color":     comp["color"],
+            "molecule_id": mol_id,
             **data,
         }
 
@@ -678,12 +684,12 @@ class PopulationDiagramPlot(BasePlot):
     # Rendering helpers
     # ------------------------------------------------------------------
     def _render_by_component(self, ax: Axes) -> None:
-        """Render each component as a single-colour scatter series.
+        """Render each component as a single-color scatter series.
 
-        When only one component is present, the default scatter colour
+        When only one component is present, the default scatter color
         comes from the theme (``scatter_main_color``, typically a
         neutral grey) to match the original single-molecule appearance.
-        In multi-component mode each molecule uses its own colour so
+        In multi-component mode each molecule uses its own color so
         that the user can visually distinguish them.
         """
         single = len(self._component_data) == 1
@@ -713,7 +719,7 @@ class PopulationDiagramPlot(BasePlot):
                 sc._islat_scatter_wavelengths = np.asarray(wav)
 
     def _render_component_legend(self, ax: Axes) -> None:
-        """Add a legend showing component names and colours."""
+        """Add a legend showing component names and colors."""
         from matplotlib.lines import Line2D
 
         handles = []
@@ -737,7 +743,7 @@ class PopulationDiagramPlot(BasePlot):
         )
 
     # ------------------------------------------------------------------
-    # Colour-mapping API
+    # color-mapping API
     # ------------------------------------------------------------------
     def color_by(
         self,
@@ -751,12 +757,12 @@ class PopulationDiagramPlot(BasePlot):
         log_scale: bool = False,
         regenerate: bool = True,
     ) -> None:
-        """Re-colour the scatter points by a molecular property.
+        """Re-color the scatter points by a molecular property.
 
         Parameters
         ----------
         prop : str
-            The property name to colour by.  Supported values:
+            The property name to color by.  Supported values:
 
             * ``'e_up'``   — upper-level energy (K)
             * ``'e_low'``  — lower-level energy (K)
@@ -770,25 +776,31 @@ class PopulationDiagramPlot(BasePlot):
             * ``'tau'``     — line-center opacity
             * ``'component'`` — which molecule / component the point
               belongs to (categorical)
-            * ``'molecule'`` — alias for ``'component'``; colours each
+            * ``'molecule'`` — alias for ``'component'``; colors each
               point by which molecule it belongs to (categorical)
+            * Any quantum-field name defined in the molecule's schema,
+              e.g. ``"J"``, ``"v"``, ``"Ka"``, ``"Kc"``, ``"v1"``,
+              ``"v2"`` — colors by upper-state quantum number value.
+              Use ``"qn_upper:FIELD"`` / ``"qn_lower:FIELD"`` prefixes
+              to explicitly target the upper or lower state (bare names
+              default to the upper state).
 
         cmap : str
-            Matplotlib colourmap name (default ``'viridis'``).
+            Matplotlib colormap name (default ``'viridis'``).
         vmin, vmax : float, optional
-            Explicit colour-scale limits for continuous properties.
+            Explicit color-scale limits for continuous properties.
             Ignored when *pmin* / *pmax* are set.  Ignored for
             categorical properties.
         pmin, pmax : float, optional
-            Percentile cutoffs (0-100) for the colour-scale limits.
-            When set, the colour scale minimum / maximum is computed
+            Percentile cutoffs (0-100) for the color-scale limits.
+            When set, the color scale minimum / maximum is computed
             as the *pmin*-th / *pmax*-th percentile of the plotted
             values, overriding *vmin* / *vmax*.  For example,
-            ``pmax=75`` caps the top colour at the 75th-percentile
+            ``pmax=75`` caps the top color at the 75th-percentile
             value so that the upper 25 % of the distribution all
-            receive the maximum colour.
+            receive the maximum color.
         log_scale : bool
-            Use a logarithmic colour-norm (default ``False``).
+            Use a logarithmic color-norm (default ``False``).
         regenerate : bool
             If ``True`` (default) the plot is regenerated immediately.
         """
@@ -805,8 +817,8 @@ class PopulationDiagramPlot(BasePlot):
             self.generate_plot()
 
     def clear_color_mapping(self, *, regenerate: bool = True) -> None:
-        """Remove any property-based colour mapping and revert to
-        per-component colouring.
+        """Remove any property-based color mapping and revert to
+        per-component coloring.
 
         Parameters
         ----------
@@ -819,7 +831,7 @@ class PopulationDiagramPlot(BasePlot):
 
     # ------------------------------------------------------------------
     def _render_colormapped(self, ax: Axes) -> None:
-        """Render all components with a single property-based colourmap."""
+        """Render all components with a single property-based colormap."""
         mapping = self._color_mapping
         if mapping is None:
             return
@@ -837,7 +849,7 @@ class PopulationDiagramPlot(BasePlot):
             "lam": "wavelength",
             "e_up": "eu",
         }
-        internal_key = _ALIASES.get(prop, prop)
+        internal_key: str = _ALIASES.get(prop, prop)  # type: ignore[assignment]
         display_prop = prop  # keep the user-facing name for labels
 
         # ---- Categorical properties ----------------------------------
@@ -848,7 +860,36 @@ class PopulationDiagramPlot(BasePlot):
             self._render_categorical_colormap(ax, render_prop, cmap_name)
             return
 
-        # ---- Continuous properties -----------------------------------
+        # ---- Quantum field properties  (e.g. "J", "v", "Ka", "Kc") --
+        # These are field names from the QuantumStateSchema for the molecule.
+        # Props with an explicit state prefix "qn_upper:FIELD" / "qn_lower:FIELD"
+        # are also accepted; bare names default to the upper state.
+        _KNOWN_CONTINUOUS = {
+            "eu", "rd_yax", "wavelength", "intens", "a_stein",
+            "g_up", "g_low", "e_low", "tau",
+        }
+        qn_state = "upper"
+        qn_field = None
+        if internal_key not in _KNOWN_CONTINUOUS:
+            if internal_key.startswith("qn_upper:"):
+                qn_field = internal_key[len("qn_upper:"):]
+                qn_state = "upper"
+            elif internal_key.startswith("qn_lower:"):
+                qn_field = internal_key[len("qn_lower:"):]
+                qn_state = "lower"
+            else:
+                # Bare field name — try upper state first
+                qn_field = internal_key
+                qn_state = "upper"
+
+        if qn_field is not None:
+            self._render_quantum_field(
+                ax, qn_field, qn_state, cmap_name,
+                vmin=vmin, vmax=vmax, pmin=pmin, pmax=pmax,
+                log_scale=log_scale, display_prop=display_prop,
+            )
+            return
+
         all_x: List[np.ndarray] = []
         all_y: List[np.ndarray] = []
         all_vals: List[np.ndarray] = []
@@ -866,7 +907,7 @@ class PopulationDiagramPlot(BasePlot):
             # flux threshold are plotted and used for scale computation.
             # Without this, near-zero dim lines dominate the vmin/vmax for
             # log-distributed properties (intens, tau, a_stein) making all
-            # the visible points appear as the same colour.
+            # the visible points appear as the same color.
             mask = cdata.get("valid_mask")
             if mask is not None:
                 mask = np.asarray(mask, dtype=bool)
@@ -941,7 +982,7 @@ class PopulationDiagramPlot(BasePlot):
         if _wav_parts:
             sc._islat_scatter_wavelengths = np.concatenate(_wav_parts)
 
-        # Add a colourbar and track it for later removal
+        # Add a colorbar and track it for later removal
         label = self._property_label(display_prop)
         fig = ax.get_figure()
         if fig is not None:
@@ -951,7 +992,7 @@ class PopulationDiagramPlot(BasePlot):
     def _render_categorical_colormap(
         self, ax: Axes, prop: str, cmap_name: str
     ) -> None:
-        """Render scatter with categorical colour mapping."""
+        """Render scatter with categorical color mapping."""
         all_x: List[np.ndarray] = []
         all_y: List[np.ndarray] = []
         all_labels: List[np.ndarray] = []
@@ -993,13 +1034,13 @@ class PopulationDiagramPlot(BasePlot):
         unique_labels = np.unique(label_cat)
 
         # In all-molecules mode, use each molecule's own .color attribute
-        # so the population diagram matches the control-panel colours.
+        # so the population diagram matches the control-panel colors.
         if self._all_molecules_mode and prop == "component":
             label_to_color = {
                 cdata["name"]: cdata["color"]
                 for cdata in self._component_data
             }
-            # Fall back to colormap for any label that somehow lacks a colour
+            # Fall back to colormap for any label that somehow lacks a color
             cmap_obj = matplotlib.colormaps.get_cmap(cmap_name).resampled(
                 max(len(unique_labels), 1)
             )
@@ -1051,13 +1092,185 @@ class PopulationDiagramPlot(BasePlot):
         )
 
     # ------------------------------------------------------------------
+    def _render_quantum_field(
+        self,
+        ax: "Axes",
+        field: str,
+        state: str,
+        cmap_name: str,
+        *,
+        vmin=None,
+        vmax=None,
+        pmin=None,
+        pmax=None,
+        log_scale: bool = False,
+        display_prop: str = "",
+    ) -> None:
+        """color scatter points by a parsed quantum number field.
+
+        Parameters
+        ----------
+        field : str
+            Quantum-field name as defined in the molecule's
+            :class:`~iSLAT.Modules.DataTypes.QuantumStateSchema.QuantumStateSchema`
+            (e.g. ``"J"``, ``"v"``, ``"Ka"``).
+        state : str
+            ``"upper"`` to parse ``lev_up`` labels, ``"lower"`` to parse
+            ``lev_low`` labels.
+        """
+        from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
+        import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # register all schemas
+
+        lev_key = "lev_up" if state == "upper" else "lev_low"
+
+        all_x: List[np.ndarray] = []
+        all_y: List[np.ndarray] = []
+        all_vals: List[np.ndarray] = []
+        all_wav: List[np.ndarray] = []
+        field_dtype: Optional[str] = None
+
+        for cdata in self._component_data:
+            x_arr = self._get_axis_array(cdata, self._x_prop)
+            y_arr = self._get_axis_array(cdata, self._y_prop)
+            if x_arr is None or y_arr is None:
+                continue
+
+            lev_arr = cdata.get(lev_key)
+            if lev_arr is None:
+                continue
+
+            mol_id = cdata.get("molecule_id")
+            schema = QuantumStateRegistry.get_schema(mol_id)
+
+            # Check that this field exists in the schema
+            all_fields = {f.name: f for f in list(schema.global_fields) + list(schema.local_fields)}
+            if field not in all_fields:
+                continue
+            field_dtype = all_fields[field].dtype
+
+            labels = np.asarray(lev_arr, dtype="U64")
+            parsed = schema.parse_bulk(labels)
+            field_vals = parsed.get(field)
+            if field_vals is None:
+                continue
+
+            mask = cdata.get("valid_mask")
+            if mask is not None:
+                mask = np.asarray(mask, dtype=bool)
+                x_arr = x_arr[mask]
+                y_arr = y_arr[mask]
+                field_vals = field_vals[mask]
+                wav = cdata.get("wavelength")
+                if wav is not None:
+                    all_wav.append(np.asarray(wav)[mask])
+            else:
+                wav = cdata.get("wavelength")
+                if wav is not None:
+                    all_wav.append(np.asarray(wav))
+
+            if len(x_arr) == 0:
+                continue
+            all_x.append(x_arr)
+            all_y.append(y_arr)
+            all_vals.append(field_vals)
+
+        if not all_x:
+            # No components had this field — fall back
+            self._render_by_component(ax)
+            return
+
+        eu_cat = np.concatenate(all_x)
+        rd_cat = np.concatenate(all_y)
+        val_cat = np.concatenate(all_vals)
+
+        # str-dtype fields → categorical colormap
+        if field_dtype == "str":
+            label_cat = np.asarray(val_cat, dtype=str)
+            unique_labels = np.unique(label_cat)
+            cmap_obj = matplotlib.colormaps.get_cmap(cmap_name).resampled(
+                max(len(unique_labels), 1)
+            )
+            label_to_color = {
+                lbl: cmap_obj(i / max(len(unique_labels) - 1, 1))
+                for i, lbl in enumerate(unique_labels)
+            }
+            colors = np.array([label_to_color[lbl] for lbl in label_cat])
+            ax.scatter(eu_cat, rd_cat, c=colors, s=5, alpha=0.8)
+
+            from matplotlib.lines import Line2D
+            entries = list(unique_labels)[:20]
+            handles = [
+                Line2D([0], [0], marker="o", color="w",
+                       markerfacecolor=label_to_color[lbl],
+                       markersize=6, label=str(lbl), linewidth=0)
+                for lbl in entries
+            ]
+            if len(unique_labels) > 20:
+                handles.append(Line2D([0], [0], marker="", color="w",
+                                      label=f"… +{len(unique_labels) - 20} more",
+                                      linewidth=0))
+            ax.legend(handles=handles, loc="upper right", fontsize="x-small",
+                      framealpha=0.7)
+            return
+
+        # int/float fields → continuous colormap
+        val_cat = np.asarray(val_cat, dtype=float)
+
+        # Replace sentinel values (-999 for int, NaN for float) with NaN
+        val_cat = np.where(val_cat == -999, np.nan, val_cat)
+
+        finite_vals = val_cat[np.isfinite(val_cat)]
+        if len(finite_vals) == 0:
+            self._render_by_component(ax)
+            return
+
+        if pmin is not None:
+            vmin = float(np.nanpercentile(finite_vals, float(pmin)))
+        elif vmin is None:
+            vmin = float(np.nanmin(finite_vals))
+        if pmax is not None:
+            vmax = float(np.nanpercentile(finite_vals, float(pmax)))
+        elif vmax is None:
+            vmax = float(np.nanmax(finite_vals))
+
+        if log_scale:
+            pos_vals = finite_vals[finite_vals > 0]
+            if len(pos_vals) == 0:
+                pos_vals = np.array([1e-30])
+            safe_vmin = max(vmin if vmin is not None and vmin > 0 else float(np.nanmin(pos_vals)), 1e-300)
+            safe_vmax = max(vmax, safe_vmin * 10) if vmax is not None else float(np.nanmax(pos_vals))
+            norm = LogNorm(vmin=safe_vmin, vmax=safe_vmax)
+        else:
+            norm = Normalize(vmin=vmin, vmax=vmax)
+
+        cmap_obj = matplotlib.colormaps.get_cmap(cmap_name)
+        sc = ax.scatter(eu_cat, rd_cat, c=val_cat, s=5, cmap=cmap_obj,
+                        norm=norm, alpha=0.8, picker=True)
+        if all_wav:
+            sc._islat_scatter_wavelengths = np.concatenate(all_wav)
+
+        label = display_prop or field
+        fig = ax.get_figure()
+        if fig is not None:
+            self._colorbar = fig.colorbar(sc, ax=ax, label=label, pad=0.02)
+
+    # ------------------------------------------------------------------
     @staticmethod
     def _property_label(prop: str) -> str:
-        """LaTeX label for a property name (used for colourbar labels).
+        """LaTeX label for a property name (used for colorbar labels).
 
         Delegates to :meth:`~iSLAT.Modules.DataTypes.Intensity.Intensity.get_axis_label`
-        so the label registry lives on the data object.
+        so the label registry lives on the data object.  Quantum-field props
+        (bare names or ``qn_upper:FIELD`` / ``qn_lower:FIELD`` prefixed forms)
+        are handled here.
         """
+        # Quantum-field with explicit state prefix
+        if prop.startswith("qn_upper:"):
+            field = prop[len("qn_upper:"):]
+            return f"{field} (upper)"
+        if prop.startswith("qn_lower:"):
+            field = prop[len("qn_lower:"):]
+            return f"{field} (lower)"
         from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
         return _Intensity.get_axis_label(prop)
 
@@ -1247,8 +1460,8 @@ class PopulationDiagramPlot(BasePlot):
         """Switch to multiple molecules and regenerate.
 
         When *molecules* is a :class:`MoleculeDict` the plot enters
-        *all-molecules mode*: it automatically colours each component by
-        its own molecule colour and re-renders whenever the active/visible
+        *all-molecules mode*: it automatically colors each component by
+        its own molecule color and re-renders whenever the active/visible
         set changes.
 
         Parameters
@@ -1277,7 +1490,7 @@ class PopulationDiagramPlot(BasePlot):
         self._exit_all_molecules_mode()
         self._all_molecules_mode = True
         self._molecules_dict_ref = molecules_dict
-        # Automatically colour by molecule (uses each mol's own colour)
+        # Automatically color by molecule (uses each mol's own color)
         self._color_mapping = {"prop": "molecule", "cmap": "tab10"}
         # Register for active-molecule and comparison-molecule changes
         cb = self._on_molecules_changed
