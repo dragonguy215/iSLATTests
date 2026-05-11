@@ -149,6 +149,7 @@ class TopBar(ResizableFrame):
         molecule_menu.add_command(label="Save Parameters (Ctrl+S)", command=self.save_parameters)
         molecule_menu.add_command(label="Load Parameters (Ctrl+L)", command=self.load_parameters)
         molecule_menu.add_command(label="Load Parameters From File (Ctrl+Shift+L)", command=self.load_parameters_from_file)
+        molecule_menu.add_command(label="Import Parameters From File", command=self.import_parameters_from_file)
         molecule_menu.add_command(label="Save Parameters To File (Ctrl+Shift+S)", command=self.save_parameters_to_file)
         molecule_drpdwn.config(menu=molecule_menu)
         MenuToolTip(molecule_menu, {
@@ -158,7 +159,8 @@ class TopBar(ResizableFrame):
             "Export Models":                       "Export current model spectra\nto CSV files for external use.",
             "Save Parameters (Ctrl+S)":            "Save current molecule parameters\nto the default save file\nfor this spectrum.",
             "Load Parameters (Ctrl+L)":            "Load molecule parameters from\nthe default save file\nfor this spectrum.",
-            "Load Parameters From File (Ctrl+Shift+L)": "Load molecule parameters from\na user-selected CSV save file.",
+            "Load Parameters From File (Ctrl+Shift+L)": "Load molecule parameters from\na user-selected CSV save file,\nreplacing existing molecules.",
+            "Import Parameters From File":              "Load molecules from a CSV save file\nand add them to the existing set\nwithout replacing current molecules.",
             "Save Parameters To File (Ctrl+Shift+S)":   "Save current molecule parameters\nto a user-selected CSV file.",
         })
 
@@ -1185,6 +1187,90 @@ class TopBar(ResizableFrame):
             if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
                 self.islat.GUI.data_field.insert_text(
                     f'Error loading parameters: {str(e)}',
+                    clear_after=True
+                )
+
+    def import_parameters_from_file(self):
+        """
+        Import molecule parameters from a user-selected CSV file and add them
+        to the existing molecules without clearing or replacing anything.
+        Opens a file dialog to let the user pick any save file.
+        """
+        selected_file = filedialog.askopenfilename(
+            title="Select a parameter file to import",
+            initialdir=str(save_folder_path),
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+
+        if not selected_file:
+            return  # User cancelled
+
+        # Show loading message
+        if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+            self.islat.GUI.data_field.insert_text(
+                'Importing parameters, this may take a moment...',
+                clear_after=True
+            )
+
+        try:
+            file_dir = os.path.dirname(selected_file)
+            file_name = os.path.basename(selected_file)
+
+            # Read molecule data from the selected file
+            mole_save_data = read_from_user_csv(
+                file_path=file_dir,
+                file_name=file_name,
+                update_save_file_names=self.islat.user_settings.get(
+                    "update_save_file_names_in_save_csv", False
+                )
+            )
+
+            if mole_save_data is None:
+                if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+                    self.islat.GUI.data_field.insert_text(
+                        f'Failed to read file: {file_name}',
+                        clear_after=True
+                    )
+                return
+
+            # Filter out molecules already present so we never overwrite them
+            existing_names = set(self.islat.molecules_dict.keys())
+            new_mole_data = {
+                name: data
+                for name, data in mole_save_data.items()
+                if name not in existing_names
+            }
+
+            if not new_mole_data:
+                if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+                    self.islat.GUI.data_field.insert_text(
+                        'No new molecules to import (all already loaded).',
+                        clear_after=False
+                    )
+                return
+
+            # Add new molecules without clearing the existing ones
+            self.islat.init_molecules(new_mole_data)
+
+            # Update GUI components
+            if hasattr(self.islat, 'GUI'):
+                if hasattr(self.islat.GUI, 'plot'):
+                    self.main_plot.update_all_plots()
+                if hasattr(self.islat.GUI, 'control_panel'):
+                    self.islat.GUI.control_panel.refresh_from_molecules_dict()
+                if hasattr(self.islat.GUI, 'data_field'):
+                    self.islat.GUI.data_field.insert_text(
+                        f'Imported {len(new_mole_data)} molecule(s) from: {file_name}',
+                        clear_after=False
+                    )
+
+            print(f"Successfully imported {len(new_mole_data)} molecule(s) from: {selected_file}")
+
+        except Exception as e:
+            print(f"Error importing parameters from file: {e}")
+            if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'data_field'):
+                self.islat.GUI.data_field.insert_text(
+                    f'Error importing parameters: {str(e)}',
                     clear_after=True
                 )
 
