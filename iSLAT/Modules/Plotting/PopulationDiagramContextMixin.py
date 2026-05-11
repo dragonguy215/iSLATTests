@@ -502,6 +502,8 @@ class PopulationDiagramContextMixin:
             ("Population diagram Y [ln(4\u03c0F/h\u03bdA_u g_u)]", "rd_yax"),
             ("Model intensity",                                      "intens"),
             ("Line-center opacity (tau)",                            "tau"),
+            ("Line instrumental FWHM (km/s)",                       "fwhm_instrumental_kms"),
+            ("Line convolved FWHM (km/s)",                          "fwhm_convolved_kms"),
         ]
         _FROM_REG_AXIS = [
             (_ML.get_text(k), k if k != "lam" else "wavelength")

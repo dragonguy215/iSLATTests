@@ -1662,3 +1662,343 @@ class Intensity(WavelengthRangeMixin):
         # noinspection PyProtectedMember
         pd = _get_pandas()
         return self.build_table()._repr_html_() if pd is not None else None
+
+    # ------------------------------------------------------------------
+    # Axis label registry  (shared with the plotting layer)
+    # ------------------------------------------------------------------
+
+    #: Human-readable (LaTeX) axis labels for every property that can
+    #: appear as an axis in a population / rotation diagram.  The
+    #: plotting layer delegates to :meth:`get_axis_label` instead of
+    #: maintaining its own copy of these strings.
+    AXIS_LABELS: dict = {
+        "e_up":               r"$E_{u}$ (K)",
+        "eu":                 r"$E_{u}$ (K)",            # alias used in component dicts
+        "e_low":              r"$E_{low}$ (K)",
+        "lam":                r"$\lambda$ ($\mu m$)",
+        "wavelength":         r"$\lambda$ ($\mu m$)",    # alias used in component dicts
+        "freq":               r"Frequency (cm$^{-1}$)",
+        "a_stein":            r"$A_{u}$ (s$^{-1}$)",
+        "g_up":               r"$g_{u}$",
+        "g_low":              r"$g_{low}$",
+        "nr":                 "Line number",
+        "lev_up":             "Upper level label",
+        "lev_low":            "Lower level label",
+        "rd_yax":             r"ln(4πF/(hν$A_{u}$$g_{u}$))",
+        "intens":             "Intensity",
+        "tau":                r"Opacity ($\tau$)",
+        "fwhm_instrumental_kms": "Instrumental FWHM (km/s)",
+        "fwhm_convolved_kms":    "Convolved FWHM (km/s)",
+    }
+
+    @classmethod
+    def get_axis_label(cls, prop: str) -> str:
+        """Return the human-readable (LaTeX) axis label for *prop*.
+
+        Falls back to *prop* itself when the key is not registered.
+        """
+        return cls.AXIS_LABELS.get(prop, prop)
+
+    # ------------------------------------------------------------------
+    # Population-diagram data
+    # ------------------------------------------------------------------
+
+    def get_population_diagram_data(
+        self,
+        radius: float,
+        distance: float,
+        *,
+        molecule: Optional[Any] = None,
+        full_range: bool = True,
+    ) -> Optional[dict]:
+        """Compute all arrays needed for a Boltzmann / rotation diagram.
+
+        This is the canonical source of population-diagram data.  The
+        plotting layer (e.g. ``PopulationDiagramPlot``) should call this
+        method and use the returned dict for rendering rather than
+        re-implementing the physics itself.
+
+        Parameters
+        ----------
+        radius : float
+            Emitting radius in AU.
+        distance : float
+            Distance to source in pc.
+        molecule : optional
+            Molecule object.  When supplied the instrumental and Keplerian
+            FWHM breakdown arrays (``fwhm_instrumental_kms`` and
+            ``fwhm_convolved_kms``) are included in the result.
+        full_range : bool
+            If ``True`` (default) include all lines in the underlying
+            line list.  If ``False`` restrict to the active wavelength
+            range.
+
+        Returns
+        -------
+        dict or None
+            ``None`` when no intensity data is available.  Otherwise a
+            dict with keys:
+
+            ``eu``, ``rd_yax``, ``wavelength``, ``intens``, ``a_stein``,
+            ``g_up``, ``g_low``, ``lev_up``, ``lev_low``, ``e_low``,
+            ``tau``, ``valid_mask``, ``beam_s``,
+            ``fwhm_instrumental_kms``, ``fwhm_convolved_kms``.
+        """
+        df = self.build_table(full_range=full_range)
+        if df is None or df.empty:
+            return None
+
+        wavelength = np.asarray(df["lam"])
+        intens_mod = np.asarray(df["intens"])
+        Astein_mod = np.asarray(df["a_stein"])
+        gu         = np.asarray(df["g_up"])
+        eu         = np.asarray(df["e_up"])
+
+        lev_up = np.asarray(df["lev_up"]) if "lev_up" in df.columns else None
+        lev_low = np.asarray(df["lev_low"]) if "lev_low" in df.columns else None
+        e_low   = np.asarray(df["e_low"])  if "e_low"  in df.columns else None
+        g_low   = np.asarray(df["g_low"])  if "g_low"  in df.columns else None
+        tau     = np.asarray(df["tau"], dtype=float) if "tau" in df.columns else None
+
+        area   = np.pi * (radius * c.ASTRONOMICAL_UNIT_M * 1e2) ** 2
+        dist   = distance * c.PARSEC_CM
+        beam_s = area / dist ** 2
+
+        F         = intens_mod * beam_s
+        frequency = c.SPEED_OF_LIGHT_MICRONS / wavelength
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rd_yax = np.log(
+                4 * np.pi * F
+                / (Astein_mod * c.PLANCK_CONSTANT * frequency * gu)
+            )
+
+        threshold  = np.nanmax(F) / 100 if np.any(F > 0) else 0
+        valid_mask = F > threshold
+
+        # Per-line FWHM (instrumental + Keplerian convolution)
+        fwhm_instrumental_kms: Optional[np.ndarray] = None
+        fwhm_convolved_kms:    Optional[np.ndarray] = None
+        if molecule is not None and len(wavelength) > 0:
+            try:
+                from iSLAT.Modules.DataProcessing.InstrumentalProfiles import (
+                    PROFILE_REGISTRY, ConstantProfile,
+                )
+                profile_key = (
+                    getattr(molecule, "instrumental_profile_key", "constant") or "constant"
+                )
+                profile_cls = PROFILE_REGISTRY.get(profile_key, ConstantProfile)
+                _fwhm_const = getattr(molecule, "fwhm", 160.0)
+                profile = (
+                    profile_cls(_fwhm_const) if profile_key == "constant"
+                    else profile_cls()
+                )
+                R_arr = np.asarray(profile.get_R(wavelength), dtype=float)
+                R_arr = np.where(
+                    (np.isfinite(R_arr)) & (R_arr > 0),
+                    R_arr,
+                    c.SPEED_OF_LIGHT_KMS / _fwhm_const,
+                )
+                fwhm_inst_arr = c.SPEED_OF_LIGHT_KMS / R_arr
+                _kep_raw = getattr(molecule, "keplerian_fwhm", None)
+                fwhm_kep = float(_kep_raw) if (_kep_raw is not None and _kep_raw > 0) else 0.0
+                fwhm_instrumental_kms = fwhm_inst_arr
+                fwhm_convolved_kms    = np.sqrt(fwhm_inst_arr ** 2 + fwhm_kep ** 2)
+            except Exception:
+                pass
+
+        return {
+            "eu":                    eu,
+            "rd_yax":                rd_yax,
+            "wavelength":            wavelength,
+            "intens":                intens_mod,
+            "a_stein":               Astein_mod,
+            "g_up":                  gu,
+            "g_low":                 g_low,
+            "lev_up":                lev_up,
+            "lev_low":               lev_low,
+            "e_low":                 e_low,
+            "tau":                   tau,
+            "valid_mask":            valid_mask,
+            "beam_s":                beam_s,
+            "fwhm_instrumental_kms": fwhm_instrumental_kms,
+            "fwhm_convolved_kms":    fwhm_convolved_kms,
+        }
+
+    # ------------------------------------------------------------------
+    # Per-line information helpers  (used by GUI data-field display)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_line_info(
+        line: Any,
+        intensity: float,
+        tau: Optional[float] = None,
+        data_flux_in_range: Optional[float] = None,
+        model_flux_in_range: Optional[float] = None,
+        molecule: Optional[Any] = None,
+    ) -> dict:
+        """Build a structured information dict for a single molecular line.
+
+        This is the canonical source of per-line metadata used by both
+        the GUI data-field display and standalone notebooks/scripts.
+        The plotting layer delegates to this method rather than
+        re-implementing the logic itself.
+
+        Parameters
+        ----------
+        line : MoleculeLine
+            The molecular transition.
+        intensity : float
+            Computed model intensity for this line.
+        tau : float, optional
+            Line opacity.
+        data_flux_in_range : float, optional
+            Observed flux integral in the selection range (erg s⁻¹ cm⁻²).
+        model_flux_in_range : float, optional
+            Model flux integral in the selection range (erg s⁻¹ cm⁻²).
+        molecule : optional
+            Active molecule.  When provided the instrumental, Keplerian,
+            and convolved FWHM at the line wavelength are included.
+
+        Returns
+        -------
+        dict
+            Keys: ``lam``, ``e_up``, ``e_low``, ``a_stein``, ``g_up``,
+            ``g_low``, ``up_lev``, ``low_lev``, ``intensity``, ``tau``,
+            ``data_flux_in_range``, ``model_flux_in_range``,
+            ``fwhm_instrumental_kms``, ``fwhm_keplerian_kms``,
+            ``fwhm_convolved_kms``, ``formatted_text``.
+        """
+        lam     = getattr(line, "lam",     None)
+        e_up    = getattr(line, "e_up",    None)
+        e_low   = getattr(line, "e_low",   None)
+        a_stein = getattr(line, "a_stein", None)
+        g_up    = getattr(line, "g_up",    None)
+        g_low   = getattr(line, "g_low",   None)
+        up_lev  = getattr(line, "lev_up",  None) or "N/A"
+        low_lev = getattr(line, "lev_low", None) or "N/A"
+        tau_val = tau if tau is not None else "N/A"
+
+        fwhm_inst = None
+        fwhm_kep  = None
+        fwhm_conv = None
+        if molecule is not None and lam is not None:
+            try:
+                from iSLAT.Modules.DataProcessing.InstrumentalProfiles import (
+                    PROFILE_REGISTRY, ConstantProfile,
+                )
+                profile_key = (
+                    getattr(molecule, "instrumental_profile_key", "constant") or "constant"
+                )
+                profile_cls = PROFILE_REGISTRY.get(profile_key, ConstantProfile)
+                _fwhm_const = getattr(molecule, "fwhm", 160.0)
+                profile     = (
+                    profile_cls(_fwhm_const) if profile_key == "constant"
+                    else profile_cls()
+                )
+                R_inst = float(np.atleast_1d(
+                    np.asarray(profile.get_R(np.array([lam])), dtype=float)
+                )[0])
+                if not np.isfinite(R_inst) or R_inst <= 0:
+                    R_inst = c.SPEED_OF_LIGHT_KMS / _fwhm_const
+                fwhm_inst = c.SPEED_OF_LIGHT_KMS / R_inst
+                _kep_raw  = getattr(molecule, "keplerian_fwhm", None)
+                fwhm_kep  = float(_kep_raw) if (_kep_raw is not None and _kep_raw > 0) else 0.0
+                fwhm_conv = float(np.sqrt(fwhm_inst ** 2 + fwhm_kep ** 2))
+            except Exception:
+                pass
+
+        wav_s   = f"{lam:.6f}"       if lam     is not None                       else "N/A"
+        a_s     = f"{a_stein:.3e}"   if a_stein is not None                       else "N/A"
+        e_s     = f"{e_up:.0f}"      if e_up    is not None                       else "N/A"
+        tau_s   = f"{tau_val:.3f}"   if isinstance(tau_val, (int, float))         else str(tau_val)
+        dflux_s = f"{data_flux_in_range:.3e}"  if data_flux_in_range  is not None else "N/A"
+        mflux_s = f"{model_flux_in_range:.3e}" if model_flux_in_range is not None else "N/A"
+
+        fwhm_block = ""
+        if fwhm_inst is not None:
+            profile_label = (
+                getattr(molecule, "instrumental_profile_key", "constant") or "constant"
+            )
+            fwhm_block = (
+                f"--- FWHM breakdown ({profile_label}) ---\n"
+                f"Instrumental FWHM (km/s) = {fwhm_inst:.2f}\n"
+                f"Keplerian FWHM (km/s) = {fwhm_kep:.2f}\n"
+                f"Convolved FWHM (km/s) = {fwhm_conv:.2f}\n"
+            )
+
+        text = (
+            "\n--- Line Information ---\n"
+            "Selected line:\n"
+            f"Upper level = {up_lev}\n"
+            f"Lower level = {low_lev}\n"
+            f"Wavelength (μm) = {wav_s}\n"
+            f"Einstein-A coeff. (1/s) = {a_s}\n"
+            f"Upper level energy (K) = {e_s}\n"
+            f"Opacity = {tau_s}\n"
+            f"Data flux in range (erg/s/cm2) = {dflux_s}\n"
+            f"Model flux in range (erg/s/cm2) = {mflux_s}\n"
+            + fwhm_block
+        )
+
+        return {
+            "lam":                   lam,
+            "e_up":                  e_up,
+            "e_low":                 e_low if e_low else "N/A",
+            "a_stein":               a_stein,
+            "g_up":                  g_up,
+            "g_low":                 g_low if g_low else "N/A",
+            "up_lev":                up_lev,
+            "low_lev":               low_lev,
+            "intensity":             intensity,
+            "tau":                   tau_val,
+            "data_flux_in_range":    data_flux_in_range,
+            "model_flux_in_range":   model_flux_in_range,
+            "fwhm_instrumental_kms": fwhm_inst,
+            "fwhm_keplerian_kms":    fwhm_kep,
+            "fwhm_convolved_kms":    fwhm_conv,
+            "formatted_text":        text,
+        }
+
+    @staticmethod
+    def get_line_info_dataframe(line_data: list) -> "pandas.DataFrame":
+        """Build a :class:`~pandas.DataFrame` with one row per molecular line.
+
+        Parameters
+        ----------
+        line_data : list of (MoleculeLine, intensity, tau)
+            Line tuples as returned by
+            ``Intensity.get_lines_in_range_with_intensity()``.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns: ``wavelength_um``, ``e_up_K``, ``e_low_K``,
+            ``a_stein``, ``g_up``, ``g_low``, ``upper_level``,
+            ``lower_level``, ``intensity``, ``tau``.
+            Rows are sorted by wavelength.
+        """
+        pd = _get_pandas()
+        if pd is None:
+            raise ImportError("pandas is required for get_line_info_dataframe")
+
+        rows = []
+        for line, intens_val, tau in line_data:
+            info = Intensity.get_line_info(line, intens_val, tau)
+            rows.append({
+                "wavelength_um": info["lam"],
+                "e_up_K":        info["e_up"],
+                "e_low_K":       info["e_low"],
+                "a_stein":       info["a_stein"],
+                "g_up":          info["g_up"],
+                "g_low":         info["g_low"],
+                "upper_level":   info["up_lev"],
+                "lower_level":   info["low_lev"],
+                "intensity":     info["intensity"],
+                "tau":           info["tau"],
+            })
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            df = df.sort_values("wavelength_um", ignore_index=True)
+        return df

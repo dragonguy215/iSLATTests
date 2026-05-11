@@ -343,11 +343,14 @@ class LineInspectionPlot(SpectrumPanel):
         model_flux_in_range: Optional[float] = None,
         molecule: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """
-        Build a structured information dict for a single molecular line.
+        """Build a structured information dict for a single molecular line.
 
-        This is the canonical source of per-line metadata used by both
-        the GUI data-field display and standalone notebooks/scripts.
+        Delegates to
+        :meth:`~iSLAT.Modules.DataTypes.Intensity.Intensity.get_line_info`
+        so that the data object owns the canonical implementation.
+        This method is kept here for backward compatibility; all callers
+        that already use ``LineInspectionPlot.get_line_info`` continue to
+        work unchanged.
 
         Parameters
         ----------
@@ -376,94 +379,13 @@ class LineInspectionPlot(SpectrumPanel):
             ``fwhm_instrumental_kms``, ``fwhm_keplerian_kms``,
             ``fwhm_convolved_kms``, ``formatted_text``.
         """
-        import numpy as _np
-
-        lam     = getattr(line, "lam", None)
-        e_up    = getattr(line, "e_up", None)
-        e_low   = getattr(line, "e_low", None)
-        a_stein = getattr(line, "a_stein", None)
-        g_up    = getattr(line, "g_up", None)
-        g_low   = getattr(line, "g_low", None)
-        up_lev  = getattr(line, "lev_up", None) or "N/A"
-        low_lev = getattr(line, "lev_low", None) or "N/A"
-        tau_val = tau if tau is not None else "N/A"
-
-        # --- FWHM breakdown at this line's wavelength ------------------
-        fwhm_inst = None
-        fwhm_kep  = None
-        fwhm_conv = None
-        if molecule is not None and lam is not None:
-            try:
-                from iSLAT.Modules.DataProcessing.InstrumentalProfiles import (
-                    PROFILE_REGISTRY, ConstantProfile,
-                )
-                import iSLAT.Constants as _c
-                profile_key  = getattr(molecule, "instrumental_profile_key", "constant") or "constant"
-                profile_cls  = PROFILE_REGISTRY.get(profile_key, ConstantProfile)
-                _fwhm_const  = getattr(molecule, "fwhm", 160.0)
-                profile      = profile_cls(_fwhm_const) if profile_key == "constant" else profile_cls()
-
-                R_inst = float(_np.atleast_1d(
-                    _np.asarray(profile.get_R(_np.array([lam])), dtype=float)
-                )[0])
-                if not _np.isfinite(R_inst) or R_inst <= 0:
-                    R_inst = _c.SPEED_OF_LIGHT_KMS / _fwhm_const
-                fwhm_inst = _c.SPEED_OF_LIGHT_KMS / R_inst
-                fwhm_kep  = float(getattr(molecule, "keplerian_fwhm", 0.0))
-                fwhm_conv = float(_np.sqrt(fwhm_inst ** 2 + fwhm_kep ** 2))
-            except Exception:
-                pass  # Non-fatal — FWHM lines simply omitted
-
-        # Build formatted text ------------------------------------------
-        wav_s   = f"{lam:.6f}"       if lam     is not None else "N/A"
-        a_s     = f"{a_stein:.3e}"   if a_stein is not None else "N/A"
-        e_s     = f"{e_up:.0f}"      if e_up    is not None else "N/A"
-        tau_s   = f"{tau_val:.3f}"   if isinstance(tau_val, (int, float)) else str(tau_val)
-        dflux_s = f"{data_flux_in_range:.3e}"  if data_flux_in_range  is not None else "N/A"
-        mflux_s = f"{model_flux_in_range:.3e}" if model_flux_in_range is not None else "N/A"
-
-        fwhm_block = ""
-        if fwhm_inst is not None:
-            profile_label = getattr(molecule, "instrumental_profile_key", "constant") or "constant"
-            fwhm_block = (
-                f"--- FWHM breakdown ({profile_label}) ---\n"
-                f"Instrumental FWHM (km/s) = {fwhm_inst:.2f}\n"
-                f"Keplerian FWHM (km/s) = {fwhm_kep:.2f}\n"
-                f"Convolved FWHM (km/s) = {fwhm_conv:.2f}\n"
-            )
-
-        text = (
-            "\n--- Line Information ---\n"
-            "Selected line:\n"
-            f"Upper level = {up_lev}\n"
-            f"Lower level = {low_lev}\n"
-            f"Wavelength (μm) = {wav_s}\n"
-            f"Einstein-A coeff. (1/s) = {a_s}\n"
-            f"Upper level energy (K) = {e_s}\n"
-            f"Opacity = {tau_s}\n"
-            f"Data flux in range (erg/s/cm2) = {dflux_s}\n"
-            f"Model flux in range (erg/s/cm2) = {mflux_s}\n"
-            + fwhm_block
+        from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
+        return _Intensity.get_line_info(
+            line, intensity, tau,
+            data_flux_in_range=data_flux_in_range,
+            model_flux_in_range=model_flux_in_range,
+            molecule=molecule,
         )
-
-        return {
-            "lam":                   lam,
-            "e_up":                  e_up,
-            "e_low":                 e_low if e_low else "N/A",
-            "a_stein":               a_stein,
-            "g_up":                  g_up,
-            "g_low":                 g_low if g_low else "N/A",
-            "up_lev":                up_lev,
-            "low_lev":               low_lev,
-            "intensity":             intensity,
-            "tau":                   tau_val,
-            "data_flux_in_range":    data_flux_in_range,
-            "model_flux_in_range":   model_flux_in_range,
-            "fwhm_instrumental_kms": fwhm_inst,
-            "fwhm_keplerian_kms":    fwhm_kep,
-            "fwhm_convolved_kms":    fwhm_conv,
-            "formatted_text":        text,
-        }
 
     @staticmethod
     def format_line_info(info: Dict[str, Any]) -> str:
@@ -474,8 +396,12 @@ class LineInspectionPlot(SpectrumPanel):
     def get_line_info_dataframe(
         line_data: List[Tuple["MoleculeLine", float, Optional[float]]],
     ) -> "pd.DataFrame":
-        """
-        Build a :class:`~pandas.DataFrame` with one row per molecular line.
+        """Build a :class:`~pandas.DataFrame` with one row per molecular line.
+
+        Delegates to
+        :meth:`~iSLAT.Modules.DataTypes.Intensity.Intensity.get_line_info_dataframe`
+        so that the data object owns the canonical implementation.
+        This method is kept here for backward compatibility.
 
         Parameters
         ----------
@@ -491,22 +417,5 @@ class LineInspectionPlot(SpectrumPanel):
             ``lower_level``, ``intensity``, ``tau``.
             Rows are sorted by wavelength.
         """
-        rows = []
-        for line, intensity, tau in line_data:
-            info = LineInspectionPlot.get_line_info(line, intensity, tau)
-            rows.append({
-                "wavelength_um": info["lam"],
-                "e_up_K":        info["e_up"],
-                "e_low_K":       info["e_low"],
-                "a_stein":       info["a_stein"],
-                "g_up":          info["g_up"],
-                "g_low":         info["g_low"],
-                "upper_level":   info["up_lev"],
-                "lower_level":   info["low_lev"],
-                "intensity":     info["intensity"],
-                "tau":           info["tau"],
-            })
-        df = pd.DataFrame(rows)
-        if not df.empty:
-            df = df.sort_values("wavelength_um", ignore_index=True)
-        return df
+        from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
+        return _Intensity.get_line_info_dataframe(line_data)

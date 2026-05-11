@@ -237,7 +237,7 @@ class PopulationDiagramPlot(BasePlot):
         # threshold-passing lines in line_data order).
         value_data_list: List[Tuple[Dict[str, Any], int]] = []
 
-        from iSLAT.Modules.Plotting.LineInspectionPlot import LineInspectionPlot as _LIP
+        from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
 
         mol_name = getattr(molecule, "name", "") if molecule else ""
 
@@ -269,18 +269,26 @@ class PopulationDiagramPlot(BasePlot):
                 if (F > 0 and line.a_stein > 0) else np.nan
             )
 
-            # Resolve x/y coordinates using current axis property settings so
-            # the scatter stays consistent after set_axes() or color_by() calls.
+            # Delegate per-line metadata (including FWHM breakdown) to Intensity
+            # so all physics computation lives on the data object.
+            info = _Intensity.get_line_info(line, intensity, tau_val, molecule=molecule)
+            info["rd_yax"] = rd_yax  # computed here using beam_s
+            info["intensity_percent"] = frac * 100
+            info["molecule_name"] = mol_name  # needed for pick-highlight routing
+
+            # Build the axis-property lookup map; FWHM values come from info.
             _LINE_MAP = {
-                "eu":         line.e_up,
-                "e_low":      line.e_low,
-                "rd_yax":     rd_yax,
-                "wavelength": line.lam,
-                "intens":     intensity,
-                "a_stein":    line.a_stein,
-                "g_up":       line.g_up,
-                "g_low":      line.g_low,
-                "tau":        tau_val,
+                "eu":                    line.e_up,
+                "e_low":                 line.e_low,
+                "rd_yax":                rd_yax,
+                "wavelength":            line.lam,
+                "intens":                intensity,
+                "a_stein":               line.a_stein,
+                "g_up":                  line.g_up,
+                "g_low":                 line.g_low,
+                "tau":                   tau_val,
+                "fwhm_instrumental_kms": info.get("fwhm_instrumental_kms"),
+                "fwhm_convolved_kms":    info.get("fwhm_convolved_kms"),
             }
             xv = _LINE_MAP.get(self._x_prop)
             yv = _LINE_MAP.get(self._y_prop)
@@ -294,11 +302,6 @@ class PopulationDiagramPlot(BasePlot):
 
             x_vals.append(xv)
             y_vals.append(yv)
-
-            info = _LIP.get_line_info(line, intensity, tau_val)
-            info["rd_yax"] = rd_yax  # always store for data display
-            info["intensity_percent"] = frac * 100
-            info["molecule_name"] = mol_name  # needed for pick-highlight routing
             value_data_list.append((info, current_al_idx))
 
         if not x_vals:
@@ -612,82 +615,63 @@ class PopulationDiagramPlot(BasePlot):
     ) -> Optional[Dict[str, Any]]:
         """Compute population-diagram values for a single component.
 
+        Delegates all physics to
+        :meth:`~iSLAT.Modules.DataTypes.Intensity.Intensity.get_population_diagram_data`
+        and annotates the result with the rendering metadata (name, color)
+        that only the plotting layer knows.
+
         Returns a data dict or ``None`` if no valid data is available.
         """
-        mol = comp.get("molecule")
+        from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
+
+        mol          = comp.get("molecule")
         intensity_obj = comp.get("intensity")
+        radius       = comp["radius"]
+        distance     = comp["distance"]
 
         if mol is not None:
-            int_pars = self.get_intensity_data(mol, full_range=True)
-            # Fall back to active-range if full_range returns all-NaN
-            if int_pars is not None and not int_pars.empty:
-                intens_vals = int_pars["intens"]
-                if intens_vals.isna().all():
-                    int_pars_active = self.get_intensity_data(
-                        mol, full_range=False
+            # Ensure intensity has been calculated
+            if not hasattr(mol, "intensity") or mol.intensity is None:
+                if hasattr(mol, "calculate_intensity"):
+                    mol.calculate_intensity()
+            intensity_from_mol = getattr(mol, "intensity", None)
+            if intensity_from_mol is None:
+                return None
+
+            data = intensity_from_mol.get_population_diagram_data(
+                radius, distance, molecule=mol, full_range=True
+            )
+
+            # Fall back to active-range when full-range returns all-NaN intensities
+            if data is not None:
+                intens_arr = data.get("intens")
+                if (
+                    intens_arr is not None
+                    and not (np.isfinite(intens_arr) & (intens_arr > 0)).any()
+                ):
+                    data_active = intensity_from_mol.get_population_diagram_data(
+                        radius, distance, molecule=mol, full_range=False
                     )
-                    if (
-                        int_pars_active is not None
-                        and not int_pars_active.empty
-                        and not int_pars_active["intens"].isna().all()
-                    ):
-                        int_pars = int_pars_active
+                    if data_active is not None:
+                        active_intens = data_active.get("intens")
+                        if (
+                            active_intens is not None
+                            and (np.isfinite(active_intens) & (active_intens > 0)).any()
+                        ):
+                            data = data_active
+
         elif intensity_obj is not None:
-            int_pars = self._build_table_from_intensity_obj(intensity_obj)
+            data = intensity_obj.get_population_diagram_data(radius, distance)
         else:
             return None
 
-        if int_pars is None or int_pars.empty:
+        if data is None:
             return None
 
-        wavelength = np.asarray(int_pars["lam"])
-        intens_mod = np.asarray(int_pars["intens"])
-        Astein_mod = np.asarray(int_pars["a_stein"])
-        gu = np.asarray(int_pars["g_up"])
-        eu = np.asarray(int_pars["e_up"])
-
-        # Extra columns for colour-mapping
-        lev_up = np.asarray(int_pars["lev_up"]) if "lev_up" in int_pars.columns else None
-        lev_low = np.asarray(int_pars["lev_low"]) if "lev_low" in int_pars.columns else None
-        e_low = np.asarray(int_pars["e_low"]) if "e_low" in int_pars.columns else None
-        g_low = np.asarray(int_pars["g_low"]) if "g_low" in int_pars.columns else None
-        tau = np.asarray(int_pars["tau"], dtype=float) if "tau" in int_pars.columns else None
-
-        radius = comp["radius"]
-        distance = comp["distance"]
-
-        area = np.pi * (radius * c.ASTRONOMICAL_UNIT_M * 1e2) ** 2
-        dist = distance * c.PARSEC_CM
-        beam_s = area / dist**2
-
-        F = intens_mod * beam_s
-        frequency = c.SPEED_OF_LIGHT_MICRONS / wavelength
-
-        with np.errstate(divide="ignore", invalid="ignore"):
-            rd_yax = np.log(
-                4 * np.pi * F
-                / (Astein_mod * c.PLANCK_CONSTANT * frequency * gu)
-            )
-
-        threshold = np.nanmax(F) / 100 if np.any(F > 0) else 0
-        valid_mask = F > threshold
-
         return {
-            "name": comp["name"],
+            "name":  comp["name"],
             "color": comp["color"],
-            "eu": eu,
-            "rd_yax": rd_yax,
-            "wavelength": wavelength,
-            "intens": intens_mod,
-            "a_stein": Astein_mod,
-            "g_up": gu,
-            "g_low": g_low,
-            "lev_up": lev_up,
-            "lev_low": lev_low,
-            "e_low": e_low,
-            "tau": tau,
-            "valid_mask": valid_mask,
-            "beam_s": beam_s,
+            **data,
         }
 
     # ------------------------------------------------------------------
@@ -1069,36 +1053,33 @@ class PopulationDiagramPlot(BasePlot):
     # ------------------------------------------------------------------
     @staticmethod
     def _property_label(prop: str) -> str:
-        """LaTeX label for a property name (used for colourbar labels)."""
-        _OVERRIDES = {
-            "eu":        _MoleculeLine.PROPERTY_INFO["e_up"].latex,
-            "wavelength": _MoleculeLine.PROPERTY_INFO["lam"].latex,
-            "intens":    "Intensity",
-            "tau":       r"Opacity ($\tau$)",
-            "rd_yax":    r"ln(4πF/(hν$A_{u}$$g_{u}$))",
-        }
-        if prop in _OVERRIDES:
-            return _OVERRIDES[prop]
-        info = _MoleculeLine.PROPERTY_INFO.get(prop)
-        return info.latex if info is not None else prop
+        """LaTeX label for a property name (used for colourbar labels).
 
-    # Axis-property helpers — built from MoleculeLine.PROPERTY_INFO (latex labels) plus
-    # derived/plot-specific properties not directly stored on the line object.
-    _AXIS_LABELS: Dict[str, str] = {
-        **{k: v.latex for k, v in _MoleculeLine.PROPERTY_INFO.items()},
-        # Internal key aliases used by the component data dicts
-        "eu":         _MoleculeLine.PROPERTY_INFO["e_up"].latex,   # alias for e_up
-        "wavelength": _MoleculeLine.PROPERTY_INFO["lam"].latex,    # alias for lam
-        # Derived / plot-only properties
-        "rd_yax":     r"ln(4πF/(hν$A_{u}$$g_{u}$))",
-        "intens":     "Intensity",
-        "tau":        r"Opacity ($\tau$)",
-    }
+        Delegates to :meth:`~iSLAT.Modules.DataTypes.Intensity.Intensity.get_axis_label`
+        so the label registry lives on the data object.
+        """
+        from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
+        return _Intensity.get_axis_label(prop)
+
+    # Axis-property helpers — the label dict and lookup now live on Intensity;
+    # _AXIS_LABELS is kept here as a convenience reference for callers that
+    # read it directly (e.g. GUI dropdown population), but it is sourced from
+    # Intensity.AXIS_LABELS so there is a single source of truth.
+    @classmethod
+    def _get_all_axis_labels(cls) -> Dict[str, str]:
+        """Return the full axis-label registry (sourced from Intensity)."""
+        from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
+        return _Intensity.AXIS_LABELS
 
     @classmethod
     def _get_axis_label(cls, prop: str) -> str:
-        """Human-readable axis label for a given property name."""
-        return cls._AXIS_LABELS.get(prop, prop)
+        """Human-readable axis label for a given property name.
+
+        Delegates to :attr:`~iSLAT.Modules.DataTypes.Intensity.Intensity.AXIS_LABELS`
+        so the label registry is stored on the data object.
+        """
+        from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
+        return _Intensity.get_axis_label(prop)
 
     @staticmethod
     def _get_axis_array(
@@ -1156,6 +1137,8 @@ class PopulationDiagramPlot(BasePlot):
             return
         color = self._get_theme_value("active_scatter_line_color", "green")
 
+        from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
+
         x_vals: List[float] = []
         y_vals: List[float] = []
 
@@ -1174,18 +1157,32 @@ class PopulationDiagramPlot(BasePlot):
                 / (line_obj.a_stein * c.PLANCK_CONSTANT * freq * line_obj.g_up)
             ) if (F > 0 and line_obj.a_stein > 0) else np.nan
 
+            # Resolve the active molecule for FWHM lookup.
+            _hl_mol = self.molecule or (
+                list(self._molecules_input.get_visible_molecules(return_objects=True))[0]
+                if self._molecules_input is not None
+                and hasattr(self._molecules_input, "get_visible_molecules")
+                else None
+            )
+
+            # Delegate per-line metadata (including FWHM) to Intensity.get_line_info
+            # so all physics computation lives on the data object.
+            _hl_info = _Intensity.get_line_info(line_obj, intensity, tau, molecule=_hl_mol)
+
             def _resolve(prop: str) -> Optional[float]:
                 """Map a property key to a scalar value for this line."""
                 _LINE_MAP = {
-                    "eu":         line_obj.e_up,
-                    "e_low":      line_obj.e_low,
-                    "rd_yax":     rd,
-                    "wavelength": line_obj.lam,
-                    "intens":     intensity,
-                    "a_stein":    line_obj.a_stein,
-                    "g_up":       line_obj.g_up,
-                    "g_low":      line_obj.g_low,
-                    "tau":        tau,
+                    "eu":                    line_obj.e_up,
+                    "e_low":                 line_obj.e_low,
+                    "rd_yax":                rd,
+                    "wavelength":            line_obj.lam,
+                    "intens":                intensity,
+                    "a_stein":               line_obj.a_stein,
+                    "g_up":                  line_obj.g_up,
+                    "g_low":                 line_obj.g_low,
+                    "tau":                   tau,
+                    "fwhm_instrumental_kms": _hl_info.get("fwhm_instrumental_kms"),
+                    "fwhm_convolved_kms":    _hl_info.get("fwhm_convolved_kms"),
                 }
                 val = _LINE_MAP.get(prop)
                 try:
