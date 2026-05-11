@@ -329,7 +329,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
 
         # Overlay saved / atomic lines if their toggles are on
         if self._pm.atomic_toggle:
-            self._plot_atomic_lines()
+            self.toggle_atomic_lines(True)
 
         if self._pm.line_toggle:
             self._add_saved_line_artists()
