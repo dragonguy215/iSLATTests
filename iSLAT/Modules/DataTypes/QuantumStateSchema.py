@@ -432,6 +432,82 @@ class QuantumStateRegistry:
         """
         cls._registry[molecule_id] = schema
 
+        # Register quantum-field axis entries with PlotAxisRegistry so that
+        # GUI dialogs and plot classes discover them automatically.
+        try:
+            from iSLAT.Modules.DataTypes.PlotAxisRegistry import (
+                PlotAxisEntry,
+                PlotAxisRegistry,
+            )
+            import numpy as _np
+
+            all_fields = list(schema.global_fields) + list(schema.local_fields)
+            for _f in all_fields:
+                _is_numeric = _f.dtype in ("int", "float")
+                _kind: str = "continuous" if _is_numeric else "categorical"
+                _fname = _f.name
+                _desc = _f.description or _fname
+
+                for _state, _lev_key in (("upper", "lev_up"), ("lower", "lev_low")):
+                    _key = f"qn_{_state}:{_fname}"
+                    _label = f"{_fname} ({_state})"
+                    _display = f"{_fname} \u2014 {_state} state (quantum)"
+
+                    # Capture loop variables by default-argument trick
+                    def _make_resolve_array(_lk=_lev_key, _fn=_fname, _s=schema):
+                        def _resolve(cdata, __lk=_lk, __fn=_fn, __s=_s):
+                            lev_arr = cdata.get(__lk)
+                            if lev_arr is None:
+                                return None
+                            try:
+                                labels = _np.asarray(lev_arr, dtype="U64")
+                                parsed = __s.parse_bulk(labels)
+                                field_vals = parsed.get(__fn)
+                                if field_vals is None:
+                                    return None
+                                # Replace integer sentinel -999 with NaN
+                                arr = _np.asarray(field_vals, dtype=float)
+                                arr = _np.where(arr == -999, _np.nan, arr)
+                                return arr
+                            except Exception:
+                                return None
+                        return _resolve
+
+                    def _make_resolve_scalar(_st=_state, _fn=_fname):
+                        def _resolve(line, mol_id, __st=_st, __fn=_fn):
+                            try:
+                                import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401
+                                from iSLAT.Modules.DataTypes.QuantumStateSchema import (
+                                    QuantumStateRegistry as _QR,
+                                )
+                                _mid = mol_id or getattr(line, "molecule_id", None)
+                                _schema = _QR.get_schema(_mid)
+                                qd = line.get_quantum_dict(__st, schema=_schema)
+                                val = qd.get(__fn)
+                                if val is None or val == -999:
+                                    return None
+                                return float(val)
+                            except Exception:
+                                return None
+                        return _resolve
+
+                    PlotAxisRegistry.register(
+                        PlotAxisEntry(
+                            key=_key,
+                            display_name=_display,
+                            label=_label,
+                            kind=_kind,  # type: ignore[arg-type]
+                            available_as_axis=_is_numeric,
+                            available_as_color=True,
+                            suggest_log=False,
+                            resolve_array=_make_resolve_array(),
+                            resolve_scalar=_make_resolve_scalar(),
+                            group=f"Quantum \u2014 {_state}",
+                        )
+                    )
+        except Exception:
+            pass  # Registry registration is best-effort; never break molecule loading
+
     @classmethod
     def get_schema(cls, molecule_id: Optional[str]) -> QuantumStateSchema:
         """Return the schema for *molecule_id*, or the generic fallback.

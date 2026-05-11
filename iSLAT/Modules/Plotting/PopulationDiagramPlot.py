@@ -24,6 +24,7 @@ import matplotlib
 from .BasePlot import BasePlot
 import iSLAT.Constants as c
 from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine as _MoleculeLine
+from iSLAT.Modules.DataTypes.PlotAxisRegistry import PlotAxisRegistry as _AxisReg
 
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
@@ -295,10 +296,10 @@ class PopulationDiagramPlot(BasePlot):
             }
             xv = _LINE_MAP.get(self._x_prop)
             if xv is None:
-                xv = self._resolve_qn_for_line(self._x_prop, line, _mol_id)
+                xv = _AxisReg.resolve_scalar(self._x_prop, line, _mol_id)
             yv = _LINE_MAP.get(self._y_prop)
             if yv is None:
-                yv = self._resolve_qn_for_line(self._y_prop, line, _mol_id)
+                yv = _AxisReg.resolve_scalar(self._y_prop, line, _mol_id)
             try:
                 xv = float(xv) if xv is not None else None
                 yv = float(yv) if yv is not None else None
@@ -855,70 +856,36 @@ class PopulationDiagramPlot(BasePlot):
         pmax = mapping.get("pmax")
         log_scale = mapping.get("log_scale", False)
 
-        # Resolve aliases between user-facing names and internal keys
-        _ALIASES = {
-            "lam": "wavelength",
-            "e_up": "eu",
-        }
-        internal_key: str = _ALIASES.get(prop, prop)  # type: ignore[assignment]
-        display_prop = prop  # keep the user-facing name for labels
+        # Resolve legacy aliases so old callers (e.g. passing "lam" or "e_up")
+        # still work; the registry uses the canonical forms "wavelength" / "eu".
+        _ALIASES = {"lam": "wavelength", "e_up": "eu"}
+        internal_key: str = _ALIASES.get(prop, prop)
+        display_prop = prop
 
-        # ---- Categorical properties ----------------------------------
-        _CATEGORICAL = {"lev_up", "lev_low", "component", "molecule"}
-        if prop in _CATEGORICAL:
+        # ---- Dispatch by kind (categorical vs continuous) -----------
+        kind = _AxisReg.get_kind(internal_key)
+
+        if kind == "categorical":
             # 'molecule' is a convenience alias for 'component'
-            render_prop = "component" if prop == "molecule" else prop
+            render_prop = "component" if internal_key in ("molecule", "component") else internal_key
             self._render_categorical_colormap(ax, render_prop, cmap_name)
             return
 
-        # ---- Quantum field properties  (e.g. "J", "v", "Ka", "Kc") --
-        # These are field names from the QuantumStateSchema for the molecule.
-        # Props with an explicit state prefix "qn_upper:FIELD" / "qn_lower:FIELD"
-        # are also accepted; bare names default to the upper state.
-        _KNOWN_CONTINUOUS = {
-            "eu", "rd_yax", "wavelength", "intens", "a_stein",
-            "g_up", "g_low", "e_low", "tau",
-        }
-        qn_state = "upper"
-        qn_field = None
-        if internal_key not in _KNOWN_CONTINUOUS:
-            if internal_key.startswith("qn_upper:"):
-                qn_field = internal_key[len("qn_upper:"):]
-                qn_state = "upper"
-            elif internal_key.startswith("qn_lower:"):
-                qn_field = internal_key[len("qn_lower:"):]
-                qn_state = "lower"
-            else:
-                # Bare field name — try upper state first
-                qn_field = internal_key
-                qn_state = "upper"
-
-        if qn_field is not None:
-            self._render_quantum_field(
-                ax, qn_field, qn_state, cmap_name,
-                vmin=vmin, vmax=vmax, pmin=pmin, pmax=pmax,
-                log_scale=log_scale, display_prop=display_prop,
-            )
-            return
-
+        # ---- Continuous (includes quantum fields via resolve_array) --
         all_x: List[np.ndarray] = []
         all_y: List[np.ndarray] = []
         all_vals: List[np.ndarray] = []
         all_wav: List[np.ndarray] = []
 
         for cdata in self._component_data:
-            vals = cdata.get(internal_key)
+            vals_arr = _AxisReg.resolve_array(internal_key, cdata)
             x_arr = self._get_axis_array(cdata, self._x_prop)
             y_arr = self._get_axis_array(cdata, self._y_prop)
-            if vals is None or x_arr is None or y_arr is None:
+            if vals_arr is None or x_arr is None or y_arr is None:
                 continue
-            vals_arr = np.asarray(vals, dtype=float)
 
             # Apply the valid_mask so that only lines above the 1%-of-max
             # flux threshold are plotted and used for scale computation.
-            # Without this, near-zero dim lines dominate the vmin/vmax for
-            # log-distributed properties (intens, tau, a_stein) making all
-            # the visible points appear as the same color.
             mask = cdata.get("valid_mask")
             if mask is not None:
                 mask = np.asarray(mask, dtype=bool)
@@ -948,8 +915,6 @@ class PopulationDiagramPlot(BasePlot):
         val_cat = np.concatenate(all_vals)
 
         # Percentile cutoffs override explicit vmin/vmax when set.
-        # Use only finite values so that -inf / nan (from log of 0) don't
-        # corrupt the scale.
         finite_vals = val_cat[np.isfinite(val_cat)]
         if len(finite_vals) == 0:
             self._render_by_component(ax)
@@ -965,8 +930,6 @@ class PopulationDiagramPlot(BasePlot):
             vmax = float(np.nanmax(finite_vals))
 
         if log_scale:
-            # LogNorm requires strictly positive limits; derive from the
-            # positive-only subset if vmin ended up ≤ 0.
             pos_vals = finite_vals[finite_vals > 0]
             if len(pos_vals) == 0:
                 pos_vals = np.array([1e-30])
@@ -988,12 +951,9 @@ class PopulationDiagramPlot(BasePlot):
             alpha=0.8,
             picker=True,
         )
-        # Wavelengths are already masked and concatenated above in all_wav.
-        _wav_parts = all_wav
-        if _wav_parts:
-            sc._islat_scatter_wavelengths = np.concatenate(_wav_parts)
+        if all_wav:
+            sc._islat_scatter_wavelengths = np.concatenate(all_wav)
 
-        # Add a colorbar and track it for later removal
         label = self._property_label(display_prop)
         fig = ax.get_figure()
         if fig is not None:
@@ -1103,322 +1063,33 @@ class PopulationDiagramPlot(BasePlot):
         )
 
     # ------------------------------------------------------------------
-    def _render_quantum_field(
-        self,
-        ax: "Axes",
-        field: str,
-        state: str,
-        cmap_name: str,
-        *,
-        vmin=None,
-        vmax=None,
-        pmin=None,
-        pmax=None,
-        log_scale: bool = False,
-        display_prop: str = "",
-    ) -> None:
-        """color scatter points by a parsed quantum number field.
-
-        Parameters
-        ----------
-        field : str
-            Quantum-field name as defined in the molecule's
-            :class:`~iSLAT.Modules.DataTypes.QuantumStateSchema.QuantumStateSchema`
-            (e.g. ``"J"``, ``"v"``, ``"Ka"``).
-        state : str
-            ``"upper"`` to parse ``lev_up`` labels, ``"lower"`` to parse
-            ``lev_low`` labels.
-        """
-        from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
-        import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # register all schemas
-
-        lev_key = "lev_up" if state == "upper" else "lev_low"
-
-        all_x: List[np.ndarray] = []
-        all_y: List[np.ndarray] = []
-        all_vals: List[np.ndarray] = []
-        all_wav: List[np.ndarray] = []
-        field_dtype: Optional[str] = None
-
-        for cdata in self._component_data:
-            x_arr = self._get_axis_array(cdata, self._x_prop)
-            y_arr = self._get_axis_array(cdata, self._y_prop)
-            if x_arr is None or y_arr is None:
-                continue
-
-            lev_arr = cdata.get(lev_key)
-            if lev_arr is None:
-                continue
-
-            mol_id = cdata.get("molecule_id")
-            schema = QuantumStateRegistry.get_schema(mol_id)
-
-            # Check that this field exists in the schema
-            all_fields = {f.name: f for f in list(schema.global_fields) + list(schema.local_fields)}
-            if field not in all_fields:
-                continue
-            field_dtype = all_fields[field].dtype
-
-            labels = np.asarray(lev_arr, dtype="U64")
-            parsed = schema.parse_bulk(labels)
-            field_vals = parsed.get(field)
-            if field_vals is None:
-                continue
-
-            mask = cdata.get("valid_mask")
-            if mask is not None:
-                mask = np.asarray(mask, dtype=bool)
-                x_arr = x_arr[mask]
-                y_arr = y_arr[mask]
-                field_vals = field_vals[mask]
-                wav = cdata.get("wavelength")
-                if wav is not None:
-                    all_wav.append(np.asarray(wav)[mask])
-            else:
-                wav = cdata.get("wavelength")
-                if wav is not None:
-                    all_wav.append(np.asarray(wav))
-
-            if len(x_arr) == 0:
-                continue
-            all_x.append(x_arr)
-            all_y.append(y_arr)
-            all_vals.append(field_vals)
-
-        if not all_x:
-            # No components had this field — fall back
-            self._render_by_component(ax)
-            return
-
-        eu_cat = np.concatenate(all_x)
-        rd_cat = np.concatenate(all_y)
-        val_cat = np.concatenate(all_vals)
-
-        # str-dtype fields → categorical colormap
-        if field_dtype == "str":
-            label_cat = np.asarray(val_cat, dtype=str)
-            unique_labels = np.unique(label_cat)
-            cmap_obj = matplotlib.colormaps.get_cmap(cmap_name).resampled(
-                max(len(unique_labels), 1)
-            )
-            label_to_color = {
-                lbl: cmap_obj(i / max(len(unique_labels) - 1, 1))
-                for i, lbl in enumerate(unique_labels)
-            }
-            colors = np.array([label_to_color[lbl] for lbl in label_cat])
-            ax.scatter(eu_cat, rd_cat, c=colors, s=5, alpha=0.8)
-
-            from matplotlib.lines import Line2D
-            entries = list(unique_labels)[:20]
-            handles = [
-                Line2D([0], [0], marker="o", color="w",
-                       markerfacecolor=label_to_color[lbl],
-                       markersize=6, label=str(lbl), linewidth=0)
-                for lbl in entries
-            ]
-            if len(unique_labels) > 20:
-                handles.append(Line2D([0], [0], marker="", color="w",
-                                      label=f"… +{len(unique_labels) - 20} more",
-                                      linewidth=0))
-            ax.legend(handles=handles, loc="upper right", fontsize="x-small",
-                      framealpha=0.7)
-            return
-
-        # int/float fields → continuous colormap
-        val_cat = np.asarray(val_cat, dtype=float)
-
-        # Replace sentinel values (-999 for int, NaN for float) with NaN
-        val_cat = np.where(val_cat == -999, np.nan, val_cat)
-
-        finite_vals = val_cat[np.isfinite(val_cat)]
-        if len(finite_vals) == 0:
-            self._render_by_component(ax)
-            return
-
-        if pmin is not None:
-            vmin = float(np.nanpercentile(finite_vals, float(pmin)))
-        elif vmin is None:
-            vmin = float(np.nanmin(finite_vals))
-        if pmax is not None:
-            vmax = float(np.nanpercentile(finite_vals, float(pmax)))
-        elif vmax is None:
-            vmax = float(np.nanmax(finite_vals))
-
-        if log_scale:
-            pos_vals = finite_vals[finite_vals > 0]
-            if len(pos_vals) == 0:
-                pos_vals = np.array([1e-30])
-            safe_vmin = max(vmin if vmin is not None and vmin > 0 else float(np.nanmin(pos_vals)), 1e-300)
-            safe_vmax = max(vmax, safe_vmin * 10) if vmax is not None else float(np.nanmax(pos_vals))
-            norm = LogNorm(vmin=safe_vmin, vmax=safe_vmax)
-        else:
-            norm = Normalize(vmin=vmin, vmax=vmax)
-
-        cmap_obj = matplotlib.colormaps.get_cmap(cmap_name)
-        sc = ax.scatter(eu_cat, rd_cat, c=val_cat, s=5, cmap=cmap_obj,
-                        norm=norm, alpha=0.8, picker=True)
-        if all_wav:
-            sc._islat_scatter_wavelengths = np.concatenate(all_wav)
-
-        label = display_prop or field
-        fig = ax.get_figure()
-        if fig is not None:
-            self._colorbar = fig.colorbar(sc, ax=ax, label=label, pad=0.02)
-
-    # ------------------------------------------------------------------
     @staticmethod
     def _property_label(prop: str) -> str:
         """LaTeX label for a property name (used for colorbar labels).
 
-        Delegates to :meth:`~iSLAT.Modules.DataTypes.Intensity.Intensity.get_axis_label`
-        so the label registry lives on the data object.  Quantum-field props
-        (bare names or ``qn_upper:FIELD`` / ``qn_lower:FIELD`` prefixed forms)
-        are handled here.
+        Delegates to :class:`~iSLAT.Modules.DataTypes.PlotAxisRegistry.PlotAxisRegistry`.
         """
-        # Quantum-field with explicit state prefix
-        if prop.startswith("qn_upper:"):
-            field = prop[len("qn_upper:"):]
-            return f"{field} (upper)"
-        if prop.startswith("qn_lower:"):
-            field = prop[len("qn_lower:"):]
-            return f"{field} (lower)"
-        from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
-        return _Intensity.get_axis_label(prop)
+        return _AxisReg.get_axis_label(prop)
 
-    # Axis-property helpers — the label dict and lookup now live on Intensity;
-    # _AXIS_LABELS is kept here as a convenience reference for callers that
-    # read it directly (e.g. GUI dropdown population), but it is sourced from
-    # Intensity.AXIS_LABELS so there is a single source of truth.
     @classmethod
     def _get_all_axis_labels(cls) -> Dict[str, str]:
-        """Return the full axis-label registry (sourced from Intensity)."""
-        from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
-        return _Intensity.AXIS_LABELS
+        """Return all axis-option labels sourced from the registry."""
+        return {e.key: e.label for e in _AxisReg.get_axis_options()}
 
     @classmethod
     def _get_axis_label(cls, prop: str) -> str:
         """Human-readable axis label for a given property name.
 
-        Delegates to :attr:`~iSLAT.Modules.DataTypes.Intensity.Intensity.AXIS_LABELS`
-        so the label registry is stored on the data object.  Quantum-field
-        props (``"qn_upper:FIELD"``, ``"qn_lower:FIELD"``, or bare field
-        names like ``"J"``) are formatted as ``"FIELD (upper/lower)"``.
+        Delegates to :class:`~iSLAT.Modules.DataTypes.PlotAxisRegistry.PlotAxisRegistry`.
         """
-        if prop.startswith("qn_upper:"):
-            return f"{prop[len('qn_upper:'):]} (upper)"
-        if prop.startswith("qn_lower:"):
-            return f"{prop[len('qn_lower:'):]} (lower)"
-        from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
-        label = _Intensity.get_axis_label(prop)
-        # If the label equals the prop key it was not found in AXIS_LABELS;
-        # it may be a bare quantum-field name — return it as-is (e.g. "J").
-        return label
-
-    # ------------------------------------------------------------------
-    # Quantum-field helpers (shared by axis and color_by)
-    # ------------------------------------------------------------------
-
-    # Properties stored directly as float arrays in component data dicts.
-    _KNOWN_CONTINUOUS_PROPS: frozenset = frozenset({
-        "eu", "rd_yax", "wavelength", "intens", "a_stein",
-        "g_up", "g_low", "e_low", "tau",
-        "fwhm_instrumental_kms", "fwhm_convolved_kms",
-    })
-
-    @staticmethod
-    def _parse_qn_prop(prop: str) -> Tuple[Optional[str], str]:
-        """Parse *prop* into ``(qn_field, qn_state)``.
-
-        Returns ``(None, 'upper')`` for standard (non-quantum) properties.
-        Bare names that are not in the known-continuous set are treated as
-        upper-state quantum fields (matching the ``color_by`` convention).
-        """
-        _KNOWN = PopulationDiagramPlot._KNOWN_CONTINUOUS_PROPS
-        if prop in _KNOWN:
-            return None, "upper"
-        if prop.startswith("qn_upper:"):
-            return prop[len("qn_upper:"):], "upper"
-        if prop.startswith("qn_lower:"):
-            return prop[len("qn_lower:"):], "lower"
-        return prop, "upper"
-
-    def _resolve_qn_for_line(
-        self,
-        prop: str,
-        line: "MoleculeLine",
-        mol_id: Optional[str] = None,
-    ) -> Optional[float]:
-        """Return the quantum-field value for *prop* on a single line.
-
-        Used by :meth:`render_active_lines` and :meth:`_render_highlights`
-        to support quantum-number axis properties on individual lines.
-
-        Returns ``None`` when the field is absent or the value is the
-        sentinel ``-999``.
-        """
-        qn_field, qn_state = self._parse_qn_prop(prop)
-        if qn_field is None:
-            return None
-        try:
-            import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401
-            from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
-            _mid = mol_id or getattr(line, "molecule_id", None)
-            schema = QuantumStateRegistry.get_schema(_mid)
-            qd = line.get_quantum_dict(qn_state, schema=schema)
-            val = qd.get(qn_field)
-            if val is None or val == -999:
-                return None
-            return float(val)
-        except Exception:
-            return None
+        return _AxisReg.get_axis_label(prop)
 
     @staticmethod
     def _get_axis_array(
         cdata: Dict[str, Any], prop: str
     ) -> Optional[np.ndarray]:
-        """Extract a property array from a component data dict.
-
-        Handles both standard property keys stored in *cdata* and quantum
-        field names (e.g. ``"qn_upper:J"``, ``"qn_lower:v"``, or bare
-        names like ``"J"``), which are parsed from the ``lev_up`` /
-        ``lev_low`` labels using the molecule's quantum-state schema.
-
-        Returns ``None`` if the property is absent or cannot be resolved.
-        """
-        # Direct key lookup (covers all standard properties)
-        arr = cdata.get(prop)
-        if arr is not None:
-            try:
-                return np.asarray(arr, dtype=float)
-            except (ValueError, TypeError):
-                pass  # fall through to quantum-field parsing
-
-        # Quantum-field parsing
-        qn_field, qn_state = PopulationDiagramPlot._parse_qn_prop(prop)
-        if qn_field is None:
-            return None  # known-continuous prop with no data
-
-        lev_key = "lev_up" if qn_state == "upper" else "lev_low"
-        lev_arr = cdata.get(lev_key)
-        if lev_arr is None:
-            return None
-
-        mol_id = cdata.get("molecule_id")
-        try:
-            from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
-            import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401
-            schema = QuantumStateRegistry.get_schema(mol_id)
-            labels = np.asarray(lev_arr, dtype="U64")
-            parsed = schema.parse_bulk(labels)
-            field_vals = parsed.get(qn_field)
-            if field_vals is None:
-                return None
-            float_vals = np.asarray(field_vals, dtype=float)
-            # Replace integer sentinel values with NaN
-            float_vals = np.where(float_vals == -999, np.nan, float_vals)
-            return float_vals
-        except Exception:
-            return None
+        """Extract a property array from a component data dict via the registry."""
+        return _AxisReg.resolve_array(prop, cdata)
 
     def set_axes(
         self,
@@ -1532,8 +1203,8 @@ class PopulationDiagramPlot(BasePlot):
                         return float(val)
                     except (TypeError, ValueError):
                         return None
-                # Fall back to quantum-field resolution
-                return self._resolve_qn_for_line(prop, line_obj, _hl_mol_id)
+                # Fall back to registry scalar resolver for quantum/extended props
+                return _AxisReg.resolve_scalar(prop, line_obj, _hl_mol_id)
 
             xv = _resolve(self._x_prop)
             yv = _resolve(self._y_prop)

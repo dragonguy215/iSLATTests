@@ -326,37 +326,18 @@ class PopulationDiagramContextMixin:
         except ImportError:
             return
 
-        from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine as _ML
-
-        _EXTRA = [
-            ("Population diagram Y [ln(4\u03c0F/h\u03bdA_u g_u)]", "rd_yax"),
-            ("Model intensity",                                      "intens"),
-            ("Line-center opacity (tau)",                            "tau"),
-            ("Molecule / component",                                 "molecule"),
-        ]
-        _FROM_REG = [
-            (_ML.get_text(k), k if k != "lam" else "wavelength")
-            for k in ("e_up", "e_low", "a_stein", "g_up", "g_low",
-                      "lev_up", "lev_low", "freq", "lam")
-        ]
-        # Quantum field options — populated from the molecule's schema when
-        # pdp has component_data with a recognised molecule_id.
-        _QUANTUM: list = []
+        # Ensure quantum schemas for any currently-loaded molecule are
+        # registered so their qn_upper/qn_lower entries appear in the list.
         if pdp is not None:
             try:
-                import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401 (registers all schemas)
-                from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
-                _comp_data = getattr(pdp, 'component_data', [])
-                _mol_ids = [c.get('molecule_id') for c in _comp_data if c.get('molecule_id')]
-                if _mol_ids:
-                    _schema = QuantumStateRegistry.get_schema(_mol_ids[0])
-                    for _f in list(_schema.global_fields) + list(_schema.local_fields):
-                        _QUANTUM.append((f"{_f.name} — upper state (quantum)", f"qn_upper:{_f.name}"))
-                        _QUANTUM.append((f"{_f.name} — lower state (quantum)", f"qn_lower:{_f.name}"))
+                import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401
             except Exception:
                 pass
 
-        PROP_OPTIONS = _EXTRA + _FROM_REG + _QUANTUM
+        from iSLAT.Modules.DataTypes.PlotAxisRegistry import PlotAxisRegistry as _Reg
+
+        color_entries = _Reg.get_color_options()
+        PROP_OPTIONS = [(e.display_name, e.key) for e in color_entries]
         PROP_LABELS  = [p[0] for p in PROP_OPTIONS]
         PROP_VALUES  = [p[1] for p in PROP_OPTIONS]
 
@@ -370,10 +351,6 @@ class PopulationDiagramContextMixin:
         initial_cmap = "viridis"
         initial_vmin = initial_vmax = initial_pmin = initial_pmax = ""
         initial_log_scale = False
-
-        # Properties that naturally span orders of magnitude benefit from
-        # a log color scale — pre-tick the checkbox for these.
-        _LOG_SUGGESTED = {"intens", "tau", "a_stein"}
 
         if current_mapping:
             prop_val = current_mapping.get("prop", "e_up")
@@ -390,9 +367,9 @@ class PopulationDiagramContextMixin:
             initial_pmax = str(v) if v is not None else ""
             initial_log_scale = bool(current_mapping.get("log_scale", False))
         else:
-            # No existing mapping: suggest log scale for log-distributed props
+            # No existing mapping: suggest log scale based on registry metadata.
             initial_prop = PROP_VALUES[initial_prop_idx]
-            initial_log_scale = initial_prop in _LOG_SUGGESTED
+            initial_log_scale = _Reg.suggests_log(initial_prop)
 
         win = tk.Toplevel(parent_widget)
         win.title("Population Diagram \u2014 Color By")
@@ -409,7 +386,7 @@ class PopulationDiagramContextMixin:
             lbl = prop_var.get()
             if lbl in PROP_LABELS:
                 pval = PROP_VALUES[PROP_LABELS.index(lbl)]
-                if pval in _LOG_SUGGESTED:
+                if _Reg.suggests_log(pval):
                     log_scale_var.set(True)
 
         prop_combo = ttk.Combobox(win, textvariable=prop_var, values=PROP_LABELS,
@@ -513,40 +490,18 @@ class PopulationDiagramContextMixin:
         except ImportError:
             return
 
-        from iSLAT.Modules.DataTypes.MoleculeLine import MoleculeLine as _ML
-
-        _AXIS_EXTRA = [
-            ("Population diagram Y [ln(4\u03c0F/h\u03bdA_u g_u)]", "rd_yax"),
-            ("Model intensity",                                      "intens"),
-            ("Line-center opacity (tau)",                            "tau"),
-            ("Line instrumental FWHM (km/s)",                       "fwhm_instrumental_kms"),
-            ("Line convolved FWHM (km/s)",                          "fwhm_convolved_kms"),
-        ]
-        _FROM_REG_AXIS = [
-            (_ML.get_text(k), k if k != "lam" else "wavelength")
-            for k in ("e_up", "e_low", "lam", "a_stein", "g_up", "g_low")
-        ]
-        # Quantum field options — populated from the molecule's schema when
-        # pdp has component_data with a recognised molecule_id.
-        _QUANTUM_AXIS: list = []
+        # Ensure quantum schemas for any currently-loaded molecule are
+        # registered so their qn_upper/qn_lower entries appear in the list.
         if pdp is not None:
             try:
                 import iSLAT.Modules.DataTypes.HITRANQuantumSchemas  # noqa: F401
-                from iSLAT.Modules.DataTypes.QuantumStateSchema import QuantumStateRegistry
-                _comp_data = getattr(pdp, 'component_data', [])
-                _mol_ids = [c.get('molecule_id') for c in _comp_data if c.get('molecule_id')]
-                if _mol_ids:
-                    _schema = QuantumStateRegistry.get_schema(_mol_ids[0])
-                    for _f in list(_schema.global_fields) + list(_schema.local_fields):
-                        _QUANTUM_AXIS.append((f"{_f.name} — upper state (quantum)", f"qn_upper:{_f.name}"))
-                        _QUANTUM_AXIS.append((f"{_f.name} — lower state (quantum)", f"qn_lower:{_f.name}"))
             except Exception:
                 pass
 
-        AXIS_OPTIONS = [
-            (label, "eu" if key == "e_up" else key)
-            for label, key in (_AXIS_EXTRA + _FROM_REG_AXIS)
-        ] + _QUANTUM_AXIS
+        from iSLAT.Modules.DataTypes.PlotAxisRegistry import PlotAxisRegistry as _Reg
+
+        axis_entries = _Reg.get_axis_options()
+        AXIS_OPTIONS = [(e.display_name, e.key) for e in axis_entries]
         AXIS_LABELS = [o[0] for o in AXIS_OPTIONS]
         AXIS_VALUES = [o[1] for o in AXIS_OPTIONS]
 

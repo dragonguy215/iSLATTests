@@ -1666,40 +1666,6 @@ class Intensity(WavelengthRangeMixin):
     # ------------------------------------------------------------------
     # Axis label registry  (shared with the plotting layer)
     # ------------------------------------------------------------------
-
-    #: Human-readable (LaTeX) axis labels for every property that can
-    #: appear as an axis in a population / rotation diagram.  The
-    #: plotting layer delegates to :meth:`get_axis_label` instead of
-    #: maintaining its own copy of these strings.
-    AXIS_LABELS: dict = {
-        "e_up":               r"$E_{u}$ (K)",
-        "eu":                 r"$E_{u}$ (K)",            # alias used in component dicts
-        "e_low":              r"$E_{low}$ (K)",
-        "lam":                r"$\lambda$ ($\mu m$)",
-        "wavelength":         r"$\lambda$ ($\mu m$)",    # alias used in component dicts
-        "freq":               r"Frequency (cm$^{-1}$)",
-        "a_stein":            r"$A_{u}$ (s$^{-1}$)",
-        "g_up":               r"$g_{u}$",
-        "g_low":              r"$g_{low}$",
-        "nr":                 "Line number",
-        "lev_up":             "Upper level label",
-        "lev_low":            "Lower level label",
-        "rd_yax":             r"ln(4πF/(hν$A_{u}$$g_{u}$))",
-        "intens":             "Intensity",
-        "tau":                r"Opacity ($\tau$)",
-        "fwhm_instrumental_kms": "Instrumental FWHM (km/s)",
-        "fwhm_convolved_kms":    "Convolved FWHM (km/s)",
-    }
-
-    @classmethod
-    def get_axis_label(cls, prop: str) -> str:
-        """Return the human-readable (LaTeX) axis label for *prop*.
-
-        Falls back to *prop* itself when the key is not registered.
-        """
-        return cls.AXIS_LABELS.get(prop, prop)
-
-    # ------------------------------------------------------------------
     # Population-diagram data
     # ------------------------------------------------------------------
 
@@ -2002,3 +1968,233 @@ class Intensity(WavelengthRangeMixin):
         if not df.empty:
             df = df.sort_values("wavelength_um", ignore_index=True)
         return df
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Register standard physics properties with PlotAxisRegistry
+# ═══════════════════════════════════════════════════════════════════
+def _register_standard_entries() -> None:
+    """Register all standard Intensity / MoleculeLine properties."""
+    from iSLAT.Modules.DataTypes.PlotAxisRegistry import PlotAxisEntry, PlotAxisRegistry
+    import numpy as _np
+
+    def _arr(key):
+        """Return a resolve_array callback for a direct component-dict key."""
+        def _resolve(cdata, _k=key):
+            arr = cdata.get(_k)
+            if arr is None:
+                return None
+            try:
+                return _np.asarray(arr, dtype=float)
+            except (ValueError, TypeError):
+                return None
+        return _resolve
+
+    def _scalar(attr):
+        """Return a resolve_scalar callback for a MoleculeLine attribute."""
+        def _resolve(line, _mol_id, _a=attr):
+            val = getattr(line, _a, None)
+            if val is None:
+                return None
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return None
+        return _resolve
+
+    entries = [
+        PlotAxisEntry(
+            key="eu",
+            display_name="Upper-level energy E_up (K)",
+            label=r"$E_{u}$ (K)",
+            kind="continuous",
+            available_as_axis=True,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=_arr("eu"),
+            resolve_scalar=_scalar("e_up"),
+            group="Physics",
+        ),
+        PlotAxisEntry(
+            key="e_low",
+            display_name="Lower-level energy E_low (K)",
+            label=r"$E_{low}$ (K)",
+            kind="continuous",
+            available_as_axis=True,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=_arr("e_low"),
+            resolve_scalar=_scalar("e_low"),
+            group="Physics",
+        ),
+        PlotAxisEntry(
+            key="rd_yax",
+            display_name="Population diagram Y [ln(4\u03c0F/h\u03bdA_u g_u)]",
+            label=r"ln(4$\pi$F/(h$\nu$$A_{u}$$g_{u}$))",
+            kind="continuous",
+            available_as_axis=True,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=_arr("rd_yax"),
+            resolve_scalar=None,  # requires beam_s — not derivable from bare MoleculeLine
+            group="Physics",
+        ),
+        PlotAxisEntry(
+            key="wavelength",
+            display_name="Wavelength (\u03bcm)",
+            label=r"$\lambda$ ($\mu$m)",
+            kind="continuous",
+            available_as_axis=True,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=_arr("wavelength"),
+            resolve_scalar=_scalar("lam"),
+            group="Physics",
+        ),
+        PlotAxisEntry(
+            key="intens",
+            display_name="Model intensity",
+            label="Intensity",
+            kind="continuous",
+            available_as_axis=True,
+            available_as_color=True,
+            suggest_log=True,
+            resolve_array=_arr("intens"),
+            resolve_scalar=None,
+            group="Physics",
+        ),
+        PlotAxisEntry(
+            key="a_stein",
+            display_name="Einstein A coefficient (s\u207b\u00b9)",
+            label=r"$A_{u}$ (s$^{-1}$)",
+            kind="continuous",
+            available_as_axis=True,
+            available_as_color=True,
+            suggest_log=True,
+            resolve_array=_arr("a_stein"),
+            resolve_scalar=_scalar("a_stein"),
+            group="Physics",
+        ),
+        PlotAxisEntry(
+            key="g_up",
+            display_name="Upper-state degeneracy g_up",
+            label=r"$g_{u}$",
+            kind="continuous",
+            available_as_axis=True,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=_arr("g_up"),
+            resolve_scalar=_scalar("g_up"),
+            group="Physics",
+        ),
+        PlotAxisEntry(
+            key="g_low",
+            display_name="Lower-state degeneracy g_low",
+            label=r"$g_{low}$",
+            kind="continuous",
+            available_as_axis=True,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=_arr("g_low"),
+            resolve_scalar=_scalar("g_low"),
+            group="Physics",
+        ),
+        PlotAxisEntry(
+            key="tau",
+            display_name="Line-center opacity (tau)",
+            label=r"Opacity ($\tau$)",
+            kind="continuous",
+            available_as_axis=True,
+            available_as_color=True,
+            suggest_log=True,
+            resolve_array=_arr("tau"),
+            resolve_scalar=None,
+            group="Physics",
+        ),
+        PlotAxisEntry(
+            key="fwhm_instrumental_kms",
+            display_name="Line instrumental FWHM (km/s)",
+            label="Instrumental FWHM (km/s)",
+            kind="continuous",
+            available_as_axis=True,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=_arr("fwhm_instrumental_kms"),
+            resolve_scalar=None,
+            group="Physics",
+        ),
+        PlotAxisEntry(
+            key="fwhm_convolved_kms",
+            display_name="Line convolved FWHM (km/s)",
+            label="Convolved FWHM (km/s)",
+            kind="continuous",
+            available_as_axis=True,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=_arr("fwhm_convolved_kms"),
+            resolve_scalar=None,
+            group="Physics",
+        ),
+        # ---- Categorical entries (color-by only) --------------------
+        PlotAxisEntry(
+            key="lev_up",
+            display_name="Upper level label",
+            label="Upper level label",
+            kind="categorical",
+            available_as_axis=False,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=lambda cdata: (
+                _np.asarray(cdata["lev_up"], dtype=object)
+                if cdata.get("lev_up") is not None else None
+            ),
+            resolve_scalar=lambda line, _mol_id: getattr(line, "lev_up", None),
+            group="Labels",
+        ),
+        PlotAxisEntry(
+            key="lev_low",
+            display_name="Lower level label",
+            label="Lower level label",
+            kind="categorical",
+            available_as_axis=False,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=lambda cdata: (
+                _np.asarray(cdata["lev_low"], dtype=object)
+                if cdata.get("lev_low") is not None else None
+            ),
+            resolve_scalar=lambda line, _mol_id: getattr(line, "lev_low", None),
+            group="Labels",
+        ),
+        PlotAxisEntry(
+            key="component",
+            display_name="Molecule / component",
+            label="Component",
+            kind="categorical",
+            available_as_axis=False,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=None,  # handled specially in _render_categorical_colormap
+            resolve_scalar=None,
+            group="Labels",
+        ),
+        PlotAxisEntry(
+            key="molecule",
+            display_name="Molecule / component",
+            label="Component",
+            kind="categorical",
+            available_as_axis=False,
+            available_as_color=True,
+            suggest_log=False,
+            resolve_array=None,
+            resolve_scalar=None,
+            group="Labels",
+        ),
+    ]
+    for entry in entries:
+        PlotAxisRegistry.register(entry)
+
+    # Convenience alias so consumers can do ``Intensity.AxisRegistry``
+    Intensity.AxisRegistry = PlotAxisRegistry  # type: ignore[attr-defined]
+
+_register_standard_entries()
