@@ -709,15 +709,29 @@ class StackedSpectralPanel(CompositePlot):
         # Disable constrained_layout for uniform cell heights.
         self.fig.set_layout_engine(None)
 
+        # Compute hspace so x-axis tick labels on each panel are not
+        # covered by the axes background of the row below.  hspace is the
+        # inter-panel gap expressed as a fraction of the average axes
+        # height.  A target gap of 0.22 in accommodates 7-pt tick labels
+        # plus padding at typical screen DPIs.  The value is clamped so it
+        # is always at least self.hspace and at most 0.8.
+        _margin_top = 0.93
+        _margin_bottom = 0.06
+        figH = (self._figsize or (12, 8.0))[1]
+        _avg_ax_h = (_margin_top - _margin_bottom) * figH / max(n_active, 1)
+        _target_gap = 0.22  # inches needed for tick labels + padding
+        _needed_hspace = _target_gap / _avg_ax_h if _avg_ax_h > 0 else 0.35
+        render_hspace = min(max(self.hspace, _needed_hspace), 0.8)
+
         gs = GridSpec(
             nrows=n_active,
             ncols=1,
             figure=self.fig,
-            hspace=self.hspace,
+            hspace=render_hspace,
         )
 
         self.fig.subplots_adjust(
-            left=0.06, right=0.94, top=0.93, bottom=0.06,
+            left=0.06, right=0.94, top=_margin_top, bottom=_margin_bottom,
         )
 
         fg = self._get_theme_value("foreground", "black")

@@ -43,7 +43,6 @@ try:
 except ImportError:
     _FigureCanvasTkAgg = None
 
-
 class SpectrumPanelView(PlotView):
     """
     Intermediate abstract base for standalone spectrum-panel views.
