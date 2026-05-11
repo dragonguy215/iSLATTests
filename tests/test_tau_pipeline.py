@@ -74,7 +74,7 @@ class TestTauIntensityToSpectrum(_TauTestBase):
         inten_high = self._make_intensity(mll, n_mol=1e20)
         assert np.all(inten_high.tau >= inten_low.tau)
 
-    def test_convolved_tau_peaks_at_line_centres(self):
+    def test_convolved_tau_peaks_at_line_centers(self):
         """Convolved tau profile should peak near line wavelengths."""
         mll = self._make_line_list(n_lines=3, lam_start=14.5, lam_step=0.5)
         inten = self._make_intensity(mll)
@@ -84,7 +84,7 @@ class TestTauIntensityToSpectrum(_TauTestBase):
         tp = spec.tau_profile
         idx_peak = np.argmax(tp)
         peak_lam = spec.lamgrid[idx_peak]
-        # Peak should be near one of the line centres (14.5, 15.0, 15.5)
+        # Peak should be near one of the line centers (14.5, 15.0, 15.5)
         assert 14.0 < peak_lam < 16.0
 
     def test_convolved_tau_integral_scales_with_line_tau(self):

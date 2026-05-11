@@ -216,7 +216,7 @@ class ResidualPanel(SpectralPanel):
     def compute_ylim(self, ymax_factor: float = 0.3) -> Tuple[float, float]:
         """Symmetric y-limits based on the worst-case residual / error.
 
-        Returns ``(-pad, +pad)`` so the zero line sits at the centre.
+        Returns ``(-pad, +pad)`` so the zero line sits at the center.
         """
         mask = self.get_panel_mask()
         panel_flux = self.flux_data[mask]

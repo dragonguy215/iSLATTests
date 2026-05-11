@@ -1229,7 +1229,7 @@ class ControlPanel(ttk.Frame):
         else:
             # New molecule: promote to primary (old primary → comparison)
             # _update_active_molecule_changes fires via the active_molecule
-            # callback and repaints all frame colours correctly.
+            # callback and repaints all frame colors correctly.
             self.islat.molecules_dict.promote_to_active_molecule(mol_name)
 
     # ------------------------------------------------------------------

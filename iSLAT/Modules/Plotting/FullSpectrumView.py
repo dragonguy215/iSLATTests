@@ -827,7 +827,7 @@ class FullSpectrumView(ToggleMixin, PlotView):
         """
         if self._plot is None:
             return
-        # Delegate to FullSpectrumPlot's mol-cache helper so colour/style
+        # Delegate to FullSpectrumPlot's mol-cache helper so color/style
         # stays consistent with the rest of the composed plot.
         # _build_mol_cache returns a list of (lam, flux, color, label, name) tuples;
         # convert to a dict keyed by name for O(1) lookup.

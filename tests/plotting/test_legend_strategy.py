@@ -232,13 +232,13 @@ class TestStandardLegend:
 # MoleculeColorLegend
 # ======================================================================
 class TestMoleculeColorLegend:
-    """Tests for the compact text-only molecule colour legend."""
+    """Tests for the compact text-only molecule color legend."""
 
     def test_is_legend_strategy(self):
         assert isinstance(MoleculeColorLegend(), LegendStrategy)
 
     def test_build_basic(self, fig_ax, sample_labels, sample_colors):
-        """Creates a text-only legend with correct labels and colours."""
+        """Creates a text-only legend with correct labels and colors."""
         fig, ax = fig_ax
         strategy = MoleculeColorLegend()
         strategy.build_legend(ax, fig, sample_labels, sample_colors)
@@ -351,7 +351,7 @@ class TestMoleculeColorLegend:
         assert ax.get_legend().get_visible()
 
     def test_apply_theme_preserves_mol_colors(self, fig_ax, sample_labels, sample_colors):
-        """apply_theme should NOT overwrite per-molecule colours."""
+        """apply_theme should NOT overwrite per-molecule colors."""
         fig, ax = fig_ax
         strategy = MoleculeColorLegend()
         strategy.build_legend(ax, fig, sample_labels, sample_colors)
@@ -359,7 +359,7 @@ class TestMoleculeColorLegend:
         strategy.apply_theme(ax, {"foreground": "white", "graph_fill_color": "black"})
 
         for text, expected_color in zip(ax.get_legend().get_texts(), sample_colors):
-            # Molecule-coloured texts should keep their original colour
+            # Molecule-colored texts should keep their original color
             assert text.get_color() == expected_color
 
     def test_apply_theme_noop_when_no_legend(self, fig_ax):

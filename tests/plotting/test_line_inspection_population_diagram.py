@@ -16,7 +16,7 @@ Covers:
   base population-diagram scatter.
 - After changing the population-diagram axis (set_axes), the previously
   selected line remains highlighted orange in both panels, and all other
-  lines revert to the base molecule colour.
+  lines revert to the base molecule color.
 """
 
 import matplotlib
@@ -419,7 +419,7 @@ class TestPickEventHighlighting:
         assert isinstance(result, dict)
 
     def test_pick_vline_turns_orange(self, tpv_fixture):
-        """The picked vline must be coloured orange after a pick event."""
+        """The picked vline must be colored orange after a pick event."""
         import matplotlib.colors as mcolors
         view, mol, pm = tpv_fixture
         view.on_selection(self.XMIN, self.XMAX)
@@ -624,7 +624,7 @@ class TestNoLinesInRange:
 class TestAxisChangePreservesHighlight:
     """After set_axes + _reapply_selected_line_highlight the previously
     selected line must remain orange; all other lines must revert to the
-    base molecule colour."""
+    base molecule color."""
 
     XMIN, XMAX = 11.0, 20.0
 
@@ -721,7 +721,7 @@ class TestAxisChangePreservesHighlight:
     # ------------------------------------------------------------------
 
     def test_nonselected_vlines_not_orange_after_axis_change(self, tpv_fixture):
-        """Non-selected vlines must revert to molecule colour after axis change."""
+        """Non-selected vlines must revert to molecule color after axis change."""
         import matplotlib.colors as mcolors
         view, mol, pm = tpv_fixture
         view.on_selection(self.XMIN, self.XMAX)
@@ -791,7 +791,7 @@ class TestAxisChangePreservesHighlight:
     # ------------------------------------------------------------------
 
     def test_nonselected_scatter_not_orange_after_axis_change(self, tpv_fixture):
-        """All non-selected scatter points must revert to base colour after axis change."""
+        """All non-selected scatter points must revert to base color after axis change."""
         import matplotlib.colors as mcolors
         view, mol, pm = tpv_fixture
         view.on_selection(self.XMIN, self.XMAX)

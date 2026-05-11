@@ -176,7 +176,7 @@ class FullSpectrumPlot(StackedSpectralPanel):
     # Molecule-cache helper (shared with ResidualSpectrumPlot)
     # ------------------------------------------------------------------
     def _build_mol_cache(self) -> Tuple[List[tuple], List[str], List[str]]:
-        """Pre-compute molecule spectrum data, labels, and colours.
+        """Pre-compute molecule spectrum data, labels, and colors.
 
         Returns ``(mol_cache, mol_labels, mol_colors)`` where each entry
         in *mol_cache* is ``(wavelengths, flux, color, label, name)``.
@@ -354,7 +354,7 @@ class FullSpectrumPlot(StackedSpectralPanel):
         )
 
         # --- Global labels and legend ----------------------------------
-        # Colour-legend on the first panel (handles removal when empty).
+        # color-legend on the first panel (handles removal when empty).
         legend_ax = self._legend_axes
         if legend_ax is not None:
             self.legend_strategy.build_legend(
@@ -510,7 +510,7 @@ class FullSpectrumPlot(StackedSpectralPanel):
 
     @property
     def _legend_axes(self) -> Optional["Axes"]:
-        """Return the axes that should receive the molecule colour legend.
+        """Return the axes that should receive the molecule color legend.
 
         For single-axes cells this is ``subplots[0]``.  For multi-axes
         cells (e.g. :class:`ResidualSpectrumPlot` where each value is a

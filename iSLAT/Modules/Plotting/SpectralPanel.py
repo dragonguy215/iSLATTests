@@ -366,8 +366,8 @@ class SpectralPanel(BasePlot):
         placed at the affected edge to show what was skipped.
 
         **Internal gaps** (data on both sides) are blanked out with a
-        background-coloured rectangle, diagonal break lines are drawn
-        at both edges, and a text annotation is placed in the centre
+        background-colored rectangle, diagonal break lines are drawn
+        at both edges, and a text annotation is placed in the center
         showing the skipped wavelength range.
 
         Artists are tagged with :attr:`_GAP_TAG` so they can be removed

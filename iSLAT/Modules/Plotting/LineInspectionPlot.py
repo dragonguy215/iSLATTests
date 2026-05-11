@@ -271,11 +271,11 @@ class LineInspectionPlot(SpectrumPanel):
         threshold : float
             Fraction (0-1) of max intensity below which lines are hidden.
         color : str
-            Colour for the markers and labels.
+            color for the markers and labels.
         molecule_name : str
             Molecule name stored in the info dict.
         molecule_color : str
-            Molecule colour stored in the info dict.
+            Molecule color stored in the info dict.
         """
         # Use the already-resolved axes directly — do NOT call _resolve_axes()
         # here as that clears the axes and would wipe the already-rendered

@@ -298,7 +298,7 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
         picked_artist = event.artist
         picked_value = None
 
-        # Reset all vlines to their default colour
+        # Reset all vlines to their default color
         for vline, text_obj, _sc, value in self.active_lines:
             mol_color = (
                 value.get('molecule_color', 'green') if value else 'green'

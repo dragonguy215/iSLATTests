@@ -35,7 +35,7 @@ Class hierarchy::
 
     LegendStrategy (ABC)       — pluggable legend provider
     ├── StandardLegend         — standard artist-based legend (default for BasePlot)
-    └── MoleculeColorLegend    — text-only colour key (default for stacked plots)
+    └── MoleculeColorLegend    — text-only color key (default for stacked plots)
 
     GapMode (Enum)             — CONNECT (default) | SKIP (break lines at gaps)
     XScaling (Enum)            — WAVELENGTH (default) | DATA_DENSITY (uniform point density)

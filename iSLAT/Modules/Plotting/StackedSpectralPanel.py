@@ -119,7 +119,7 @@ class StackedSpectralPanel(CompositePlot):
     ):
         super().__init__(figsize=figsize, **kwargs)
 
-        # Stacked-panel plots default to the molecule colour legend.
+        # Stacked-panel plots default to the molecule color legend.
         if not isinstance(self.legend_strategy, MoleculeColorLegend):
             # Only override if caller didn't explicitly pass a strategy.
             if 'legend_strategy' not in kwargs:

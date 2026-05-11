@@ -111,7 +111,7 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
         in the plot and excluded from the chi^2 calculation.
     exclude_lines_half_width : float, optional
         Half-width (in the same units as *wave_data*) of exclusion
-        windows centred on each line in *atomic_lines*.  When set
+        windows centered on each line in *atomic_lines*.  When set
         together with *atomic_lines*, data points within +/- this
         distance of any atomic line are excluded from chi^2 statistics
         (and shaded on the residual panels).  Default ``None``

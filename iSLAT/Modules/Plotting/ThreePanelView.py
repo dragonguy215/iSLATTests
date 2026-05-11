@@ -213,12 +213,12 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         """Apply *theme* to the three-panel figure, axes, and canvas.
 
         Delegates to the controller's :meth:`_apply_plot_theming` which
-        already handles figure/axes/spine/tick colouring.
+        already handles figure/axes/spine/tick coloring.
         """
         # Keep the controller's theme reference in sync
         self._pm.theme = theme
 
-        # Propagate theme to the grid so future renders pick up the colours.
+        # Propagate theme to the grid so future renders pick up the colors.
         if self._grid is not None:
             self._grid.theme = theme
             if self._grid.pop_diagram_panel is not None:
@@ -704,7 +704,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
             self._display_line_info(picked_value)
 
             # Shift+click on a scatter point → trigger a line-inspection
-            # selection centred on the picked wavelength, exactly as if the
+            # selection centered on the picked wavelength, exactly as if the
             # user had drawn a span in the full-spectrum view.
             mouse_event = getattr(event, 'mouseevent', None)
             key = getattr(mouse_event, 'key', None) if mouse_event is not None else None
@@ -742,7 +742,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         self._canvas.draw_idle()
 
     def _trigger_inspection_from_wavelength(self, lam: float) -> None:
-        """Centre the line-inspection panel on *lam* and trigger on_selection.
+        """center the line-inspection panel on *lam* and trigger on_selection.
 
         The window width is derived (in priority order) from:
         1. The current inspection selection width (``_current_selection``).
@@ -870,7 +870,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
 
         # Update the population diagram only when the pick belongs to a
         # *different* molecule than the one currently shown (comparison pick).
-        # For same-molecule picks the scatter colour was already updated above;
+        # For same-molecule picks the scatter color was already updated above;
         # calling _render_population_diagram_with_lines here would call
         # generate_plot → clear axes → replay cache, causing scatter doubling
         # and compounding the title font size on every click.
@@ -891,7 +891,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
 
         Called after ``set_axes`` / ``color_by`` replays the cache so the
         previously-selected line stays highlighted rather than reverting to
-        the base molecule colour.
+        the base molecule color.
         """
         import matplotlib.colors as mcolors
 
@@ -914,7 +914,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
                     )
                     self._active_scatter_collections[_mname] = (_sc, _count)
 
-        # Reset all vlines to their base molecule colour.
+        # Reset all vlines to their base molecule color.
         for line, text_obj, scatter, value in self.active_lines:
             mol_color = (value.get('molecule_color') or
                          grid._get_theme_value("active_scatter_line_color", 'green')) if value else 'green'
@@ -923,7 +923,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
             if text_obj is not None:
                 text_obj.set_color(mol_color)
 
-        # Reset all scatter collections to their base colour.
+        # Reset all scatter collections to their base color.
         for mol_name, (sc, count) in self._active_scatter_collections.items():
             mol_dict = getattr(self._islat, 'molecules_dict', {})
             mol = mol_dict.get(mol_name) if mol_dict else None

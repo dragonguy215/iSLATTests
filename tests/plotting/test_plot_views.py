@@ -197,7 +197,7 @@ class TestPopulationDiagramPlot:
     # --- Multi-molecule tests ---
 
     def test_multiple_molecules_list(self):
-        """Passing a list of molecules renders all with distinct colours."""
+        """Passing a list of molecules renders all with distinct colors."""
         mol1 = _make_test_molecule(name='H2O', temp=500.0)
         mol2 = _make_test_molecule(name='CO', temp=300.0, lam_start=14.0)
         pdp = PopulationDiagramPlot(molecules=[mol1, mol2])
@@ -209,7 +209,7 @@ class TestPopulationDiagramPlot:
         assert len(pdp.component_data) == 2
         assert pdp.component_data[0]["name"] == "H2O"
         assert pdp.component_data[1]["name"] == "CO"
-        # Colours should be distinct
+        # colors should be distinct
         assert pdp.component_data[0]["color"] != pdp.component_data[1]["color"]
         pdp.close()
 

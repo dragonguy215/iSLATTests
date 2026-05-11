@@ -673,7 +673,7 @@ class FitLinesPlotGridView(PlotView):
                     )
 
             def _open_three_panel():
-                # Centre ax1 on the line; keep the current span if possible.
+                # center ax1 on the line; keep the current span if possible.
                 half_span = (xmax - xmin) / 2.0
                 try:
                     cur_lo, cur_hi = pm.ax1.get_xlim()

@@ -216,10 +216,10 @@ class iSLATPlot:
     def _apply_plot_theming(self):
         """Apply theme colors to matplotlib figure, axes, data artists, and toolbar.
 
-        Delegates figure/axes background and data-artist re-colouring to
+        Delegates figure/axes background and data-artist re-coloring to
         :meth:`BasePlot.apply_theme_to_figure` via the three-panel-view’s
         grid (if available) and adds GUI-specific extras on top:
-        canvas widget background, toolbar, legend frame colouring, grid
+        canvas widget background, toolbar, legend frame coloring, grid
         lines, and ``axis_text_label_color`` support.
         """
         try:
@@ -244,7 +244,7 @@ class iSLATPlot:
             label_color = self.theme.get("axis_text_label_color", fg)
 
             if label_color != fg:
-                # Re-apply the GUI-specific label colour on top
+                # Re-apply the GUI-specific label color on top
                 for ax in [self.ax1, self.ax2, self.ax3]:
                     ax.tick_params(colors=label_color, which='both')
                     ax.xaxis.label.set_color(label_color)
@@ -265,7 +265,7 @@ class iSLATPlot:
                 except Exception:
                     pass
 
-            # Legend frame / text colouring
+            # Legend frame / text coloring
             for ax in [self.ax1, self.ax2, self.ax3]:
                 legend = ax.get_legend()
                 if legend is not None:
@@ -749,10 +749,10 @@ class iSLATPlot:
         self.active_view.toggle_saved_lines(False)
 
     def apply_theme(self, theme=None):
-        """Apply theme colours to the plot without recalculating spectra.
+        """Apply theme colors to the plot without recalculating spectra.
 
         This is a *visual-only* refresh: figure / axes backgrounds,
-        tick / label / spine colours, canvas widget, toolbar, and the
+        tick / label / spine colors, canvas widget, toolbar, and the
         full-spectrum view.  No spectrum data is recomputed, so the
         update is near-instant.
 
@@ -767,7 +767,7 @@ class iSLATPlot:
 
         # Propagate to both views — the currently invisible view will
         # also be themed so the next activate() doesn't flash stale
-        # colours.
+        # colors.
         self._three_panel_view.apply_theme(self.theme)
         self._full_spectrum_view.apply_theme(self.theme)
 

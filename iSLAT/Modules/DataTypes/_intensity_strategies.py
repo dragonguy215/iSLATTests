@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 class IntensityStrategy(Protocol):
     """Protocol for intensity calculation strategies.
 
-    A strategy converts centre-of-line optical depths into line
+    A strategy converts center-of-line optical depths into line
     intensities.  It receives pre-computed physical scalars and arrays
     from the ``Intensity`` object.
 
@@ -55,7 +55,7 @@ class IntensityStrategy(Protocol):
             The calling ``Intensity`` instance (provides quadrature
             data, overlap caches, etc.).
         center_tau : np.ndarray, shape ``(n_cond, n_lines)``
-            Line-centre optical depths.
+            Line-center optical depths.
         dv_vals : np.ndarray, shape ``(n_cond,)``
             Doppler broadening (FWHM) in km/s per condition.
         bb_vals : np.ndarray, shape ``(n_cond, n_lines)``

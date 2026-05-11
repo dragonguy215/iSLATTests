@@ -46,7 +46,7 @@ class GUI:
         self.default_font = font.nametofont("TkDefaultFont")
 
         # Set module-level tooltip theme so every tooltip picks up
-        # the current theme's colours automatically.
+        # the current theme's colors automatically.
         set_tooltip_theme(self.theme)
         
         # Apply theme to root window
@@ -115,7 +115,7 @@ class GUI:
 
         # --- Propagate to every component ---
 
-        # 1. Tooltip colours
+        # 1. Tooltip colors
         set_tooltip_theme(new_theme)
 
         # 2. Custom ttk button / menubutton styles
@@ -141,7 +141,7 @@ class GUI:
             self._apply_theme_to_widget_recursive(child, theme)
 
     def _apply_theme_to_widget_recursive(self, widget, theme):
-        """Apply *theme* colours to *widget* and recurse into children."""
+        """Apply *theme* colors to *widget* and recurse into children."""
         try:
             # Skip matplotlib canvas widget subtrees entirely – they are
             # already themed by MainPlot.apply_theme() and recursing into
@@ -182,7 +182,7 @@ class GUI:
 
             elif widget_class == 'Label':
                 # Skip ColorButton instances – they use bg for the
-                # molecule colour and must not be overwritten.
+                # molecule color and must not be overwritten.
                 if not hasattr(widget, 'color'):
                     try:
                         widget.configure(

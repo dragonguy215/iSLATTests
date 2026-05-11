@@ -485,7 +485,7 @@ class TestColorByScatterConsistency:
         pdp.close()
 
     def test_scatter_x_coords_unchanged_by_color_by(self, mol, line_data):
-        """color_by() changes colour but must not shift scatter positions."""
+        """color_by() changes color but must not shift scatter positions."""
         pdp = PopulationDiagramPlot(molecule=mol)
         pdp.generate_plot()
         active_lines = []

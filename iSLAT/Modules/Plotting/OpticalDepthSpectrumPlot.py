@@ -128,7 +128,7 @@ class OpticalDepthSpectrumPlot(StackedSpectralPanel):
     def _build_mol_tau_cache(
         self,
     ) -> Tuple[List[tuple], List[str], List[str]]:
-        """Pre-compute molecule tau data, labels, and colours.
+        """Pre-compute molecule tau data, labels, and colors.
 
         Returns ``(mol_tau_cache, mol_labels, mol_colors)`` where each
         entry in *mol_tau_cache* is
@@ -279,7 +279,7 @@ class OpticalDepthSpectrumPlot(StackedSpectralPanel):
     # ------------------------------------------------------------------
     @property
     def _legend_axes(self):
-        """Return the axes for the molecule colour legend."""
+        """Return the axes for the molecule color legend."""
         val = self.subplots.get(0)
         if val is None:
             return None
@@ -307,7 +307,7 @@ class OpticalDepthSpectrumPlot(StackedSpectralPanel):
             **kwargs,
         )
 
-        # Colour legend on the first panel
+        # color legend on the first panel
         legend_ax = self._legend_axes
         if legend_ax is not None:
             self.legend_strategy.build_legend(

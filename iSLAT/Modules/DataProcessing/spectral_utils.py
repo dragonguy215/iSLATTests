@@ -22,7 +22,7 @@ def make_bins(wavs: np.ndarray):
     Parameters
     ----------
     wavs : np.ndarray
-        1-D array of wavelength centres (must be sorted, length ≥ 2).
+        1-D array of wavelength centers (must be sorted, length ≥ 2).
 
     Returns
     -------

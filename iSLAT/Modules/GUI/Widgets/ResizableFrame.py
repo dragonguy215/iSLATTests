@@ -378,7 +378,7 @@ class ResizableFrame(tk.Frame):
                 )
             elif widget_class == 'Label':
                 # Skip ColorButton instances – they use bg for the
-                # molecule colour and must not be overwritten.
+                # molecule color and must not be overwritten.
                 if not hasattr(widget, 'color'):
                     widget.configure(
                         bg=self.theme.get("background", "#181A1B"),

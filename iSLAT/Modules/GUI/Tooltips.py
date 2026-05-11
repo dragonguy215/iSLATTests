@@ -2,7 +2,7 @@ from tkinter import Toplevel, Label, LEFT, SOLID, TclError
 
 # Module-level theme reference for tooltip colors.
 # Call set_tooltip_theme(theme_dict) once at GUI startup so every
-# tooltip automatically uses the current theme colours.
+# tooltip automatically uses the current theme colors.
 _current_theme = None
 
 _LIGHT_DEFAULTS = {"tooltip_background": "peachpuff", "tooltip_foreground": "#000000"}

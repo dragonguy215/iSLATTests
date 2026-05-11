@@ -359,7 +359,7 @@ class TestResizableFrame:
         rf.add_frame(tk.Frame(rf))
         theme = {"toolbar": "#555555", "selection_color": "#777777"}
         rf._apply_theme_to_sashes(theme)
-        # Sash colour should match theme
+        # Sash color should match theme
         assert rf.sashes[0].cget("bg") == "#555555"
 
 

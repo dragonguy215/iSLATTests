@@ -84,7 +84,7 @@ class TestSpectrumAddIntensity:
         assert spec._flux_valid is False
 
     def test_add_intensity_produces_nonzero_flux(self):
-        """After adding an intensity, flux should be nonzero near line centres."""
+        """After adding an intensity, flux should be nonzero near line centers."""
         mll = self._make_line_list(n_lines=3, lam_start=14.0)
         inten = self._make_intensity(mll)
         spec = self._make_spectrum()
