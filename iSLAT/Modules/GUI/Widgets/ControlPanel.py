@@ -622,13 +622,7 @@ class ControlPanel(ttk.Frame):
     def _delete_molecule(self, mol_name = None, frame = None):
         mol_name = mol_name
         active_mol = self._get_active_molecule_object().name
-        default_mol = self.islat.user_settings.get("default_active_molecule", "H2O")
 
-        if mol_name == default_mol:
-            # print(f"Cannot delete {mol_name}!")
-            self.data_field.insert_text(f"Cannot delete default molecule: {mol_name}!")
-            return
-        
         # print(f"destroying {mol_name}")
         self.data_field.insert_text(f"Deleting {mol_name}", clear_after = True)
 
