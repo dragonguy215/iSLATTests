@@ -26,7 +26,6 @@ _VIS_COL_MINSIZES = (30, 62, 30, 32) if _IS_WINDOWS else (20, 42, 20, 22)
 # ---------------------------------------------------------------------------
 # ControlPanelSurface — ControlSurface implementation for the view-fields area
 # ---------------------------------------------------------------------------
-
 class ControlPanelSurface(ControlSurface):
     """Concrete :class:`ControlSurface` that renders :class:`ControlField` objects
     inside the ControlPanel's dynamic view-fields frame.
@@ -51,7 +50,6 @@ class ControlPanelSurface(ControlSurface):
         changes.  Receives the first :class:`DisplayRangeField` found (or
         ``None`` when none is registered).
     """
-
     def __init__(
         self,
         container,
@@ -640,7 +638,10 @@ class ControlPanel(ttk.Frame):
                 self.data_field.insert_text(f"setting {new_active} as active molecule", clear_after=False)
                 self._set_active_molecule(mol_name=new_active)
 
-        frame.destroy()
+        if frame is None:
+            frame = self.mol_frames.get(mol_name)
+        if frame is not None:
+            frame.destroy()
 
         self.mol_frames.pop(mol_name, None)
         self.mol_visibility.pop(mol_name, None)
@@ -1236,6 +1237,10 @@ class ControlPanel(ttk.Frame):
             label="Duplicate",
             command=lambda: self._duplicate_molecule_action(mol_name),
         )
+        menu.add_command(
+            label="Delete",
+            command=lambda: self._delete_molecule_action(mol_name),
+        )
         menu.add_separator()
         menu.add_command(
             label="Edit Name",
@@ -1273,6 +1278,12 @@ class ControlPanel(ttk.Frame):
             menu.tk_popup(event.x_root, event.y_root, 0)
         finally:
             menu.grab_release()
+
+    def _delete_molecule_action(self, mol_name: str) -> None:
+        """Wrapper: call self._delete_molecule and report any failure."""
+        result = self._delete_molecule(mol_name)
+        if result is None:
+            print(f"ControlPanel: failed to delete '{mol_name}'.")
 
     def _duplicate_molecule_action(self, mol_name: str) -> None:
         """Wrapper: call iSLAT.duplicate_molecule and report any failure."""

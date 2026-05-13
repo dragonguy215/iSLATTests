@@ -68,8 +68,7 @@ class InteractionHandler:
         self.canvas.mpl_connect('key_press_event', self._on_key_press)
         self.canvas.mpl_connect('key_release_event', self._on_key_release)
         
-        # Also bind at tkinter level for global keybindings that work
-        # even when full spectrum canvas or other widgets have focus
+        # Also bind at tkinter level for global keybindings that work even when full spectrum canvas or other widgets have focus
         self._setup_tkinter_keybindings()
     
     def _setup_plot_navigation(self):

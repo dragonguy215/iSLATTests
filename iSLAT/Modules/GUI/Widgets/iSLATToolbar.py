@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # ConfigureSubplotsSurface
 # ---------------------------------------------------------------------------
-
 class ConfigureSubplotsSurface(ControlSurface):
     """Concrete :class:`ControlSurface` for the Configure Subplots dialog.
 
@@ -42,7 +41,6 @@ class ConfigureSubplotsSurface(ControlSurface):
     ----------
     No constructor parameters required.
     """
-
     def __init__(self) -> None:
         super().__init__()
         self._field_frame: Optional[tk.Widget] = None
@@ -119,7 +117,6 @@ class iSLATConfigureSubplotsDialog(tk.Toplevel):
         The :class:`ConfigureSubplotsSurface` instance.  May be ``None``
         (the bottom section is then empty).
     """
-
     def __init__(
         self,
         parent: tk.Widget,
@@ -182,7 +179,6 @@ class iSLATConfigureSubplotsDialog(tk.Toplevel):
 # ---------------------------------------------------------------------------
 # iSLATNavigationToolbar
 # ---------------------------------------------------------------------------
-
 class iSLATNavigationToolbar(NavigationToolbar2Tk):
     """matplotlib :class:`NavigationToolbar2Tk` subclass used in iSLAT.
 
@@ -203,7 +199,6 @@ class iSLATNavigationToolbar(NavigationToolbar2Tk):
         :class:`~iSLAT.Modules.Plotting.MainPlot.iSLATPlot` controller.
         May be ``None`` (falls back to the default matplotlib dialog).
     """
-
     def __init__(
         self,
         canvas: "FigureCanvasTkAgg",
