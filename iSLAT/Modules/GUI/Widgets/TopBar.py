@@ -20,7 +20,7 @@ from iSLAT.Modules.FileHandling.iSLATFileHandling import (
 )
 from iSLAT.Modules.FileHandling import save_folder_path
 from iSLAT.Modules.Plotting.FullSpectrumView import output_full_spectrum
-from iSLAT.Modules.DataProcessing.Slabfit import SlabFit as SlabModel
+from iSLAT.Modules.DataProcessing.Slabfit import SlabModel
 from iSLAT.Modules.DataProcessing.BatchFittingService import BatchFittingService
 from iSLAT.Modules.DataProcessing.DeblendingService import DeblendingService
 from iSLAT.Modules.DataProcessing.LineSaveService import LineSaveService
@@ -28,7 +28,6 @@ from iSLAT.Modules.GUI.ControlSurface import ControlSurface
 
 if TYPE_CHECKING:
     from iSLAT.Modules.Plotting.MainPlot import iSLATPlot
-
 
 # ---------------------------------------------------------------------------
 # TopBarSurface — ControlSurface implementation for the TopBar dynamic area
@@ -914,7 +913,7 @@ class TopBar(ResizableFrame):
                 output_folder = line_saves_file_path
             # Use the SlabModel class to perform the fit
             slab_model = SlabModel(
-                mol_object=self.islat.active_molecule,
+                source=self.islat.active_molecule,
                 output_folder=output_folder,
                 data_field=self.data_field,
                 input_file=self.islat.input_line_list,

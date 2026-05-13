@@ -59,11 +59,9 @@ from iSLAT.Modules.DataTypes.MoleculeLineList import MoleculeLineList
 import iSLAT.Constants as c
 from iSLAT.Modules.FileHandling import line_saves_file_path
 
-
 # ---------------------------------------------------------------------------
 # FitParameter
 # ---------------------------------------------------------------------------
-
 @dataclass
 class FitParameter:
     """Describes a single fittable parameter.
@@ -106,7 +104,6 @@ class FitParameter:
 # ---------------------------------------------------------------------------
 # FitResult
 # ---------------------------------------------------------------------------
-
 @dataclass
 class FitResult:
     """Results returned by :meth:`SlabModel.fit`.
@@ -136,11 +133,12 @@ class FitResult:
 # ---------------------------------------------------------------------------
 # Default fit-parameter set
 # ---------------------------------------------------------------------------
-
 _DEFAULT_FIT_PARAMETERS: List[FitParameter] = [
     FitParameter('temp',   500.0, (10.0,  5000.0), log_scale=False),
     FitParameter('n_mol',  1e17,  (1e12,  1e25),   log_scale=True),
-    FitParameter('radius', 1.0,   (0.001, 1000.0), log_scale=False),
+    FitParameter('radius', 1.0,   (0.01, 1000.0), log_scale=False),
+    FitParameter('broad', 1.0,   (0.01, 20.0), log_scale=False),
+    FitParameter('keplerian_fwhm', 100.0,   (20.0, 200.0), log_scale=False),
 ]
 
 # Parameters that feed into Intensity.calc_intensity
@@ -149,14 +147,13 @@ _INTENSITY_PARAMS = frozenset({'temp', 'n_mol', 'broad'})
 _AREA_PARAMS = frozenset({'radius'})
 # Parameters that require rebuilding the Spectrum object when they are fit
 _SPECTRUM_REBUILD_PARAMS = frozenset({
-    'distance', 'fwhm', 'model_line_width',
+    'distance', 'fwhm', 'keplerian_fwhm', 'model_line_width',
     'min_wavelength', 'max_wavelength', 'model_pixel_res',
 })
 
 # ---------------------------------------------------------------------------
 # _SlabPipeline — private implementation detail
 # ---------------------------------------------------------------------------
-
 def _copy_attr(obj, d: dict, name: str) -> None:
     """Copy attribute *name* from *obj* into dict *d* if present and not None."""
     v = getattr(obj, name, None)
@@ -169,7 +166,6 @@ class _SlabPipeline:
     This object owns its own ``Intensity`` and ``Spectrum`` instances so that
     the source object's display state is never mutated during fitting.
     """
-
     def __init__(
         self,
         source: Union[Molecule, Intensity, MoleculeLineList, Spectrum],
@@ -201,7 +197,6 @@ class _SlabPipeline:
     # ------------------------------------------------------------------
     # Source name helper
     # ------------------------------------------------------------------
-
     @property
     def source_name(self) -> str:
         """Human-readable name for the source, used in output filenames."""
@@ -215,7 +210,6 @@ class _SlabPipeline:
     # ------------------------------------------------------------------
     # Default-value extraction from source
     # ------------------------------------------------------------------
-
     def _extract_source_defaults(self, source) -> Dict[str, Any]:
         defaults: Dict[str, Any] = {
             'temp':             500.0,
@@ -223,15 +217,17 @@ class _SlabPipeline:
             'radius':           1.0,
             'distance':         c.DEFAULT_DISTANCE,
             'fwhm':             c.DEFAULT_FWHM,
+            'keplerian_fwhm':   0.0,
             'broad':            c.INTRINSIC_LINE_WIDTH,
+            'profile': None,
             'min_wavelength':   c.WAVELENGTH_RANGE[0],
             'max_wavelength':   c.WAVELENGTH_RANGE[1],
             'model_pixel_res':  float(c.MODEL_PIXEL_RESOLUTION),
             'model_line_width': float(c.MODEL_LINE_WIDTH),
         }
         if isinstance(source, Molecule):
-            for attr in ('temp', 'n_mol', 'radius', 'distance', 'fwhm', 'broad',
-                         'model_pixel_res', 'model_line_width'):
+            for attr in ('temp', 'n_mol', 'radius', 'distance', 'fwhm', 'keplerian_fwhm',
+                         'broad', 'model_pixel_res', 'model_line_width', 'profile'):
                 _copy_attr(source, defaults, attr)
             wr = getattr(source, 'wavelength_range', None)
             if wr:
@@ -251,7 +247,6 @@ class _SlabPipeline:
     # ------------------------------------------------------------------
     # Lazy object builders
     # ------------------------------------------------------------------
-
     def _build_intensity(self) -> Intensity:
         if self._line_list is None:
             raise ValueError("Cannot build Intensity: no line list available.")
@@ -264,12 +259,13 @@ class _SlabPipeline:
             dlambda=config['model_pixel_res'],
             R=config['model_line_width'],
             distance=config['distance'],
+            keplerian_fwhm=config.get('keplerian_fwhm', 0.0),
+            R_func=config.get('profile', None),
         )
 
     # ------------------------------------------------------------------
     # Core evaluation
     # ------------------------------------------------------------------
-
     def evaluate(
         self,
         param_values: Dict[str, Any],
@@ -314,10 +310,8 @@ class _SlabPipeline:
 # ---------------------------------------------------------------------------
 # SlabModel
 # ---------------------------------------------------------------------------
-
 class SlabModel:
     """Slab model fitting class — see module docstring for usage examples."""
-
     def __init__(
         self,
         output_folder=None,
@@ -386,7 +380,7 @@ class SlabModel:
         if source is not None:
             self._pipeline = _SlabPipeline(source)
 
-        # --- spectral config: source defaults → kwargs overrides ---
+        # --- spectral config: source defaults -> kwargs overrides ---
         src_defs = self._pipeline.source_defaults if self._pipeline else {}
         self._config: Dict[str, Any] = {
             'temp':             src_defs.get('temp',             500.0),
@@ -396,9 +390,13 @@ class SlabModel:
                                 src_defs.get('distance',         c.DEFAULT_DISTANCE)),
             'fwhm':             kwargs.get('fwhm',
                                 src_defs.get('fwhm',             c.DEFAULT_FWHM)),
+            'keplerian_fwhm':   kwargs.get('keplerian_fwhm',
+                                src_defs.get('keplerian_fwhm',   0.0)),
             'broad':            kwargs.get('broad',
                                 kwargs.get('intrinsic_line_width',
                                 src_defs.get('broad',            c.INTRINSIC_LINE_WIDTH))),
+            'profile':          kwargs.get('profile',
+                                src_defs.get('profile', None)),
             'min_wavelength':   kwargs.get('min_wavelength',
                                 src_defs.get('min_wavelength',   c.WAVELENGTH_RANGE[0])),
             'max_wavelength':   kwargs.get('max_wavelength',
@@ -435,19 +433,20 @@ class SlabModel:
     # ------------------------------------------------------------------
     # Default fit-parameter construction
     # ------------------------------------------------------------------
-
     def _make_default_fit_params(self) -> List[FitParameter]:
         """Return the default [temp, n_mol, radius] list seeded from config."""
+        #return _DEFAULT_FIT_PARAMETERS
         return [
             FitParameter('temp',   self._config['temp'],   (10.0,  5000.0), log_scale=False),
             FitParameter('n_mol',  self._config['n_mol'],  (1e12,  1e25),   log_scale=True),
-            FitParameter('radius', self._config['radius'], (0.001, 1000.0), log_scale=False),
+            FitParameter('radius', self._config['radius'], (-2.5, 3.0), log_scale=True),
+            #FitParameter('broad', self._config['broad'],   (0.01, 20.0), log_scale=False),
+            #FitParameter('keplerian_fwhm', self._config['keplerian_fwhm'],   (0.0, 170.0), log_scale=False),
         ]
 
     # ------------------------------------------------------------------
     # Class-method constructors
     # ------------------------------------------------------------------
-
     @classmethod
     def from_molecule(
         cls,
@@ -519,7 +518,6 @@ class SlabModel:
     # ------------------------------------------------------------------
     # Fluent fit-parameter API
     # ------------------------------------------------------------------
-
     def add_fit_parameter(
         self,
         name: str,
@@ -549,7 +547,6 @@ class SlabModel:
     # ------------------------------------------------------------------
     # Core chi-squared evaluation
     # ------------------------------------------------------------------
-
     def evaluate_model(self, **param_values: Any) -> float:
         """Evaluate chi-squared for the given *physical* parameter values.
 
@@ -581,7 +578,6 @@ class SlabModel:
     # ------------------------------------------------------------------
     # Fitting
     # ------------------------------------------------------------------
-
     def fit(
         self,
         initial_overrides: Optional[Dict[str, Any]] = None,
@@ -636,7 +632,7 @@ class SlabModel:
         method = 'L-BFGS-B' if has_finite_bounds else 'Nelder-Mead'
         bounds_arg = scipy_bounds if has_finite_bounds else None
 
-        print("Starting slab fit:")
+        print(f"Starting slab fit using {method} method with initial parameters:")
         for p in self._fit_params:
             init_phys = overrides.get(p.name, p.initial_value)
             print(f"  {p.name} = {init_phys:.4g}  bounds={p.bounds}  log_scale={p.log_scale}")
@@ -689,14 +685,12 @@ class SlabModel:
     # ------------------------------------------------------------------
     # Post-fit: update source parameters
     # ------------------------------------------------------------------
-
     def update_source_parameters(self, result: FitResult) -> None:
         """Apply fitted parameters back to the source object.
 
-        For ``Molecule`` sources, uses ``bulk_update_parameters`` to invalidate
-        caches in one shot.  For ``Intensity`` sources, sets the relevant
-        attributes.  For ``Spectrum`` or ``MoleculeLineList`` sources, emits a
-        warning (no persistent state to update).
+        For ``Molecule`` sources, uses ``bulk_update_parameters`` to invalidate caches in one shot.
+        For ``Intensity`` sources, sets the relevant attributes.
+        For ``Spectrum`` or ``MoleculeLineList`` sources, emits a warning (no persistent state to update).
 
         Parameters
         ----------
@@ -738,7 +732,6 @@ class SlabModel:
     # ------------------------------------------------------------------
     # Deprecated aliases — keep for backward compatibility
     # ------------------------------------------------------------------
-
     def fit_parameters(
         self,
         start_t=None,
@@ -788,7 +781,6 @@ class SlabModel:
     # ------------------------------------------------------------------
     # Save results
     # ------------------------------------------------------------------
-
     def save_results(
         self,
         result: Union[FitResult, dict],
@@ -843,7 +835,6 @@ class SlabModel:
     # ------------------------------------------------------------------
     # Private writers — FitResult
     # ------------------------------------------------------------------
-
     def _save_fit_result_json(
         self, result: FitResult, output_path: str, source_name: str
     ) -> None:
@@ -884,7 +875,6 @@ class SlabModel:
     # ------------------------------------------------------------------
     # Private writers — legacy dict (backward compat)
     # ------------------------------------------------------------------
-
     def _save_legacy_json(
         self, fitted_params: dict, output_path: str, source_name: str
     ) -> None:
@@ -924,7 +914,6 @@ class SlabModel:
             f.write(f"  Iterations: {fitted_params.get('iterations', 'N/A')}\n")
             f.write(f"  Function calls: {fitted_params.get('function_calls', 'N/A')}\n")
             f.write(f"  Convergence flag: {fitted_params.get('convergence_flag', 'N/A')}\n")
-
 
 # ---------------------------------------------------------------------------
 # Backward-compatibility alias
