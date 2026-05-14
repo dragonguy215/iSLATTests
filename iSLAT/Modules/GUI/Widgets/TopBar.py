@@ -20,7 +20,7 @@ from iSLAT.Modules.FileHandling.iSLATFileHandling import (
 )
 from iSLAT.Modules.FileHandling import save_folder_path
 from iSLAT.Modules.Plotting.FullSpectrumView import output_full_spectrum
-from iSLAT.Modules.DataProcessing.Slabfit import SlabFit as SlabModel
+from iSLAT.Modules.DataProcessing.Slabfit import SlabModel
 from iSLAT.Modules.DataProcessing.BatchFittingService import BatchFittingService
 from iSLAT.Modules.DataProcessing.DeblendingService import DeblendingService
 from iSLAT.Modules.DataProcessing.LineSaveService import LineSaveService
@@ -28,7 +28,6 @@ from iSLAT.Modules.GUI.ControlSurface import ControlSurface
 
 if TYPE_CHECKING:
     from iSLAT.Modules.Plotting.MainPlot import iSLATPlot
-
 
 # ---------------------------------------------------------------------------
 # TopBarSurface — ControlSurface implementation for the TopBar dynamic area
@@ -226,11 +225,11 @@ class TopBar(ResizableFrame):
         toggle_legend_tip = "Turn legend on/off\nKeybind: L"
         toggle_full_spectrum_tip = "Toggle full spectrum view on/off\nKeybind: F\n\nOpen in new window: Ctrl+F"
         toggle_summed_tip = "Toggle summed model flux on/off\n(gray fill in plot)\nKeybind: M"
-        create_button(self.button_frame, self.theme, "Toggle Saved Lines", self.toggle_saved_lines, 0, 3, tip_text=saved_lines_tip)
-        create_button(self.button_frame, self.theme, "Toggle Atomic Lines", self.toggle_atomic_lines, 0, 4, tip_text=atomic_lines_tip)
-        create_button(self.button_frame, self.theme, "Toggle Full Spectrum", self.toggle_full_spectrum, 0, 5, tip_text=toggle_full_spectrum_tip)
-        create_button(self.button_frame, self.theme, "Toggle Total Model", self.toggle_summed_spectrum, 0, 6, tip_text=toggle_summed_tip)
-        create_button(self.button_frame, self.theme, "Toggle Legend", self.main_plot.toggle_legend, 0, 7, tip_text=toggle_legend_tip)
+        create_button(self.button_frame, self.theme, "Saved Lines", self.toggle_saved_lines, 0, 3, tip_text=saved_lines_tip)
+        create_button(self.button_frame, self.theme, "Atomic Lines", self.toggle_atomic_lines, 0, 4, tip_text=atomic_lines_tip)
+        create_button(self.button_frame, self.theme, "Full Spectrum", self.toggle_full_spectrum, 0, 5, tip_text=toggle_full_spectrum_tip)
+        create_button(self.button_frame, self.theme, "Total Model", self.toggle_summed_spectrum, 0, 6, tip_text=toggle_summed_tip)
+        create_button(self.button_frame, self.theme, "Legend", self.main_plot.toggle_legend, 0, 7, tip_text=toggle_legend_tip)
         
         # Navigate buttons - compact with minimal padding
         retreat_tip = "Retreat the plot start\nby the current range value\nShortcut: Shift+N"
@@ -914,7 +913,7 @@ class TopBar(ResizableFrame):
                 output_folder = line_saves_file_path
             # Use the SlabModel class to perform the fit
             slab_model = SlabModel(
-                mol_object=self.islat.active_molecule,
+                source=self.islat.active_molecule,
                 output_folder=output_folder,
                 data_field=self.data_field,
                 input_file=self.islat.input_line_list,

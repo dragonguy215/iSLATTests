@@ -39,6 +39,7 @@ class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
     
     __slots__ = (
         '_lam_min', '_lam_max', '_dlambda', '_R', '_R_func', '_distance',
+        '_keplerian_fwhm',
         '_lamgrid', '_flux', '_flux_jy', '_I_arrays', '_lam_arrays', '_tau_arrays',
         '_components', '_flux_valid', '_convolution_cache',
         '_kernel_cache', '_cache_stats', '_n_grid_points', '_unique_cache',
@@ -48,7 +49,8 @@ class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
     def __init__(self, lam_min: float = None, lam_max: float = None, 
                  dlambda: float = None, R: float = None, distance: float = None,
                  wavelength_range: Optional[tuple] = None,
-                 R_func: Optional[Any] = None):
+                 R_func: Optional[Any] = None,
+                 keplerian_fwhm: float = 0.0):
         """Initialize a spectrum class and prepare it to add intensity components
 
         Parameters
@@ -78,6 +80,19 @@ class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
 
             The callable must accept a float or 1-D ``numpy.ndarray``
             and return a value of the same shape.
+        keplerian_fwhm : float, optional
+            Keplerian line-of-sight broadening FWHM in km/s (default 0).
+            When non-zero, this is combined in quadrature with the
+            instrumental profile specified by *R* or *R_func*:
+
+            .. math::
+                \\Delta\\lambda_{\\rm total}(\\lambda) =
+                    \\sqrt{\\Delta\\lambda_{\\rm inst}(\\lambda)^2
+                         + \\Delta\\lambda_{\\rm kep}(\\lambda)^2}
+
+            For a scalar *R* the result is still a scalar (wavelength-
+            independent); for a callable *R_func* the result is a new
+            callable that wraps the original.
         """
 
         # assure valid lambda grid range
@@ -91,7 +106,30 @@ class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
         self._R = R
         self._R_func = R_func
         self._distance = distance
+        self._keplerian_fwhm = float(keplerian_fwhm)
         self._wavelength_range = wavelength_range if wavelength_range is not None else (lam_min, lam_max)
+
+        # Apply Keplerian broadening on top of the instrumental profile
+        if self._keplerian_fwhm > 0.0:
+            if self._R_func is not None:
+                # Wrap the existing wavelength-dependent R_func in quadrature
+                _orig = self._R_func
+                _kep = self._keplerian_fwhm
+                def _kep_R_func(lam, _rfunc=_orig, _kep_kms=_kep):
+                    lam = np.atleast_1d(np.asarray(lam, dtype=float))
+                    R_inst = np.asarray(_rfunc(lam), dtype=float)
+                    fwhm_inst_um = lam / R_inst
+                    fwhm_kep_um  = lam * (_kep_kms / c.SPEED_OF_LIGHT_KMS)
+                    fwhm_total   = np.sqrt(fwhm_inst_um ** 2 + fwhm_kep_um ** 2)
+                    fwhm_total   = np.where(fwhm_total > 0, fwhm_total, fwhm_inst_um)
+                    return lam / fwhm_total
+                self._R_func = _kep_R_func
+            elif self._R is not None and self._R > 0:
+                # Scalar R path: combine constant FWHMs in quadrature → new scalar R
+                # fwhm_inst_kms = c / R  (constant for all λ)
+                fwhm_inst_kms = c.SPEED_OF_LIGHT_KMS / self._R
+                fwhm_total_kms = (fwhm_inst_kms ** 2 + self._keplerian_fwhm ** 2) ** 0.5
+                self._R = c.SPEED_OF_LIGHT_KMS / fwhm_total_kms
 
         # create wavelength grid with pre-calculated size
         n_points = int(1 + (lam_max - lam_min) / dlambda)
@@ -121,6 +159,67 @@ class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
         self._kernel_cache = {}
         self._init_cache_stats()
         self._unique_cache = None  # Cached (key, lam, index_wavelength) from np.unique
+
+    @staticmethod
+    def build_R_func(profile, kep_fwhm_kms: float, fwhm_fallback_kms: float):
+        """Build an effective resolving-power callable that combines an instrumental
+        profile with Keplerian broadening in quadrature.
+
+        Parameters
+        ----------
+        profile:
+            An instrumental-profile object exposing a ``get_R(wavelength_um)``
+            method (e.g. instances from ``InstrumentalProfiles.PROFILE_REGISTRY``).
+        kep_fwhm_kms : float
+            Keplerian FWHM in km/s.  Pass ``0.0`` to include no Keplerian term.
+        fwhm_fallback_kms : float
+            Constant FWHM (km/s) used as a fallback when the profile returns
+            NaN or non-positive R (e.g. wavelength outside instrument coverage).
+
+        Returns
+        -------
+        R_func : callable
+            A function ``R_func(lam)`` that accepts a float or 1-D
+            ``numpy.ndarray`` of wavelengths in microns and returns the
+            effective resolving power at each wavelength:
+
+            .. math::
+                R_{\\rm eff}(\\lambda) = \\frac{\\lambda}{\\Delta\\lambda_{\\rm total}}
+
+            where
+
+            .. math::
+                \\Delta\\lambda_{\\rm total} =
+                    \\sqrt{\\Delta\\lambda_{\\rm inst}^2 + \\Delta\\lambda_{\\rm kep}^2}
+        rep_fwhm_kms : float
+            A representative scalar FWHM (km/s) evaluated at the middle of the
+            wavelength arrays, used by the caller to size the convolution grid.
+            Returns ``fwhm_fallback_kms`` when the profile is out of range.
+        """
+        _profile = profile
+        _kep = kep_fwhm_kms
+        _R_fallback = c.SPEED_OF_LIGHT_KMS / fwhm_fallback_kms
+
+        def R_func(lam):
+            """Effective resolving power combining instrumental + Keplerian broadening.
+
+            Wavelengths outside the instrument's coverage (R_inst = NaN or ≤ 0)
+            fall back to the constant FWHM so that NaN never reaches _convol_flux.
+            """
+            lam = np.atleast_1d(np.asarray(lam, dtype=float))
+            R_inst = np.asarray(_profile.get_R(lam), dtype=float)
+
+            bad = ~np.isfinite(R_inst) | (R_inst <= 0)
+            R_inst = np.where(bad, _R_fallback, R_inst)
+
+            fwhm_inst_um = lam / R_inst
+            fwhm_kep_um = lam * (_kep / c.SPEED_OF_LIGHT_KMS)
+            fwhm_total_um = np.sqrt(fwhm_inst_um ** 2 + fwhm_kep_um ** 2)
+            # Guard against zero total FWHM (shouldn't happen in practice)
+            fwhm_total_um = np.where(fwhm_total_um > 0, fwhm_total_um, fwhm_inst_um)
+            return lam / fwhm_total_um
+
+        return R_func
 
     def reset(self):
         """Clear all accumulated intensity components, keeping the grid and kernel caches.
@@ -357,6 +456,11 @@ class Spectrum(CacheStatsMixin, WavelengthRangeMixin):
             # Use pre-computed conversion factor
             self._flux_jy = flux_data * self._FLUX_JY_FACTOR * (self._lamgrid ** 2)
         return self._flux_jy
+
+    @property
+    def keplerian_fwhm(self) -> float:
+        """float: Keplerian broadening FWHM in km/s passed at construction."""
+        return self._keplerian_fwhm
 
     # ------------------------------------------------------------------
     # Optical-depth profile convolution

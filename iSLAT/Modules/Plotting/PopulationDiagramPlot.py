@@ -451,11 +451,15 @@ class PopulationDiagramPlot(BasePlot):
         ax.set_xscale("log" if self._x_log else "linear")
         ax.set_yscale("log" if self._y_log else "linear")
 
+        def _finite(arr: np.ndarray) -> np.ndarray:
+            """Return only finite (non-NaN, non-Inf) values."""
+            return arr[np.isfinite(arr)]
+
         # For log axes restrict the data used for limit computation to
         # strictly positive values; fall back to auto-limits if none exist.
         if self._x_log:
-            pos_x = cat_valid_x[cat_valid_x > 0]
-            pos_all_x = all_x_data[all_x_data > 0]
+            pos_x = _finite(cat_valid_x[cat_valid_x > 0])
+            pos_all_x = _finite(all_x_data[all_x_data > 0])
             if len(pos_x) == 0 or len(pos_all_x) == 0:
                 ax.autoscale(axis="x")
             else:
@@ -465,16 +469,20 @@ class PopulationDiagramPlot(BasePlot):
                 ax.set_xlim(_xlo / _factor, _xhi * _factor)
         else:
             # X limits (linear)
-            if self._x_prop == "eu":
-                ax.set_xlim(np.nanmin(all_x_data) - 50, np.nanmax(cat_valid_x))
+            _fx_all = _finite(all_x_data)
+            _fx_valid = _finite(cat_valid_x)
+            if len(_fx_all) == 0 or len(_fx_valid) == 0:
+                ax.autoscale(axis="x")
+            elif self._x_prop == "eu":
+                ax.set_xlim(np.nanmin(_fx_all) - 50, np.nanmax(_fx_valid))
             else:
-                _xr = np.nanmax(cat_valid_x) - np.nanmin(all_x_data)
-                _xpad = _xr * 0.05 if _xr > 0 else max(abs(np.nanmin(all_x_data)) * 0.05, 1)
-                ax.set_xlim(np.nanmin(all_x_data) - _xpad, np.nanmax(cat_valid_x) + _xpad)
+                _xr = np.nanmax(_fx_valid) - np.nanmin(_fx_all)
+                _xpad = _xr * 0.05 if _xr > 0 else max(abs(np.nanmin(_fx_all)) * 0.05, 1)
+                ax.set_xlim(np.nanmin(_fx_all) - _xpad, np.nanmax(_fx_valid) + _xpad)
 
         if self._y_log:
-            pos_y = cat_valid_y[cat_valid_y > 0]
-            pos_all_y = all_y_data[all_y_data > 0]
+            pos_y = _finite(cat_valid_y[cat_valid_y > 0])
+            pos_all_y = _finite(all_y_data[all_y_data > 0])
             if len(pos_y) == 0 or len(pos_all_y) == 0:
                 ax.autoscale(axis="y")
             else:
@@ -484,12 +492,16 @@ class PopulationDiagramPlot(BasePlot):
                 ax.set_ylim(_ylo / _factor, _yhi * _factor)
         else:
             # Y limits (linear)
-            if self._y_prop == "rd_yax":
-                ax.set_ylim(np.nanmin(cat_valid_y), np.nanmax(all_y_data) + 0.5)
+            _fy_all = _finite(all_y_data)
+            _fy_valid = _finite(cat_valid_y)
+            if len(_fy_all) == 0 or len(_fy_valid) == 0:
+                ax.autoscale(axis="y")
+            elif self._y_prop == "rd_yax":
+                ax.set_ylim(np.nanmin(_fy_valid), np.nanmax(_fy_all) + 0.5)
             else:
-                _yr = np.nanmax(all_y_data) - np.nanmin(cat_valid_y)
-                _ypad = _yr * 0.05 if _yr > 0 else max(abs(np.nanmin(cat_valid_y)) * 0.05, 1)
-                ax.set_ylim(np.nanmin(cat_valid_y) - _ypad, np.nanmax(all_y_data) + _ypad)
+                _yr = np.nanmax(_fy_all) - np.nanmin(_fy_valid)
+                _ypad = _yr * 0.05 if _yr > 0 else max(abs(np.nanmin(_fy_valid)) * 0.05, 1)
+                ax.set_ylim(np.nanmin(_fy_valid) - _ypad, np.nanmax(_fy_all) + _ypad)
 
         ax.set_ylabel(self._get_axis_label(self._y_prop), color=fg, labelpad=-1)
         ax.set_xlabel(self._get_axis_label(self._x_prop), color=fg)

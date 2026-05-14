@@ -640,7 +640,7 @@ class FullSpectrumView(ToggleMixin, PlotView):
 
         bus.register(
             ToggleField(
-                "show_residuals", "Toggle Residuals",
+                "show_residuals", "Residuals",
                 getter=_residuals_getter,
                 setter=_residuals_setter,
                 owner=self,

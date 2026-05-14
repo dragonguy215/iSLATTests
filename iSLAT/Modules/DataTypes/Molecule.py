@@ -64,7 +64,7 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         '_keplerian_fwhm', '_instrumental_profile_key',
         '_temp_val', '_radius_val', '_n_mol_val', '_distance_val', '_fwhm_val', '_broad_val',
         '_keplerian_fwhm_val', '_instrumental_profile_key_val',
-        '_lines_filepath',
+        '_lines_filepath', '_profile',
         't_kin', 'scale_exponent', 'scale_number', 'radius_init', 'n_mol_init',
         '_wavelength_range', '_model_pixel_res', '_model_line_width',
         '_intensity_cache', '_spectrum_cache', '_flux_cache',
@@ -412,7 +412,8 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         mean_wavelength = (self.wavelength_range[0] + self.wavelength_range[1]) / 2.0
 
         # ------------------------------------------------------------------
-        # Build the instrumental profile and combine with Keplerian FWHM
+        # Build the instrumental profile object, then delegate the quadrature
+        # combination with Keplerian FWHM to Spectrum.build_R_func.
         # ------------------------------------------------------------------
         from iSLAT.Modules.DataProcessing.InstrumentalProfiles import (
             PROFILE_REGISTRY, ConstantProfile
@@ -420,6 +421,7 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         profile_key = self._instrumental_profile_key or 'constant'
         profile_cls = PROFILE_REGISTRY.get(profile_key, ConstantProfile)
         profile = profile_cls(self._fwhm) if profile_key == 'constant' else profile_cls()
+        self._profile = profile  # Store for potential future use
 
         kep_fwhm_kms = self._keplerian_fwhm
         use_constant_scalar = (profile_key == 'constant' and kep_fwhm_kms == 0.0)
@@ -429,45 +431,14 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
             delta_lambda = mean_wavelength * (self._fwhm / c.SPEED_OF_LIGHT_KMS)
             spectral_resolution = mean_wavelength / delta_lambda if delta_lambda > 0 else self.model_line_width
             R_func = None
-            # Representative FWHM for grid spacing
             rep_fwhm_kms = self._fwhm
         else:
-            # General path: build a callable R_eff(λ) that combines instrumental
-            # and Keplerian FWHM in quadrature:
-            #   FWHM_total(λ) = sqrt(FWHM_inst(λ)^2 + FWHM_kep(λ)^2)
-            #   R_eff(λ)      = λ / FWHM_total(λ)
-            _profile = profile  # capture for closure
-            _kep = kep_fwhm_kms
-            _fwhm_kms_fallback = self._fwhm  # fallback for out-of-coverage wavelengths
-
-            def R_func(lam):
-                """Effective resolving power combining instrumental + Keplerian broadening.
-
-                Wavelengths outside the instrument's coverage (R_inst = NaN) fall
-                back to the constant instrumental FWHM so that NaN never reaches
-                Spectrum._convol_flux.
-                """
-                import numpy as _np
-                lam = _np.atleast_1d(_np.asarray(lam, dtype=float))
-                R_inst = _np.asarray(_profile.get_R(lam), dtype=float)
-
-                # Fallback R for out-of-coverage wavelengths (NaN or ≤ 0)
-                R_fallback = c.SPEED_OF_LIGHT_KMS / _fwhm_kms_fallback
-                bad = ~_np.isfinite(R_inst) | (R_inst <= 0)
-                R_inst = _np.where(bad, R_fallback, R_inst)
-
-                fwhm_inst_um = lam / R_inst
-                fwhm_kep_um = lam * (_kep / c.SPEED_OF_LIGHT_KMS)
-                fwhm_total_um = _np.sqrt(fwhm_inst_um ** 2 + fwhm_kep_um ** 2)
-                # Guard against zero total FWHM (shouldn't happen in practice)
-                fwhm_total_um = _np.where(fwhm_total_um > 0, fwhm_total_um, fwhm_inst_um)
-                return lam / fwhm_total_um
+            # General path: Spectrum owns the quadrature + fallback logic
+            R_func = Spectrum.build_R_func(profile, kep_fwhm_kms, self._fwhm)
 
             # Representative scalar R at the mean wavelength (used to size the grid)
             R_at_mean = float(np.atleast_1d(np.asarray(R_func(np.array([mean_wavelength]))))[0])
             if not np.isfinite(R_at_mean) or R_at_mean <= 0:
-                # Fall back to constant instrumental FWHM if profile returns NaN
-                # (e.g. wavelength outside MIRI coverage)
                 R_at_mean = mean_wavelength / (mean_wavelength * self._fwhm / c.SPEED_OF_LIGHT_KMS)
             spectral_resolution = R_at_mean
             rep_fwhm_kms = c.SPEED_OF_LIGHT_KMS / R_at_mean
