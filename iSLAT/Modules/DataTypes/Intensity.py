@@ -674,7 +674,24 @@ class Intensity(WavelengthRangeMixin):
         m = self._molecule
         lines = m.lines_as_namedtuple
         partition = m.partition
-        
+
+        # Guard: no lines available in the active wavelength range
+        if lines is None or len(lines.freq) == 0:
+            empty = np.array([])
+            return empty, empty
+
+        # Ensure freq is always a numpy array (guards against stale list fallbacks)
+        if not isinstance(lines.freq, np.ndarray):
+            from collections import namedtuple as _nt
+            lines = lines._replace(
+                freq=np.asarray(lines.freq, dtype=np.float64),
+                a_stein=np.asarray(lines.a_stein, dtype=np.float64),
+                e_up=np.asarray(lines.e_up, dtype=np.float64),
+                e_low=np.asarray(lines.e_low, dtype=np.float64),
+                g_up=np.asarray(lines.g_up, dtype=np.float64),
+                lam=np.asarray(lines.lam, dtype=np.float64),
+            )
+
         # Ensure inputs are numpy arrays with consistent shape
         t_kin_vals = np.asarray(t_kin_vals)
         n_mol_vals = np.asarray(n_mol_vals) 

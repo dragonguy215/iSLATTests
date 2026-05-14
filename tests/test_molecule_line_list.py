@@ -177,3 +177,125 @@ class TestMoleculeLineList:
         assert mll.num_lines == 2
         wavelengths = mll.get_wavelengths()
         assert np.all(wavelengths == 15.0)
+
+
+class TestWavelengthRangeExtension:
+    """Tests ensuring that extending the wavelength range beyond the
+    original data range correctly includes/excludes lines, and that
+    the lines_as_namedtuple always returns numpy arrays (never bare lists).
+    """
+
+    def _make_mll(self):
+        """Line list with lines spread across 5 – 35 µm."""
+        from iSLAT.Modules.DataTypes.MoleculeLineList import MoleculeLineList
+        import iSLAT.Constants as c_mod
+        lines_data = [
+            # Lines within a typical 'data' range (5–28 µm)
+            {'nr': 1, 'lev_up': '0|2', 'lev_low': '0|1',
+             'lam': 6.0,  'freq': c_mod.SPEED_OF_LIGHT_MICRONS / 6.0,
+             'a_stein': 0.02, 'e_up': 5000.0, 'e_low': 3000.0, 'g_up': 5, 'g_low': 3},
+            {'nr': 2, 'lev_up': '0|4', 'lev_low': '0|3',
+             'lam': 15.0, 'freq': c_mod.SPEED_OF_LIGHT_MICRONS / 15.0,
+             'a_stein': 0.01, 'e_up': 3000.0, 'e_low': 2000.0, 'g_up': 9, 'g_low': 7},
+            {'nr': 3, 'lev_up': '0|6', 'lev_low': '0|5',
+             'lam': 25.0, 'freq': c_mod.SPEED_OF_LIGHT_MICRONS / 25.0,
+             'a_stein': 0.005, 'e_up': 1500.0, 'e_low': 1000.0, 'g_up': 13, 'g_low': 11},
+            # Lines BEYOND a typical 'data' max of 28 µm
+            {'nr': 4, 'lev_up': '0|8', 'lev_low': '0|7',
+             'lam': 30.0, 'freq': c_mod.SPEED_OF_LIGHT_MICRONS / 30.0,
+             'a_stein': 0.003, 'e_up': 1200.0, 'e_low': 800.0, 'g_up': 17, 'g_low': 15},
+            {'nr': 5, 'lev_up': '0|10', 'lev_low': '0|9',
+             'lam': 34.0, 'freq': c_mod.SPEED_OF_LIGHT_MICRONS / 34.0,
+             'a_stein': 0.001, 'e_up': 900.0, 'e_low': 600.0, 'g_up': 21, 'g_low': 19},
+        ]
+        mll = MoleculeLineList(molecule_id='ExtTest', lines_data=lines_data)
+        mll.partition_function = mll._partition_type(
+            t=np.array([100, 300, 500, 1000, 2000], dtype=np.float64),
+            q=np.array([10, 150, 500, 2000, 8000], dtype=np.float64),
+        )
+        mll._molar_mass = 18.015
+        return mll
+
+    # ------------------------------------------------------------------
+    # lines_as_namedtuple: always numpy arrays
+    # ------------------------------------------------------------------
+
+    def test_empty_range_namedtuple_fields_are_numpy_arrays(self):
+        """When the wavelength_range filters out ALL lines,
+        lines_as_namedtuple fields must be numpy arrays, not Python lists.
+        This prevents 'list ** int' errors downstream."""
+        mll = self._make_mll()
+        # Range that contains no lines
+        mll.wavelength_range = (100.0, 200.0)
+        nt = mll.lines_as_namedtuple
+        assert isinstance(nt.freq,    np.ndarray), "freq must be ndarray when empty"
+        assert isinstance(nt.a_stein, np.ndarray), "a_stein must be ndarray when empty"
+        assert isinstance(nt.e_up,    np.ndarray), "e_up must be ndarray when empty"
+        assert isinstance(nt.e_low,   np.ndarray), "e_low must be ndarray when empty"
+        assert isinstance(nt.g_up,    np.ndarray), "g_up must be ndarray when empty"
+        assert isinstance(nt.lam,     np.ndarray), "lam must be ndarray when empty"
+        assert len(nt.freq) == 0
+
+    def test_empty_range_namedtuple_supports_pow(self):
+        """Empty lines_as_namedtuple.freq ** 3 must not raise TypeError."""
+        mll = self._make_mll()
+        mll.wavelength_range = (100.0, 200.0)
+        nt = mll.lines_as_namedtuple
+        # This should not raise 'unsupported operand type for **'
+        result = nt.freq ** 3
+        assert isinstance(result, np.ndarray)
+        assert len(result) == 0
+
+    # ------------------------------------------------------------------
+    # Range extension: lines beyond old max are included
+    # ------------------------------------------------------------------
+
+    def test_restricting_range_excludes_outer_lines(self):
+        """Lines at 30 and 34 µm must NOT appear when range = (5, 28)."""
+        mll = self._make_mll()
+        mll.wavelength_range = (5.0, 28.0)
+        wavs = mll.get_wavelengths()
+        assert len(wavs) == 3, f"Expected 3 lines in (5, 28), got {len(wavs)}"
+        assert all(w <= 28.0 for w in wavs)
+
+    def test_extending_max_includes_lines_beyond_data(self):
+        """Extending max_wave to 35 µm must include lines at 30 and 34 µm."""
+        mll = self._make_mll()
+        mll.wavelength_range = (5.0, 28.0)   # restrict first
+        assert mll.num_lines == 3
+
+        mll.wavelength_range = (5.0, 35.0)   # extend past data max
+        assert mll.num_lines == 5, (
+            f"Expected 5 lines after extension to 35 µm, got {mll.num_lines}"
+        )
+        wavs = mll.get_wavelengths()
+        assert any(w > 28.0 for w in wavs), "No lines found beyond 28 µm after range extension"
+
+    def test_extending_min_includes_lines_below_data(self):
+        """Extending min_wave to 4 µm must include lines at 6 µm."""
+        mll = self._make_mll()
+        mll.wavelength_range = (10.0, 35.0)  # restrict below 10
+        assert all(w >= 10.0 for w in mll.get_wavelengths())
+
+        mll.wavelength_range = (4.0, 35.0)   # extend below data min
+        wavs = mll.get_wavelengths()
+        assert any(w < 10.0 for w in wavs), "No lines found below 10 µm after min extension"
+
+    def test_cache_invalidated_after_range_extension(self):
+        """Cache must be rebuilt after wavelength_range changes."""
+        mll = self._make_mll()
+        mll.wavelength_range = (5.0, 28.0)
+        _ = mll.get_wavelengths()  # populate cache
+
+        mll.wavelength_range = (5.0, 35.0)
+        assert mll._filtered_raw_data is None, "Filtered cache not cleared after range change"
+        wavs = mll.get_wavelengths()
+        assert len(wavs) == 5
+
+    def test_namedtuple_fields_are_numpy_after_extension(self):
+        """After extending the range, namedtuple fields must still be numpy arrays."""
+        mll = self._make_mll()
+        mll.wavelength_range = (5.0, 35.0)
+        nt = mll.lines_as_namedtuple
+        assert isinstance(nt.freq, np.ndarray)
+        assert len(nt.freq) == 5

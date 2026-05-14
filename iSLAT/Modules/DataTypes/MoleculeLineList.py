@@ -894,7 +894,18 @@ class MoleculeLineList(WavelengthRangeMixin):
             # Fallback to using MoleculeLine objects
             self._ensure_lines_created()
             if not self.lines:
-                self._lines_cache = self._lines_type([], [], [], [], [], [], [], [], [], [])
+                self._lines_cache = self._lines_type(
+                    np.array([], dtype=np.int32),
+                    np.array([], dtype='U64'),
+                    np.array([], dtype='U64'),
+                    np.array([], dtype=np.float64),
+                    np.array([], dtype=np.float64),
+                    np.array([], dtype=np.float64),
+                    np.array([], dtype=np.float64),
+                    np.array([], dtype=np.float64),
+                    np.array([], dtype=np.int32),
+                    np.array([], dtype=np.int32),
+                )
             else:
                 line_data = list(zip(*[(line.nr, line.lev_up, line.lev_low, line.lam, line.freq,
                                        line.a_stein, line.e_up, line.e_low, line.g_up, line.g_low) 

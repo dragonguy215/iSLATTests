@@ -251,3 +251,151 @@ class TestMolecule:
         )
         assert mol.name == 'NoFile'
         assert mol.filepath is None
+
+
+class TestMoleculeWavelengthRangeExtension:
+    """Verify that Molecule.get_flux correctly calculates flux when the
+    wavelength_range is extended beyond the observed data range.
+
+    This exercises the full stack: MoleculeLineList filtering →
+    Intensity calculation → Spectrum construction → get_flux.
+    """
+
+    def _make_molecule_with_lines(self, wavelength_range=None):
+        """Create a Molecule whose line list spans 5–34 µm."""
+        from iSLAT.Modules.DataTypes.Molecule import Molecule
+        from iSLAT.Modules.DataTypes.MoleculeLineList import MoleculeLineList
+        import iSLAT.Constants as c_mod
+
+        lines_data = [
+            {'nr': i + 1,
+             'lev_up': f'0|{2*i+2}', 'lev_low': f'0|{2*i+1}',
+             'lam': lam,
+             'freq': c_mod.SPEED_OF_LIGHT_MICRONS / lam,
+             'a_stein': 0.02,
+             'e_up': 3000.0 - i * 200,
+             'e_low': 2000.0 - i * 200,
+             'g_up': 2 * i + 3,
+             'g_low': 2 * i + 1}
+            for i, lam in enumerate([6.0, 10.0, 15.0, 20.0, 25.0, 30.0, 34.0])
+        ]
+        mll = MoleculeLineList(
+            molecule_id='RangeTestMol',
+            lines_data=lines_data,
+            wavelength_range=wavelength_range,
+        )
+        mll.partition_function = mll._partition_type(
+            t=np.array([100, 300, 500, 1000, 2000], dtype=np.float64),
+            q=np.array([10, 150, 500, 2000, 8000], dtype=np.float64),
+        )
+        mll._molar_mass = 18.015
+
+        kw = dict(
+            name='RangeTestMol', displaylabel='RangeTest',
+            filepath=None, color='#0000FF', is_visible=True,
+            temp=500.0, radius=1.0, n_mol=1e18, distance=140.0,
+            fwhm=130.0,
+            initial_molecule_parameters={
+                't_kin': 500.0,
+                'scale_exponent': 18.0,
+                'scale_number': 1.0,
+                'radius_init': 1.0,
+            },
+        )
+        if wavelength_range is not None:
+            kw['wavelength_range'] = wavelength_range
+        mol = Molecule(**kw)
+        # Inject the pre-built line list so no file loading is needed
+        mol.lines = mll
+        if wavelength_range is not None:
+            mol._wavelength_range = wavelength_range
+        return mol
+
+    # ------------------------------------------------------------------
+    # No lines in range → zero flux, no crash
+    # ------------------------------------------------------------------
+
+    def test_get_flux_empty_range_no_crash(self):
+        """When no lines fall in the active range, get_flux must return
+        an array of zeros (not crash with TypeError)."""
+        mol = self._make_molecule_with_lines(wavelength_range=(100.0, 200.0))
+        lam, flux = mol.get_flux(return_wavelengths=True)
+        assert isinstance(flux, np.ndarray)
+        # Flux should be all zeros (no lines)
+        assert np.all(flux == 0.0) or len(flux) == 0
+
+    # ------------------------------------------------------------------
+    # Restricted range → flux non-zero within range, zero outside
+    # ------------------------------------------------------------------
+
+    def test_get_flux_restricted_range_is_nonzero(self):
+        """With lines present in (5, 28), get_flux must be nonzero
+        somewhere in that wavelength window."""
+        mol = self._make_molecule_with_lines(wavelength_range=(5.0, 28.0))
+        lam, flux = mol.get_flux(return_wavelengths=True)
+        assert len(flux) > 0
+        assert np.any(flux > 0), "Expected non-zero flux in (5, 28) µm range"
+
+    # ------------------------------------------------------------------
+    # Extended range: flux must be non-zero in the extended portion
+    # ------------------------------------------------------------------
+
+    def test_get_flux_extended_range_includes_lines_beyond_data(self):
+        """After extending max_wave to 35 µm, the returned wavelength grid
+        must cover the extended region and contain non-zero flux there
+        (because lines exist at 30 and 34 µm)."""
+        mol = self._make_molecule_with_lines(wavelength_range=(5.0, 35.0))
+        lam, flux = mol.get_flux(return_wavelengths=True)
+        assert lam[-1] >= 30.0, (
+            f"Wavelength grid should extend to at least 30 µm, got {lam[-1]:.2f} µm"
+        )
+        # Flux should be non-zero somewhere beyond 28 µm
+        beyond_data_mask = lam > 28.0
+        assert np.any(beyond_data_mask), "No wavelength points beyond 28 µm in the grid"
+        assert np.any(flux[beyond_data_mask] > 0), (
+            "Expected non-zero flux beyond 28 µm (lines at 30 and 34 µm exist)"
+        )
+
+    def test_get_flux_extended_contains_more_flux_than_restricted(self):
+        """The total integrated flux over the shared range (5–28 µm) should
+        be comparable between restricted and extended calculations."""
+        mol_narrow = self._make_molecule_with_lines(wavelength_range=(5.0, 28.0))
+        mol_wide   = self._make_molecule_with_lines(wavelength_range=(5.0, 35.0))
+
+        lam_n, flux_n = mol_narrow.get_flux(return_wavelengths=True)
+        lam_w, flux_w = mol_wide.get_flux(return_wavelengths=True)
+
+        # Both grids should cover (5, 28) — sum of flux in that sub-range
+        mask_n = (lam_n >= 5.0) & (lam_n <= 28.0)
+        mask_w = (lam_w >= 5.0) & (lam_w <= 28.0)
+
+        assert np.any(mask_n) and np.any(mask_w), "No grid points in (5, 28) µm"
+        integral_narrow   = np.trapezoid(flux_n[mask_n], lam_n[mask_n])
+        integral_wide_sub = np.trapezoid(flux_w[mask_w], lam_w[mask_w])
+
+        # Allow 10% tolerance (different grid spacing may slightly change integral)
+        np.testing.assert_allclose(
+            integral_wide_sub, integral_narrow, rtol=0.10,
+            err_msg="Flux in (5-28 µm) should be similar for narrow and wide range molecules"
+        )
+
+    def test_wavelength_range_extension_dirty_flags_trigger_recalculation(self):
+        """Changing wavelength_range must mark caches dirty so the next
+        get_flux call recomputes using the new range."""
+        mol = self._make_molecule_with_lines(wavelength_range=(5.0, 28.0))
+        # Force an initial calculation
+        _, flux_before = mol.get_flux(return_wavelengths=True)
+
+        # Extend the range
+        mol.wavelength_range = (5.0, 35.0)
+
+        # Dirty flags must be set
+        assert mol._dirty_flags['intensity'] or mol._dirty_flags['spectrum'] or mol._dirty_flags['flux'], (
+            "Extending wavelength_range must mark at least one cache dirty"
+        )
+
+        # New flux should cover extended range
+        lam_after, flux_after = mol.get_flux(return_wavelengths=True)
+        assert lam_after[-1] >= 30.0, (
+            f"After extension to 35 µm, grid should reach 30+ µm, got {lam_after[-1]:.2f}"
+        )

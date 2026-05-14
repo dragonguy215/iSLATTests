@@ -291,12 +291,20 @@ class MainPlotGrid(CompositePlot):
             ax.set_title("No spectrum data loaded")
             return
 
-        # Resolve wavelength range for this render
+        # Resolve wavelength range for this render.
+        # Priority: explicit spectrum_range > global_wavelength_range from molecules > data bounds.
         if self.spectrum_range is not None:
             xmin_sp, xmax_sp = self.spectrum_range
         else:
             xmin_sp = float(np.nanmin(self.wave_data))
             xmax_sp = float(np.nanmax(self.wave_data))
+            # Expand to the molecules' global_wavelength_range when the user
+            # has extended min/max wave beyond the observed data.
+            if self.molecules is not None:
+                mol_range = getattr(self.molecules, '_global_wavelength_range', None)
+                if mol_range is not None:
+                    xmin_sp = min(xmin_sp, float(mol_range[0]))
+                    xmax_sp = max(xmax_sp, float(mol_range[1]))
 
         # Build the molecule cache (list of pre-computed spectra) so that
         # SpectrumPanel can slice into it without recomputing molecule data.

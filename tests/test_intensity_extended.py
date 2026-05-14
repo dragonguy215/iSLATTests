@@ -329,3 +329,152 @@ class TestIntensityReprHtml(_IntensityTestBase):
         inten = self._make_intensity(t_kin=700.0)
         r = repr(inten)
         assert '700' in r
+
+
+class TestWavelengthRangeExtensionIntensity(_IntensityTestBase):
+    """Intensity calculations must work correctly when wavelength_range
+    is extended beyond the originally loaded observed data range.
+
+    Specifically:
+    - Lines that fall in the extended region must be included.
+    - When NO lines exist in the active range the calculation must not
+      crash (the 'list ** int' bug) and must return empty arrays.
+    - After restriction and re-extension the results must be consistent.
+    """
+
+    def _make_wide_line_list(self):
+        """Line list with lines from 5 µm to 34 µm, spanning both a
+        'typical data range' (5-28 µm) and beyond it."""
+        from iSLAT.Modules.DataTypes.MoleculeLineList import MoleculeLineList
+        lines_data = [
+            {'nr': i + 1,
+             'lev_up': f'0|{2*i+2}', 'lev_low': f'0|{2*i+1}',
+             'lam': lam,
+             'freq': c.SPEED_OF_LIGHT_MICRONS / lam,
+             'a_stein': 0.01,
+             'e_up': 3000.0 - i * 200,
+             'e_low': 2000.0 - i * 200,
+             'g_up': 2 * i + 3,
+             'g_low': 2 * i + 1}
+            for i, lam in enumerate([6.0, 10.0, 15.0, 20.0, 25.0, 30.0, 34.0])
+        ]
+        mll = MoleculeLineList(molecule_id='WideTest', lines_data=lines_data)
+        mll.partition_function = mll._partition_type(
+            t=np.array([100, 300, 500, 1000, 2000], dtype=np.float64),
+            q=np.array([10, 150, 500, 2000, 8000], dtype=np.float64),
+        )
+        mll._molar_mass = 18.015
+        return mll
+
+    # ------------------------------------------------------------------
+    # Empty-range robustness
+    # ------------------------------------------------------------------
+
+    def test_calc_intensity_empty_range_returns_empty_arrays(self):
+        """When all lines are outside the wavelength_range,
+        calc_intensity must return empty arrays, not crash."""
+        from iSLAT.Modules.DataTypes.Intensity import Intensity
+        mll = self._make_wide_line_list()
+        mll.wavelength_range = (100.0, 200.0)  # no lines here
+        inten = Intensity(mll, wavelength_range=(100.0, 200.0))
+        # Must not raise TypeError about 'list ** int'
+        inten.calc_intensity(t_kin=500.0, n_mol=1e18, dv=1.0)
+        assert inten.intensity is not None
+        assert len(inten.intensity) == 0, "Expected empty intensity array for empty range"
+        assert len(inten.tau) == 0, "Expected empty tau array for empty range"
+
+    def test_empty_range_freq_is_numpy_array(self):
+        """lines_as_namedtuple.freq must be a numpy array even when empty,
+        so that freq ** 3 does not raise TypeError."""
+        mll = self._make_wide_line_list()
+        mll.wavelength_range = (100.0, 200.0)
+        nt = mll.lines_as_namedtuple
+        assert isinstance(nt.freq, np.ndarray)
+        # Arithmetic on an empty numpy array must not raise
+        _ = nt.freq ** 3
+
+    # ------------------------------------------------------------------
+    # Extended range includes lines beyond 'data max'
+    # ------------------------------------------------------------------
+
+    def test_restricting_range_yields_fewer_lines_in_intensity(self):
+        """Restricting to (5, 28) should yield fewer intensity values
+        than using the full range."""
+        from iSLAT.Modules.DataTypes.Intensity import Intensity
+        mll_full = self._make_wide_line_list()
+        inten_full = Intensity(mll_full)
+        inten_full.calc_intensity(t_kin=500.0, n_mol=1e18, dv=1.0)
+        n_full = len(inten_full.intensity)
+
+        mll_restricted = self._make_wide_line_list()
+        mll_restricted.wavelength_range = (5.0, 28.0)
+        inten_restricted = Intensity(mll_restricted, wavelength_range=(5.0, 28.0))
+        inten_restricted.calc_intensity(t_kin=500.0, n_mol=1e18, dv=1.0)
+        n_restricted = len(inten_restricted.intensity)
+
+        assert n_restricted < n_full, (
+            f"Restricted ({n_restricted}) should be fewer lines than full ({n_full})"
+        )
+
+    def test_extending_max_beyond_data_includes_additional_lines(self):
+        """After extending max from 28 µm to 35 µm, the intensity array
+        must be longer (includes lines at 30 and 34 µm)."""
+        from iSLAT.Modules.DataTypes.Intensity import Intensity
+
+        mll_narrow = self._make_wide_line_list()
+        mll_narrow.wavelength_range = (5.0, 28.0)
+        inten_narrow = Intensity(mll_narrow, wavelength_range=(5.0, 28.0))
+        inten_narrow.calc_intensity(t_kin=500.0, n_mol=1e18, dv=1.0)
+        n_narrow = len(inten_narrow.intensity)
+
+        mll_extended = self._make_wide_line_list()
+        mll_extended.wavelength_range = (5.0, 35.0)
+        inten_extended = Intensity(mll_extended, wavelength_range=(5.0, 35.0))
+        inten_extended.calc_intensity(t_kin=500.0, n_mol=1e18, dv=1.0)
+        n_extended = len(inten_extended.intensity)
+
+        assert n_extended > n_narrow, (
+            f"Extended range ({n_extended} lines) should include more lines than "
+            f"narrow range ({n_narrow} lines)"
+        )
+
+    def test_extended_intensity_values_are_positive(self):
+        """All intensity values for lines in the extended range must be >= 0."""
+        from iSLAT.Modules.DataTypes.Intensity import Intensity
+        mll = self._make_wide_line_list()
+        mll.wavelength_range = (5.0, 35.0)
+        inten = Intensity(mll, wavelength_range=(5.0, 35.0))
+        inten.calc_intensity(t_kin=500.0, n_mol=1e18, dv=1.0)
+        assert np.all(inten.intensity >= 0)
+        assert np.all(inten.tau >= 0)
+
+    def test_range_extension_consistent_with_direct_full_range(self):
+        """Intensity calculated on the full range should match intensity
+        calculated after extending a restricted range back to full."""
+        from iSLAT.Modules.DataTypes.Intensity import Intensity
+
+        mll_full = self._make_wide_line_list()
+        inten_full = Intensity(mll_full)
+        inten_full.calc_intensity(t_kin=500.0, n_mol=1e18, dv=1.0)
+
+        # Simulate what happens when user loads data (restricts range) then
+        # manually extends max_wave beyond the data
+        mll_ext = self._make_wide_line_list()
+        mll_ext.wavelength_range = (5.0, 28.0)   # simulate data load
+        inten_ext = Intensity(mll_ext, wavelength_range=(5.0, 28.0))
+        inten_ext.calc_intensity(t_kin=500.0, n_mol=1e18, dv=1.0)
+
+        # Now user extends max_wave to 40 µm (beyond any line)
+        mll_ext.wavelength_range = (5.0, 40.0)
+        inten_ext.wavelength_range = (5.0, 40.0)
+        inten_ext.calc_intensity(t_kin=500.0, n_mol=1e18, dv=1.0)
+
+        # Both should contain the same 7 lines (all lines are within 40 µm)
+        assert len(inten_ext.intensity) == len(inten_full.intensity), (
+            "After extending to 40 µm (covers all lines), intensity length "
+            "should match full range"
+        )
+        np.testing.assert_allclose(
+            inten_ext.intensity, inten_full.intensity, rtol=1e-8,
+            err_msg="Intensity values should match between full range and extended range"
+        )
