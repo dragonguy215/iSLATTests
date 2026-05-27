@@ -133,7 +133,6 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
     figsize : tuple, optional
         Figure size.  Auto-scaled if *None*.
     """
-
     def __init__(
         self,
         wave_data: np.ndarray,

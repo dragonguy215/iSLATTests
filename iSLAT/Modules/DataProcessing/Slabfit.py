@@ -438,8 +438,8 @@ class SlabModel:
         #return _DEFAULT_FIT_PARAMETERS
         return [
             FitParameter('temp',   self._config['temp'],   (10.0,  5000.0), log_scale=False),
-            FitParameter('n_mol',  self._config['n_mol'],  (1e12,  1e25),   log_scale=True),
-            FitParameter('radius', self._config['radius'], (-2.5, 3.0), log_scale=True),
+            FitParameter('n_mol',  self._config['n_mol'],  (1e12,  1e35),   log_scale=True),
+            FitParameter('radius', self._config['radius'], (-2.5, 8.0), log_scale=True),
             #FitParameter('broad', self._config['broad'],   (0.01, 20.0), log_scale=False),
             #FitParameter('keplerian_fwhm', self._config['keplerian_fwhm'],   (0.0, 170.0), log_scale=False),
         ]
