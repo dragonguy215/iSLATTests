@@ -39,9 +39,8 @@ class SpectrumPanel(SpectralPanel):
         Molecule collection -- visible ones are plotted.
     mol_cache : list[tuple], optional
         Pre-computed molecule cache from
-        :meth:`FullSpectrumPlot._build_mol_cache`.  When provided the
-        panel slices into this cache instead of recomputing molecule
-        spectra itself.
+        :meth:`FullSpectrumPlot._build_mol_cache`.
+        When provided the panel slices into this cache instead of recomputing molecule spectra itself.
     summed_wave : np.ndarray, optional
         Wavelength array for the summed model spectrum.
     summed_flux : np.ndarray, optional

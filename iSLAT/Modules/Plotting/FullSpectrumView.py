@@ -466,20 +466,11 @@ class FullSpectrumView(ToggleMixin, PlotView):
             self._install_span_selectors()
         else:
             # Layout unchanged -- fast in-place update of existing axes.
-            # The inherited update_panels_inplace() from FullSpectrumPlot
-            # assumes plain Axes objects; ResidualSpectrumPlot stores
-            # tuple cells so we must skip the fast-path until RSP
-            # provides its own override.
-            if isinstance(self._plot, ResidualSpectrumPlot):
-                self.span_selectors.clear()
-                self._plot.generate_plot()
-                self._install_span_selectors()
+            inplace = getattr(self._plot, "update_panels_inplace", None)
+            if inplace is not None:
+                inplace()
             else:
-                inplace = getattr(self._plot, "update_panels_inplace", None)
-                if inplace is not None:
-                    inplace()
-                else:
-                    self._plot.generate_plot()
+                self._plot.generate_plot()
 
     # ==================================================================
     # Span selector (interactive-only feature)

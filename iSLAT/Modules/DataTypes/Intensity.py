@@ -1986,7 +1986,6 @@ class Intensity(WavelengthRangeMixin):
             df = df.sort_values("wavelength_um", ignore_index=True)
         return df
 
-
 # ═══════════════════════════════════════════════════════════════════
 #  Register standard physics properties with PlotAxisRegistry
 # ═══════════════════════════════════════════════════════════════════

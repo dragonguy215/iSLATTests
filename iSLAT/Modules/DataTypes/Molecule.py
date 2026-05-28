@@ -632,10 +632,8 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
             result_wavelengths = wavelength_array.copy()  # Copy to prevent modification
             result_flux = interpolated_flux
         else:
-            # The internal spectrum is always computed on a fine Nyquist-sampled
-            # grid.  When the user-requested model_pixel_res differs from the
-            # internal grid spacing we resample via _spectres (flux-conserving)
-            # so that changing pixel resolution never alters the total flux.
+            # The internal spectrum is always computed on a fine Nyquist-sampled grid. 
+            # When the user-requested model_pixel_res differs from the internal grid spacing we resample via _spectres (flux-conserving) so that changing pixel resolution never alters the total flux.
             native_dlambda = lam_grid[1] - lam_grid[0] if len(lam_grid) > 1 else self._model_pixel_res
             needs_resample = abs(self._model_pixel_res - native_dlambda) > 1e-12 * native_dlambda
 
@@ -791,8 +789,7 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
     temp = _make_property('temp', converter=float, special_setter=lambda self, value: setattr(self, 't_kin', value))
     radius = _make_property('radius', converter=float)
     distance = _make_property('distance', converter=float)
-    # fwhm — the *instrumental* FWHM constant (km/s).  Used by ConstantProfile
-    # and as the grid-sizing hint for non-constant profiles.
+    # fwhm — the *instrumental* FWHM constant (km/s). Used by ConstantProfile and as the grid-sizing hint for non-constant profiles.
     fwhm = _make_property('fwhm', converter=float, special_setter=lambda self, value: setattr(self, 'spectrum', None))
     # Alias so GUI / notebooks can use either name
     instrumental_fwhm = fwhm
