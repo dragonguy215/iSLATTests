@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
+import platform as _plat
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from iSLAT.Modules.Plotting.FitLinesPlotGrid import FitLinesPlotGrid
@@ -123,15 +124,32 @@ class PlotGridWindow(tk.Toplevel):
         
         scroll_canvas.bind("<Configure>", configure_inner_frame)
         
-        # Mouse wheel scrolling
+        # Mouse wheel scrolling — cross-platform (Windows, macOS, Linux)
         def on_mousewheel(event):
-            scroll_canvas.yview_scroll(int(-1 * (event.delta / 60)), "units")
+            if event.num == 4:
+                scroll_canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                scroll_canvas.yview_scroll(1, "units")
+            else:
+                system = _plat.system()
+                if system == "Darwin":
+                    units = int(-1 * event.delta)
+                    if units == 0 and event.delta != 0:
+                        units = -1 if event.delta > 0 else 1
+                else:  # Windows (and fallback)
+                    units = int(-1 * (event.delta / 120))
+                if units:
+                    scroll_canvas.yview_scroll(units, "units")
         
         def bind_mousewheel(event):
             scroll_canvas.bind_all("<MouseWheel>", on_mousewheel)
-        
+            scroll_canvas.bind_all("<Button-4>", on_mousewheel)
+            scroll_canvas.bind_all("<Button-5>", on_mousewheel)
+
         def unbind_mousewheel(event):
             scroll_canvas.unbind_all("<MouseWheel>")
+            scroll_canvas.unbind_all("<Button-4>")
+            scroll_canvas.unbind_all("<Button-5>")
         
         scroll_canvas.bind("<Enter>", bind_mousewheel)
         scroll_canvas.bind("<Leave>", unbind_mousewheel)

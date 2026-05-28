@@ -205,23 +205,50 @@ def create_scrollable_frame(parent, height = 150, width = 300, vertical = False,
                         )
 
         # Bind mouse-wheel scrolling so the widget scrolls the same way
-        # as dragging the scrollbar.  The scroll direction for each axis
+        # as dragging the scrollbar. The scroll direction for each axis
         # follows the platform convention (Windows delta, Linux Button-4/5).
+        def _scroll_units(event) -> int:
+            """Return signed scroll units from a wheel/trackpad event.
+
+            - Windows  : delta is in multiples of 120 per detent.
+            - macOS    : delta is in small raw units (1-5 per gesture step);
+                         never divide — use the value directly.
+            - Linux    : Button-4 / Button-5 synthetic events, ±1 each.
+            """
+            system = _plat.system()
+            if system == "Darwin":
+                # macOS trackpad and mouse both send <MouseWheel> with small
+                # integer deltas; positive = scroll up/left.
+                units = int(-1 * event.delta)
+                # Guard against sub-integer deltas rounding to zero.
+                if units == 0 and event.delta != 0:
+                    units = -1 if event.delta > 0 else 1
+            elif system == "Windows":
+                units = int(-1 * (event.delta / 120))
+            else:
+                # Linux: rely on Button-4 / Button-5 num below
+                units = 0
+            return units
+
         def _on_vertical(event):
-            if _plat.system() == "Windows":
-                canvasscroll.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            elif event.num == 4:
+            if event.num == 4:
                 canvasscroll.yview_scroll(-1, "units")
             elif event.num == 5:
                 canvasscroll.yview_scroll(1, "units")
+            else:
+                units = _scroll_units(event)
+                if units:
+                    canvasscroll.yview_scroll(units, "units")
 
         def _on_horizontal(event):
-            if _plat.system() == "Windows":
-                canvasscroll.xview_scroll(int(-1 * (event.delta / 120)), "units")
-            elif event.num == 4:
+            if event.num == 4:
                 canvasscroll.xview_scroll(-1, "units")
             elif event.num == 5:
                 canvasscroll.xview_scroll(1, "units")
+            else:
+                units = _scroll_units(event)
+                if units:
+                    canvasscroll.xview_scroll(units, "units")
 
         def _bind_scroll(widget):
             if vertical:
