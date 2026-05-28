@@ -721,7 +721,18 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
             self.generate_plot()
             return
 
-        # --- 1. Recompute model flux from the current molecule state --
+        # --- 1. Recompute model flux and derived arrays from the current state --
+        # This handles both molecule parameter changes and spectrum reloads
+        # (update_data() may have replaced wave_data / flux_data / error_data
+        # with a new spectrum's arrays; we must keep all derived arrays in sync).
+
+        # 1a. Recompute _error_adj from the (potentially updated) error_data.
+        if self._has_noise_floor and self.error_data is not None:
+            self._error_adj = np.sqrt(self.error_data ** 2 + self.noise_floor ** 2)
+        else:
+            self._error_adj = self.error_data
+
+        # 1b. Recompute model flux from the current visible molecules.
         if self.molecules is not None:
             try:
                 _, new_model = self.molecules.get_summed_flux_resampled(

@@ -1,6 +1,5 @@
 """
-LineInspectionView — :class:`SpectrumPanelView` for a standalone full-size
-line inspection plot.
+LineInspectionView — :class:`SpectrumPanelView` for a standalone full-size line inspection plot.
 
 Shows a :class:`LineInspectionPlot` for the most recent span-selector
 selection in a dedicated figure that fills the main plotting area.
@@ -34,15 +33,13 @@ except ImportError:
         def trace(self, *a, **kw): pass
     debug_config = _FallbackDebug()
 
-
 class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
     """
     Standalone line-inspection view.
 
-    Renders a :class:`LineInspectionPlot` for the currently selected
-    wavelength range (taken from the main controller's
-    ``toggle_state["current_selection"]``).  The view owns its own
-    :class:`~matplotlib.figure.Figure` and
+    Renders a :class:`LineInspectionPlot` for the currently selected wavelength range (taken from the main controller's
+    ``toggle_state["current_selection"]``).
+    The view owns its own :class:`~matplotlib.figure.Figure` and
     :class:`~matplotlib.backends.backend_tkagg.FigureCanvasTkAgg` so it
     can be swapped in / out of the main window independently of the
     three-panel and full-spectrum views.

@@ -90,8 +90,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         # Per-molecule scatter collections keyed by molecule name:
         #   {mol_name: (PathCollection, scatter_point_count)}
         self._active_scatter_collections: Dict[str, Any] = {}
-        # Cache of {mol_name: line_data} from the last on_selection call,
-        # used when switching the pop-diagram on line-click.
+        # Cache of {mol_name: line_data} from the last on_selection call, used when switching the pop-diagram on line-click.
         self._mol_line_data_cache: Dict[str, List[Any]] = {}
         self._comparison_callback_registered: bool = False
 

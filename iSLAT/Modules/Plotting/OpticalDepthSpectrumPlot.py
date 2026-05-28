@@ -1,16 +1,11 @@
 """
 OpticalDepthSpectrumPlot -- Multi-panel stacked optical-depth overview.
 
-Generates a vertically stacked series of panels, each showing the
-convolved τ(λ) profile (or line-center stems) for visible molecules
-with color-coded stacked fills.
+Generates a vertically stacked series of panels, each showing the convolved τ(λ) profile (or line-center stems) for visible molecules with color-coded stacked fills.
 
-Inherits the stacking layout from :class:`StackedSpectralPanel` and
-implements :meth:`_create_cell` to produce a single
-:class:`OpticalDepthPanel` per row.
+Inherits the stacking layout from :class:`StackedSpectralPanel` and implements :meth:`_create_cell` to produce a single :class:`OpticalDepthPanel` per row.
 
-Can be combined with :class:`FullSpectrumPlot` using the ``+`` operator
-or :meth:`stack_with` to produce a composite flux + τ overview.
+Can be combined with :class:`FullSpectrumPlot` using the ``+`` operator or :meth:`stack_with` to produce a composite flux + τ overview.
 """
 
 from typing import Optional, Tuple, List, Dict, Any, TYPE_CHECKING
@@ -69,7 +64,6 @@ class OpticalDepthSpectrumPlot(StackedSpectralPanel):
     **kwargs
         Forwarded to :class:`StackedSpectralPanel`.
     """
-
     def __init__(
         self,
         wave_data: np.ndarray,

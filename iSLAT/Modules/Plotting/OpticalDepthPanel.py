@@ -1,16 +1,14 @@
 """
 OpticalDepthPanel -- Concrete :class:`SpectralPanel` for optical depth display.
 
-Renders the convolved optical-depth profile τ(λ) for one or more
-molecules on a single axes.  Supports two display modes:
+Renders the convolved optical-depth profile τ(λ) for one or more molecules on a single axes.  Supports two display modes:
 
 * **profile** (default) - continuous Gaussian-convolved τ(λ) with
   stacked ``fill_between`` per molecule.
 * **stem** - vertical lines at each line-center wavelength with
   height equal to the per-line τ value.
 
-Used both as a standalone single-panel plot and as the cell type
-created by :class:`OpticalDepthSpectrumPlot`.
+Used both as a standalone single-panel plot and as the cell type created by :class:`OpticalDepthSpectrumPlot`.
 """
 
 from typing import Optional, List, Tuple, TYPE_CHECKING
@@ -64,7 +62,6 @@ class OpticalDepthPanel(SpectralPanel):
     **kwargs
         Forwarded to :class:`SpectralPanel` / :class:`BasePlot`.
     """
-
     def __init__(
         self,
         wave_data: np.ndarray,
@@ -105,9 +102,8 @@ class OpticalDepthPanel(SpectralPanel):
     def _ensure_mol_tau_cache(self) -> None:
         """Populate *mol_tau_cache* from *molecule*/*molecules* if empty.
 
-        When an ``OpticalDepthPanel`` is used standalone (not embedded by
-        ``OpticalDepthSpectrumPlot``) the cache starts empty.  This
-        method builds it on-demand using :meth:`BasePlot.get_molecule_tau_data`.
+        When an ``OpticalDepthPanel`` is used standalone (not embedded by ``OpticalDepthSpectrumPlot``) the cache starts empty.
+        This method builds it on-demand using :meth:`BasePlot.get_molecule_tau_data`.
         """
         if self.mol_tau_cache:
             return

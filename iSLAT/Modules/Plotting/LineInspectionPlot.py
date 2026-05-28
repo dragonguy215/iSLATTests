@@ -1,8 +1,7 @@
 """
 LineInspectionPlot — Zoomed-in view of a narrow wavelength region.
 
-Shows the observed spectrum, overlaid molecule model(s), and optionally
-individual line markers with energy/A-coefficient labels.
+Shows the observed spectrum, overlaid molecule model(s), and optionally individual line markers with energy/A-coefficient labels.
 
 Can be used standalone (notebook / script) or embedded in a GUI layout.
 """
@@ -52,7 +51,6 @@ class LineInspectionPlot(SpectrumPanel):
     ax : Axes, optional
         Pre-existing axes to draw into (for embedding in a larger figure).
     """
-
     def __init__(
         self,
         wave_data: np.ndarray,
@@ -85,9 +83,8 @@ class LineInspectionPlot(SpectrumPanel):
         self.molecule = molecule
         self.line_data = line_data
         self.line_threshold = line_threshold
-        # When True (default), all visible molecules from *molecules* are
-        # rendered.  When False, only *molecule* (singular) is rendered;
-        # *molecules* is still used for matched-spectral-sampling queries.
+        # When True (default), all visible molecules from *molecules* are rendered.
+        # When False, only *molecule* (singular) is rendered; *molecules* is still used for matched-spectral-sampling queries.
         self.render_all_visible: bool = render_all_visible
         # Observer-frame wavelengths for matched spectral sampling.
         # SpectrumPanel stores None when not provided; fall back to wave_data.
@@ -183,8 +180,7 @@ class LineInspectionPlot(SpectrumPanel):
         if len(model_wave_range) == 0 or len(model_flux_range) == 0:
             return None
 
-        # Skip molecules whose flux is effectively zero in this range so
-        # they don't clutter the legend with a flat-line entry.
+        # Skip molecules whose flux is effectively zero in this range so they don't clutter the legend with a flat-line entry.
         peak = float(np.nanmax(np.abs(model_flux_range)))
         if peak < 1e-30:
             return None
