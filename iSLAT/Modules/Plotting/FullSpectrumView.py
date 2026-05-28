@@ -372,7 +372,7 @@ class FullSpectrumView(ToggleMixin, PlotView):
             screen_h_px = 900
 
         # Convert screen pixels to approximate matplotlib inches at the
-        # logical DPI (100).  Leave room for toolbars / window chrome.
+        # logical DPI (100). Leave room for toolbars / window chrome.
         dpi = 100
         max_fig_h = min((screen_h_px - 160) / dpi, 14.0)
         # Ensure at least a reasonable minimum height
@@ -402,16 +402,15 @@ class FullSpectrumView(ToggleMixin, PlotView):
             self._install_span_selectors()
             return
 
-        # Detect a plot-type mismatch (e.g. FSP is active but
-        # show_residuals is now True).  Force a full rebuild.
+        # Detect a plot-type mismatch (e.g. FSP is active but show_residuals is now True).
+        # Force a full rebuild.
         show_residuals = self._pm.toggle_state.get("show_residuals", False)
         type_mismatch = (
             (show_residuals and not isinstance(self._plot, ResidualSpectrumPlot))
             or (not show_residuals and isinstance(self._plot, ResidualSpectrumPlot))
         )
         if type_mismatch:
-            # Preserve the panel wavelength ranges so the user sees the
-            # same layout after the toggle.
+            # Preserve the panel wavelength ranges so the user sees the same layout after the toggle.
             old_edges = getattr(self._plot, "_panel_edges", None)
             old_ends = getattr(self._plot, "_panel_ends", None)
             old_step = getattr(self._plot, "_step", None)
@@ -423,8 +422,7 @@ class FullSpectrumView(ToggleMixin, PlotView):
             self.span_selectors.clear()
             self._plot = self._create_plot()
 
-            # Restore the panel layout from the previous plot so switching
-            # between FSP and RSP keeps the same wavelength ranges.
+            # Restore the panel layout from the previous plot so switching between FSP and RSP keeps the same wavelength ranges.
             if old_edges is not None and old_ends is not None:
                 self._plot._panel_edges = old_edges
                 self._plot._panel_ends = old_ends

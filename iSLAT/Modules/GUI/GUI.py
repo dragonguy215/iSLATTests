@@ -34,6 +34,7 @@ class GUI:
             #self.master.attributes('-topmost', config.get("start_on_top", True))
             # Configure initial window size based on screen dimensions
             self._configure_initial_size()
+            # Set window / taskbar icon
         else:
             self.master = master
 
@@ -48,6 +49,7 @@ class GUI:
         # Set module-level tooltip theme so every tooltip picks up
         # the current theme's colors automatically.
         set_tooltip_theme(self.theme)
+        self._set_window_icon(self.master)
         
         # Apply theme to root window
         # self._apply_theme_to_widget(self.master)
@@ -62,6 +64,82 @@ class GUI:
                     break
 
         self.style.configure("Small.TButton", padding=(0, 5))
+
+    def _set_window_icon(self, window: "tk.Tk") -> None:
+        """Set the window title-bar and taskbar icon from logo png."""
+        try:
+            from iSLAT.Modules.FileHandling import data_files_path
+            icon_path = data_files_path / "CONFIG" / "Logos" / "Logo2a.png"
+            if not icon_path.exists():
+                return
+
+            if platform.system() == "Windows":
+                try:
+                    import ctypes
+                    import tempfile
+                    from PIL import Image
+
+                    # Without a distinct App User Model ID, Windows groups
+                    # every Python script under python.exe and shows that
+                    # exe's icon in the taskbar regardless of iconbitmap.
+                    # Setting a unique AUMID makes Windows treat iSLAT as
+                    # its own application so the window icon appears there.
+                    try:
+                        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                            "iSLAT.Application.1"
+                        )
+                    except Exception:
+                        pass
+
+                    pil_img = Image.open(str(icon_path))
+                    ico_path = os.path.join(
+                        tempfile.gettempdir(), "islat_icon_tmp.ico"
+                    )
+                    pil_img.save(
+                        ico_path,
+                        format="ICO",
+                        sizes=[(16, 16), (32, 32), (48, 48), (64, 64)],
+                    )
+                    window.iconbitmap(ico_path)
+
+                    # Also push the icon directly onto the HWND via WM_SETICON
+                    # so the taskbar button picks up the large variant.
+                    WM_SETICON = 0x0080
+                    ICON_SMALL = 0
+                    ICON_BIG = 1
+                    IMAGE_ICON = 1
+                    LR_LOADFROMFILE = 0x0010
+                    hwnd = window.winfo_id()
+                    hicon_big = ctypes.windll.user32.LoadImageW(
+                        None, ico_path, IMAGE_ICON, 64, 64, LR_LOADFROMFILE
+                    )
+                    hicon_small = ctypes.windll.user32.LoadImageW(
+                        None, ico_path, IMAGE_ICON, 16, 16, LR_LOADFROMFILE
+                    )
+                    if hicon_big:
+                        ctypes.windll.user32.SendMessageW(
+                            hwnd, WM_SETICON, ICON_BIG, hicon_big
+                        )
+                    if hicon_small:
+                        ctypes.windll.user32.SendMessageW(
+                            hwnd, WM_SETICON, ICON_SMALL, hicon_small
+                        )
+                    return
+                except Exception:
+                    pass  # fall through to iconphoto
+
+            # Non-Windows (and Windows fallback): use iconphoto.
+            try:
+                from PIL import Image, ImageTk
+                pil_img = Image.open(str(icon_path)).resize((64, 64))
+                photo = ImageTk.PhotoImage(pil_img)
+            except ImportError:
+                photo = tk.PhotoImage(file=str(icon_path))
+
+            window.iconphoto(True, photo)
+            window._icon_image = photo  # prevent GC
+        except Exception:
+            pass  # Icon is cosmetic; never block startup
     
     def _force_theme_update(self):
         """Force theme update on all widgets in the window."""
@@ -77,7 +155,7 @@ class GUI:
 
         On macOS (Tk ≥ 8.6.9) the ``<<AppearanceChanged>>`` virtual event
         is fired whenever the user switches between Light and Dark mode in
-        System Preferences.  We listen for that event and re-apply the
+        System Preferences. sWe listen for that event and re-apply the
         theme across the entire GUI.
         """
         if platform.system() != "Darwin":
