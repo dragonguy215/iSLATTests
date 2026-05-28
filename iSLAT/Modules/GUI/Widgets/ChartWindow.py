@@ -1,12 +1,14 @@
 import tkinter as tk
 from tkinter import ttk
 from iSLAT.Modules.Hitran_data import download_hitran_data
+from iSLAT.Modules.GUI.Tooltips import CreateToolTip
 
 class MoleculeSelector:
-    def __init__(self, master, data_field, user_settings=None):
+    def __init__(self, master, data_field, user_settings=None, islat=None):
         self.master = master
         self.data_field = data_field  # Reference to the data field in the main GUI
         self.user_settings = user_settings or {}
+        self.islat = islat
         self.mols = []
         self.basem = []
         self.isot = []
@@ -86,6 +88,10 @@ class MoleculeSelector:
         self.molecule_combobox['values'] = list(self.isotopologue_data.keys())
         self.molecule_combobox.grid(row=0, column=1, padx=5, pady=5)
         self.molecule_combobox.bind('<<ComboboxSelected>>', self.update_isotopologues)
+        CreateToolTip(
+            self.molecule_combobox,
+            "Select the base molecule species to query from HITRAN."
+        )
 
         self.isotopologue_label = ttk.Label(self.frame, text="Isotopologues:")
         self.isotopologue_label.grid(row=1, column=0, padx=5, pady=5)
@@ -93,12 +99,38 @@ class MoleculeSelector:
         self.isotopologue_var = tk.StringVar()
         self.isotopologue_combobox = ttk.Combobox(self.frame, textvariable=self.isotopologue_var)
         self.isotopologue_combobox.grid(row=1, column=1, padx=5, pady=5)
+        CreateToolTip(
+            self.isotopologue_combobox,
+            "Select the specific isotopologue of the chosen molecule.\n"
+            "Each entry corresponds to a distinct HITRAN isotopologue number."
+        )
 
         self.add_button = ttk.Button(self.frame, text="Download HITRAN file", command=self.add_molecule)
-        self.add_button.grid(row=2, column=0, columnspan=2, pady=10)
+        self.add_button.grid(row=2, column=0, columnspan=2, pady=(10, 2))
+        CreateToolTip(
+            self.add_button,
+            "Download the HITRAN line-list file for the selected isotopologue\n"
+            "and save it to the local HITRANdata folder.\n"
+            "The molecule is NOT loaded into iSLAT automatically."
+        )
+
+        self.download_add_button = ttk.Button(
+            self.frame,
+            text="Download and Add to iSLAT",
+            command=self.download_and_add_molecule,
+        )
+        self.download_add_button.grid(row=3, column=0, columnspan=2, pady=2)
+        if self.islat is None:
+            self.download_add_button.configure(state="disabled")
+        CreateToolTip(
+            self.download_add_button,
+            "Download the HITRAN line-list file for the selected isotopologue\n"
+            "and immediately load it as an active molecule in iSLAT."
+        )
 
         self.done_button = ttk.Button(self.frame, text="Close Window", command=self.on_done)
-        self.done_button.grid(row=3, column=0, columnspan=2, pady=10)
+        self.done_button.grid(row=4, column=0, columnspan=2, pady=(2, 10))
+        CreateToolTip(self.done_button, "Close this window.")
 
     def update_isotopologues(self, event):
         print("updating isotopologues")
@@ -140,6 +172,63 @@ class MoleculeSelector:
             # Update the main GUI data_field
             self.data_field.delete('1.0', "end")
             self.data_field.insert_text(f"{isotopologue} downloaded from HITRAN.", clear_after=True, console_print=True)
+
+    def download_and_add_molecule(self):
+        """Download the selected isotopologue from HITRAN and immediately add it to iSLAT."""
+        mol = self.molecule_var.get()
+        isotopologue = self.isotopologue_var.get()
+        if not mol or not isotopologue:
+            self.data_field.insert_text(
+                "Please select a molecule and isotopologue first.",
+                clear_after=False, console_print=True,
+            )
+            return
+
+        isotopologue_list = self.isotopologue_data.get(mol, [])
+        isotope = next((num for iso, num in isotopologue_list if iso == isotopologue), None)
+        if isotope is None:
+            return
+
+        # Download the HITRAN file (same as add_molecule, but single-shot lists)
+        missed_mols = download_hitran_data(
+            [isotopologue], [mol], [isotope],
+            min_wave=self.user_settings.get("hitran_min_wave", 0.3),
+            max_wave=self.user_settings.get("hitran_max_wave", 1000.0),
+        )
+        if missed_mols:
+            for (bm, m, iso) in missed_mols:
+                self.data_field.insert_text(
+                    f"Could not download: {bm}, {m}, isotope {iso}",
+                    clear_after=False, console_print=True,
+                )
+            return
+
+        # Locate the file that was just written
+        from iSLAT.Modules.FileHandling import hitran_data_folder_path
+        import os
+        file_path = os.path.join(str(hitran_data_folder_path), f"data_Hitran_{isotopologue}.par")
+
+        self.data_field.insert_text(
+            f"{isotopologue} downloaded from HITRAN — adding to iSLAT…",
+            clear_after=True, console_print=True,
+        )
+
+        # Add the molecule to the running iSLAT instance
+        try:
+            self.islat.add_molecule_from_hitran(
+                hitran_files=[file_path],
+                molecule_names=[isotopologue],
+                name_popups=False,
+            )
+            self.data_field.insert_text(
+                f"{isotopologue} added to iSLAT.",
+                clear_after=True, console_print=True,
+            )
+        except Exception as e:
+            self.data_field.insert_text(
+                f"Download succeeded but could not add {isotopologue}: {e}",
+                clear_after=False, console_print=True,
+            )
 
     def on_done(self):
         self.window.destroy()
