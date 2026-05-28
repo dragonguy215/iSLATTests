@@ -335,7 +335,7 @@ class FullSpectrumView(ToggleMixin, PlotView):
         """
         try:
             _, model_flux = self._islat.molecules_dict.get_summed_flux_resampled(
-                wave_rest, visible_only=False,
+                wave_rest, visible_only=True,
             )
         except Exception as exc:
             debug_config.warning(
@@ -899,11 +899,14 @@ class FullSpectrumView(ToggleMixin, PlotView):
                     for ax in primary_axes:
                         self._render_molecule_spectrum(molecule, rv_wave, ax)
 
-        # 2. Recompute summed spectrum on primary axes.
-        #    For RSP the "summed" fill represents the fixed model flux
-        #    (computed from all molecules), so we must not replace it
-        #    with the visible-only molecule sum.
-        if not is_rsp:
+        # 2. Recompute summed spectrum / model and update residuals + chi².
+        if is_rsp:
+            # RSP's update_panels_inplace recomputes the visible-only model
+            # flux, redraws the summed fill on spectrum panels, redraws all
+            # residual panels, and refreshes the per-panel and global chi²
+            # annotations — all in one call.
+            self._plot.update_panels_inplace()
+        else:
             try:
                 summed_wavelengths, summed_flux = molecules_dict.get_summed_flux(
                     wave_obs, visible_only=True,

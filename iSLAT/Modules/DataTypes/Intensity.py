@@ -427,8 +427,7 @@ class Intensity(WavelengthRangeMixin):
         # ---------------------------------------------------------------
         # STEP 3a: Batch-vectorized processing for common group sizes
         # ---------------------------------------------------------------
-        # Groups of the same size can be processed in a single vectorized
-        # operation, avoiding per-group Python overhead.
+        # Groups of the same size can be processed in a single vectorized operation, avoiding per-group Python overhead.
         
         _BATCH_MAX_SIZE = 32  # Batch groups up to this size; larger ones use per-group loop
         

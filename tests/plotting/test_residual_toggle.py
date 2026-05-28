@@ -223,12 +223,12 @@ class TestComputeModelFlux:
         assert result.shape == wave.shape
         assert np.allclose(result, 0.05, atol=1e-10)
 
-    def test_uses_visible_false_for_all_molecules(self):
-        """Should call get_summed_flux_resampled with wave_rest and visible_only=False."""
+    def test_uses_visible_true_for_visible_molecules_only(self):
+        """Should call get_summed_flux_resampled with wave_rest and visible_only=True."""
         view, pm, islat, wave, flux, err = _make_view()
         view._compute_model_flux(wave, wave)
         islat.molecules_dict.get_summed_flux_resampled.assert_called_once_with(
-            wave, visible_only=False,
+            wave, visible_only=True,
         )
 
 

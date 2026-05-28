@@ -725,7 +725,7 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
         if self.molecules is not None:
             try:
                 _, new_model = self.molecules.get_summed_flux_resampled(
-                    self.wave_data, visible_only=False,
+                    self.wave_data, visible_only=True,
                 )
                 if len(new_model) == len(self.wave_data):
                     self.model_flux = new_model
