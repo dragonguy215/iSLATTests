@@ -509,6 +509,8 @@ class PopulationDiagramContextMixin:
         cur_y     = getattr(pdp, '_y_prop', 'rd_yax') if pdp else 'rd_yax'
         cur_x_log = getattr(pdp, '_x_log', False)     if pdp else False
         cur_y_log = getattr(pdp, '_y_log', False)     if pdp else False
+        cur_x_lim = getattr(pdp, '_x_lim', None)      if pdp else None
+        cur_y_lim = getattr(pdp, '_y_lim', None)      if pdp else None
 
         init_x_idx = AXIS_VALUES.index(cur_x) if cur_x in AXIS_VALUES else 1
         init_y_idx = AXIS_VALUES.index(cur_y) if cur_y in AXIS_VALUES else 0
@@ -519,32 +521,122 @@ class PopulationDiagramContextMixin:
         win.grab_set()
 
         pad = {"padx": 8, "pady": 4}
+        pad_tight = {"padx": 8, "pady": 1}
 
+        # ---- X axis --------------------------------------------------
         tk.Label(win, text="X axis:").grid(row=0, column=0, sticky="w", **pad)
         x_var = tk.StringVar(value=AXIS_LABELS[init_x_idx])
         ttk.Combobox(win, textvariable=x_var, values=AXIS_LABELS,
-                     state="readonly", width=38).grid(row=0, column=1, sticky="ew", **pad)
+                     state="readonly", width=38).grid(row=0, column=1, columnspan=3, sticky="ew", **pad)
 
         x_log_var = tk.BooleanVar(value=cur_x_log)
         tk.Checkbutton(win, text="Log scale (X)",
-                       variable=x_log_var).grid(row=1, column=0, columnspan=2,
+                       variable=x_log_var).grid(row=1, column=0, columnspan=4,
                                                 sticky="w", **pad)
 
-        ttk.Separator(win, orient="horizontal").grid(
-            row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=2)
+        # X limit mode
+        _x_init_mode = cur_x_lim[0] if cur_x_lim else 'auto'
+        _x_init_lo   = str(cur_x_lim[1]) if cur_x_lim and cur_x_lim[1] is not None else ''
+        _x_init_hi   = str(cur_x_lim[2]) if cur_x_lim and cur_x_lim[2] is not None else ''
 
-        tk.Label(win, text="Y axis:").grid(row=3, column=0, sticky="w", **pad)
+        x_mode_var = tk.StringVar(value=_x_init_mode)
+        tk.Label(win, text="X limits:").grid(row=2, column=0, sticky="w", **pad_tight)
+        x_mode_frame = tk.Frame(win)
+        x_mode_frame.grid(row=2, column=1, columnspan=3, sticky="w", **pad_tight)
+        for _mode, _label in [('auto', 'Auto'), ('exact', 'Exact values'), ('percentile', 'Percentile')]:
+            tk.Radiobutton(x_mode_frame, text=_label, variable=x_mode_var,
+                           value=_mode).pack(side='left', padx=4)
+
+        x_lo_var = tk.StringVar(value=_x_init_lo)
+        x_hi_var = tk.StringVar(value=_x_init_hi)
+        x_lim_frame = tk.Frame(win)
+        x_lim_frame.grid(row=3, column=0, columnspan=4, sticky="ew", padx=16, pady=1)
+        tk.Label(x_lim_frame, text="Min:").pack(side='left')
+        tk.Entry(x_lim_frame, textvariable=x_lo_var, width=10).pack(side='left', padx=4)
+        tk.Label(x_lim_frame, text="Max:").pack(side='left', padx=(8, 0))
+        tk.Entry(x_lim_frame, textvariable=x_hi_var, width=10).pack(side='left', padx=4)
+        tk.Label(x_lim_frame, text="(leave blank = auto for that bound)",
+                 fg='grey').pack(side='left', padx=8)
+
+        def _toggle_x_lim_frame(*_):
+            if x_mode_var.get() == 'auto':
+                for w in x_lim_frame.winfo_children():
+                    w.configure(state='disabled') if hasattr(w, 'configure') else None
+            else:
+                for w in x_lim_frame.winfo_children():
+                    try:
+                        w.configure(state='normal')
+                    except Exception:
+                        pass
+        x_mode_var.trace_add('write', _toggle_x_lim_frame)
+        _toggle_x_lim_frame()
+
+        ttk.Separator(win, orient="horizontal").grid(
+            row=4, column=0, columnspan=4, sticky="ew", padx=8, pady=4)
+
+        # ---- Y axis --------------------------------------------------
+        tk.Label(win, text="Y axis:").grid(row=5, column=0, sticky="w", **pad)
         y_var = tk.StringVar(value=AXIS_LABELS[init_y_idx])
         ttk.Combobox(win, textvariable=y_var, values=AXIS_LABELS,
-                     state="readonly", width=38).grid(row=3, column=1, sticky="ew", **pad)
+                     state="readonly", width=38).grid(row=5, column=1, columnspan=3, sticky="ew", **pad)
 
         y_log_var = tk.BooleanVar(value=cur_y_log)
         tk.Checkbutton(win, text="Log scale (Y)",
-                       variable=y_log_var).grid(row=4, column=0, columnspan=2,
+                       variable=y_log_var).grid(row=6, column=0, columnspan=4,
                                                 sticky="w", **pad)
 
+        # Y limit mode
+        _y_init_mode = cur_y_lim[0] if cur_y_lim else 'auto'
+        _y_init_lo   = str(cur_y_lim[1]) if cur_y_lim and cur_y_lim[1] is not None else ''
+        _y_init_hi   = str(cur_y_lim[2]) if cur_y_lim and cur_y_lim[2] is not None else ''
+
+        y_mode_var = tk.StringVar(value=_y_init_mode)
+        tk.Label(win, text="Y limits:").grid(row=7, column=0, sticky="w", **pad_tight)
+        y_mode_frame = tk.Frame(win)
+        y_mode_frame.grid(row=7, column=1, columnspan=3, sticky="w", **pad_tight)
+        for _mode, _label in [('auto', 'Auto'), ('exact', 'Exact values'), ('percentile', 'Percentile')]:
+            tk.Radiobutton(y_mode_frame, text=_label, variable=y_mode_var,
+                           value=_mode).pack(side='left', padx=4)
+
+        y_lo_var = tk.StringVar(value=_y_init_lo)
+        y_hi_var = tk.StringVar(value=_y_init_hi)
+        y_lim_frame = tk.Frame(win)
+        y_lim_frame.grid(row=8, column=0, columnspan=4, sticky="ew", padx=16, pady=1)
+        tk.Label(y_lim_frame, text="Min:").pack(side='left')
+        tk.Entry(y_lim_frame, textvariable=y_lo_var, width=10).pack(side='left', padx=4)
+        tk.Label(y_lim_frame, text="Max:").pack(side='left', padx=(8, 0))
+        tk.Entry(y_lim_frame, textvariable=y_hi_var, width=10).pack(side='left', padx=4)
+        tk.Label(y_lim_frame, text="(leave blank = auto for that bound)",
+                 fg='grey').pack(side='left', padx=8)
+
+        def _toggle_y_lim_frame(*_):
+            if y_mode_var.get() == 'auto':
+                for w in y_lim_frame.winfo_children():
+                    try:
+                        w.configure(state='disabled')
+                    except Exception:
+                        pass
+            else:
+                for w in y_lim_frame.winfo_children():
+                    try:
+                        w.configure(state='normal')
+                    except Exception:
+                        pass
+        y_mode_var.trace_add('write', _toggle_y_lim_frame)
+        _toggle_y_lim_frame()
+
         btn_frame = tk.Frame(win)
-        btn_frame.grid(row=5, column=0, columnspan=2, pady=6)
+        btn_frame.grid(row=9, column=0, columnspan=4, pady=8)
+
+        def _parse_lim(mode_var, lo_var, hi_var):
+            """Return None (auto) or a (mode, lo, hi) tuple."""
+            mode = mode_var.get()
+            if mode == 'auto':
+                return None
+            def _val(s):
+                s = s.strip()
+                return float(s) if s else None
+            return (mode, _val(lo_var.get()), _val(hi_var.get()))
 
         def _apply():
             x_label = x_var.get()
@@ -557,6 +649,8 @@ class PopulationDiagramContextMixin:
                 pdp.set_axes(
                     x_prop=x_prop, y_prop=y_prop,
                     x_log=x_log_var.get(), y_log=y_log_var.get(),
+                    x_lim=_parse_lim(x_mode_var, x_lo_var, x_hi_var),
+                    y_lim=_parse_lim(y_mode_var, y_lo_var, y_hi_var),
                     regenerate=True,
                 )
                 draw_idle()
@@ -571,9 +665,9 @@ class PopulationDiagramContextMixin:
         def _cancel():
             win.destroy()
 
-        ttk.Button(btn_frame, text="Apply",         command=_apply).pack(side="left", padx=4)
-        ttk.Button(btn_frame, text="Reset Defaults", command=_reset).pack(side="left", padx=4)
-        ttk.Button(btn_frame, text="Cancel",        command=_cancel).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Apply",          command=_apply).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Reset Defaults",  command=_reset).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Cancel",          command=_cancel).pack(side="left", padx=4)
 
         win.bind("<Return>", lambda _e: _apply())
         win.bind("<Escape>", lambda _e: _cancel())

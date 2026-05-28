@@ -506,6 +506,31 @@ class PopulationDiagramPlot(BasePlot):
         ax.set_ylabel(self._get_axis_label(self._y_prop), color=fg, labelpad=-1)
         ax.set_xlabel(self._get_axis_label(self._x_prop), color=fg)
 
+        # ---- User-specified axis limit overrides ---------------------
+        def _apply_lim_override(ax_obj, axis: str, lim_spec, data_arr: np.ndarray) -> None:
+            """Apply a (mode, lo, hi) limit spec onto *ax_obj* for *axis* ('x'|'y')."""
+            if lim_spec is None:
+                return
+            mode, lo_raw, hi_raw = lim_spec[0], lim_spec[1], lim_spec[2]
+            finite = data_arr[np.isfinite(data_arr)]
+            set_lim = ax_obj.set_xlim if axis == 'x' else ax_obj.set_ylim
+            cur_lo, cur_hi = (ax_obj.get_xlim() if axis == 'x' else ax_obj.get_ylim())
+            if mode == 'exact':
+                new_lo = float(lo_raw) if lo_raw is not None else cur_lo
+                new_hi = float(hi_raw) if hi_raw is not None else cur_hi
+                set_lim(new_lo, new_hi)
+            elif mode == 'percentile':
+                if len(finite) == 0:
+                    return
+                new_lo = float(np.nanpercentile(finite, float(lo_raw))) if lo_raw is not None else cur_lo
+                new_hi = float(np.nanpercentile(finite, float(hi_raw))) if hi_raw is not None else cur_hi
+                set_lim(new_lo, new_hi)
+
+        _cat_x = np.concatenate(all_valid_x) if all_valid_x else np.array([])
+        _cat_y = np.concatenate(all_valid_y) if all_valid_y else np.array([])
+        _apply_lim_override(ax, 'x', getattr(self, '_x_lim', None), _cat_x)
+        _apply_lim_override(ax, 'y', getattr(self, '_y_lim', None), _cat_y)
+
         # Title: single component → use its name; multi → generic
         if len(self._component_data) == 1:
             title = f"{self._component_data[0]['name']} Population diagram"
@@ -1109,6 +1134,8 @@ class PopulationDiagramPlot(BasePlot):
         y_prop: str = "rd_yax",
         x_log: bool = False,
         y_log: bool = False,
+        x_lim: tuple = None,
+        y_lim: tuple = None,
         *,
         regenerate: bool = True,
     ) -> None:
@@ -1117,24 +1144,26 @@ class PopulationDiagramPlot(BasePlot):
         Parameters
         ----------
         x_prop : str
-            Property key to use for the X axis.  Supported values include
-            all standard keys (``'eu'``, ``'wavelength'``, ``'a_stein'``,
-            ``'intens'``, ``'tau'``, ``'g_up'``, ``'g_low'``,
-            ``'e_low'``, ``'rd_yax'``, ``'fwhm_instrumental_kms'``,
-            ``'fwhm_convolved_kms'``) as well as quantum-number field
-            names in the same formats accepted by :meth:`color_by`:
-
-            * A bare field name, e.g. ``"J"``, ``"v"``, ``"Ka"``
-              (defaults to the upper state).
-            * ``"qn_upper:FIELD"`` — explicitly select the upper state.
-            * ``"qn_lower:FIELD"`` — explicitly select the lower state.
-
+            Property key to use for the X axis.
         y_prop : str
-            Property key to use for the Y axis.  Same options as *x_prop*.
+            Property key to use for the Y axis.
         x_log : bool
             Whether to use a logarithmic scale for the X axis.
         y_log : bool
             Whether to use a logarithmic scale for the Y axis.
+        x_lim : tuple or None
+            Axis limit override for the X axis.  Three forms are accepted:
+
+            * ``None`` — use matplotlib auto-limits (default).
+            * ``('exact', min_val, max_val)`` — pin the axis to the given
+              numeric values (either may be ``None`` to leave that bound
+              automatic).
+            * ``('percentile', p_min, p_max)`` — set the limits from the
+              *p_min*-th and *p_max*-th percentile of the plotted X data
+              (0-100, either may be ``None`` to leave that bound automatic).
+
+        y_lim : tuple or None
+            Same as *x_lim* but for the Y axis.
         regenerate : bool
             If ``True`` (default) the plot is regenerated immediately.
         """
@@ -1142,6 +1171,8 @@ class PopulationDiagramPlot(BasePlot):
         self._y_prop = y_prop
         self._x_log = x_log
         self._y_log = y_log
+        self._x_lim = x_lim   # None | ('exact', lo, hi) | ('percentile', plo, phi)
+        self._y_lim = y_lim
         if regenerate:
             self.generate_plot()
 
