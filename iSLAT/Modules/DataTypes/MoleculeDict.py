@@ -128,6 +128,23 @@ class MoleculeDict(ObservableMixin, dict):
         self._visible_molecules = set()  # Clear visibility cache
         print("MoleculeDict cleared.")
 
+    def reorder(self, new_order: list) -> None:
+        """Reorder molecules in-place according to *new_order* (list of names).
+
+        The list must contain exactly the same names currently in the dict.
+        Raises ``ValueError`` if the sets don't match.
+        """
+        if set(new_order) != set(self.keys()):
+            raise ValueError(
+                "new_order must contain exactly the same molecule names as the current dict."
+            )
+        # Snapshot the current objects, then rebuild insertion order
+        snapshot = {k: self[k] for k in new_order}
+        # Use super().clear() to avoid triggering cache-clearing side-effects
+        super().clear()
+        for k in new_order:
+            super().__setitem__(k, snapshot[k])
+
     # ------------------------------------------------------------------
     # Typed dict accessors — tell static analysis that values are Molecule
     # ------------------------------------------------------------------

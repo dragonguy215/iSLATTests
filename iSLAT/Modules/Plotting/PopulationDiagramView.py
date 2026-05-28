@@ -1,11 +1,8 @@
 """
-PopulationDiagramView — :class:`PlotView` for a standalone full-size
-population (Boltzmann) diagram.
+PopulationDiagramView — :class:`PlotView` for a standalone full-size population (Boltzmann) diagram.
 
-Shows the :class:`PopulationDiagramPlot` for the currently active
-molecule in a dedicated figure that fills the main plotting area.
-All spectrum-specific toggles (summed spectrum, saved lines, atomic
-lines) are no-ops for this view.
+Shows the :class:`PopulationDiagramPlot` for the currently active molecule in a dedicated figure that fills the main plotting area.
+All spectrum-specific toggles (summed spectrum, saved lines, atomic lines) are no-ops for this view.
 """
 
 from __future__ import annotations

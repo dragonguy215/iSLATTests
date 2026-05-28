@@ -21,7 +21,8 @@ _COLOR_VIS_SCROLL_WIDTH = 190 if _IS_WINDOWS else 160
 _MOL_PARAM_SCROLL_WIDTH = 200 if _IS_WINDOWS else 170
 _MATCH_BTN_PADX = 3 if _IS_WINDOWS else 1
 # Column minimum pixel sizes for molecule visibility/color grid alignment
-_VIS_COL_MINSIZES = (30, 62, 30, 32) if _IS_WINDOWS else (20, 42, 20, 22)
+# Col 0 = drag handle, Col 1 = checkbox, Col 2 = name, Col 3 = delete, Col 4 = color
+_VIS_COL_MINSIZES = (14, 30, 62, 30, 32) if _IS_WINDOWS else (12, 20, 42, 20, 22)
 
 # ---------------------------------------------------------------------------
 # ControlPanelSurface — ControlSurface implementation for the view-fields area
@@ -122,8 +123,9 @@ class ControlPanel(ttk.Frame):
 
         self.mol_visibility = {}
         self.column_labels = {
+            "": None,               # drag handle — no header text
             "On": "Turn on/off this\nmodel in the plot ",
-            "Molecule": "Select active molecule", 
+            "Molecule": "Select active molecule",
             "Del.": "Remove this model\nfrom the GUI",
             "Color": "Change color\nfor this model"
             }
@@ -410,6 +412,14 @@ class ControlPanel(ttk.Frame):
                 label_widget.bind("<Button-1>", lambda e: self._toggle_all_molecule_visibility())
             label_widget.grid(row=0, column=col, sticky="ew", padx=3 if _IS_WINDOWS else 2)
 
+        # Drag-and-drop state — reset on every rebuild
+        self._drag_state = {
+            'source': None,
+            'target_idx': None,
+            'indicator': None,
+            'original_bg': None,
+        }
+
         # Molecule rows — each packed with fill="x" for consistent width,
         # using identical column config so columns align across rows.
         for row, (mol_name, mol_obj) in enumerate(self.mol_dict.items()):
@@ -421,19 +431,35 @@ class ControlPanel(ttk.Frame):
             mol_frame.pack(fill="x", pady=_row_pady)
             self._apply_vis_col_config(mol_frame)
 
+            # --- Col 0: drag handle ---
+            drag_handle = tk.Label(
+                mol_frame,
+                text="⠿",
+                cursor="fleur",
+                fg="#888888",
+            )
+            drag_handle.grid(row=0, column=0, sticky="nsew", padx=1)
+            CreateToolTip(drag_handle, "Drag to reorder")
+            drag_handle.bind("<ButtonPress-1>",   lambda e, n=mol_name: self._on_drag_start(n, e))
+            drag_handle.bind("<B1-Motion>",        lambda e: self._on_drag_motion(e))
+            drag_handle.bind("<ButtonRelease-1>",  lambda e: self._on_drag_release(e))
+
+            # --- Col 1: visibility checkbox ---
             visibility_var = tk.BooleanVar()
             visibility_checkbox = ttk.Checkbutton(
                 mol_frame,
                 variable=visibility_var,
                 command=lambda name=mol_name: self._on_visibility_changed(name)
             )
-            visibility_checkbox.grid(row=0, column=0, sticky="nsew", pady=_row_pady)
+            visibility_checkbox.grid(row=0, column=1, sticky="nsew", pady=_row_pady)
             if mol_name not in self.mol_visibility:
                 self.mol_visibility[mol_name] = visibility_var
 
             from ..GUIFunctions import _MOLNAME_STYLE, _DELETE_STYLE, configure_all_button_styles
             if hasattr(self, 'theme') and self.theme:
                 configure_all_button_styles(self.theme)
+
+            # --- Col 2: molecule name button ---
             mol_btn = ttk.Button(
                 mol_frame,
                 text=mol_name,
@@ -441,7 +467,7 @@ class ControlPanel(ttk.Frame):
                 style=_MOLNAME_STYLE,
                 command=lambda name=mol_name: self._on_molecule_selected(mol_name=name),
             )
-            mol_btn.grid(row=0, column=1, sticky="ew", pady=_row_pady)
+            mol_btn.grid(row=0, column=2, sticky="ew", pady=_row_pady)
             # Shift-click toggles the molecule as a comparison molecule
             mol_btn.bind(
                 "<Shift-Button-1>",
@@ -461,6 +487,7 @@ class ControlPanel(ttk.Frame):
             if len(mol_name) > self.max_name_len:
                 CreateToolTip(mol_btn, mol_name, bg=self.bg_color)
 
+            # --- Col 3: delete button ---
             delete_btn = ttk.Button(
                 mol_frame,
                 text="X",
@@ -468,24 +495,150 @@ class ControlPanel(ttk.Frame):
                 style=_DELETE_STYLE,
                 command=lambda name=mol_name, frame=mol_frame: self._delete_molecule(mol_name=name, frame=frame),
             )
-            delete_btn.grid(row=0, column=2, pady=_row_pady, sticky="ns")
+            delete_btn.grid(row=0, column=3, pady=_row_pady, sticky="ns")
 
+            # --- Col 4: color button ---
             color_button = ColorButton(
                 mol_frame,
                 color=getattr(current_mol, 'color', None) or "blue",
             )
             color_button.add_command(command=lambda btn=color_button, name=mol_name: self._on_color_button_clicked(name, btn))
-            color_button.grid(row=0, column=3, sticky="nsew")
+            color_button.grid(row=0, column=4, sticky="nsew")
 
             is_visible = getattr(self.islat.molecules_dict[mol_name], 'is_visible', False)
             visibility_var.set(is_visible)
 
         self._update_active_molecule_changes()
 
+    # ------------------------------------------------------------------
+    # Drag-and-drop reordering
+    # ------------------------------------------------------------------
+
+    def _on_drag_start(self, mol_name: str, event) -> None:
+        """Record which molecule row the user started dragging."""
+        self._drag_state['source'] = mol_name
+        self._drag_state['target_idx'] = None
+        # Visually highlight the dragged row
+        frame = self.mol_frames.get(mol_name)
+        if frame:
+            original = frame.cget('bg')
+            self._drag_state['original_bg'] = original
+            frame.configure(bg='#c8e6ff')
+            for child in frame.winfo_children():
+                try:
+                    child.configure(bg='#c8e6ff')
+                except Exception:
+                    pass
+        # Create the drop-indicator line (created fresh each drag)
+        self._drag_state['indicator'] = tk.Frame(
+            self.color_vis_frame, height=2, bg='#0078d4'
+        )
+
+    def _on_drag_motion(self, event) -> None:
+        """Update the drop-indicator line as the cursor moves."""
+        if not self._drag_state['source']:
+            return
+        indicator = self._drag_state['indicator']
+        parent = self.color_vis_frame
+        mol_names = list(self.mol_dict.keys())
+
+        # Convert cursor y to parent-relative coordinates
+        y = event.y_root - parent.winfo_rooty()
+
+        # Determine insertion index: after which molecule index to insert
+        insert_after = -1  # -1 => before the first row
+        for i, name in enumerate(mol_names):
+            frame = self.mol_frames.get(name)
+            if frame is None:
+                continue
+            mid = frame.winfo_y() + frame.winfo_height() // 2
+            if y > mid:
+                insert_after = i
+
+        self._drag_state['target_idx'] = insert_after
+
+        # Re-pack the indicator at the correct position
+        if indicator:
+            indicator.pack_forget()
+            if insert_after < 0:
+                # Before the very first molecule row
+                first = mol_names[0] if mol_names else None
+                if first and first in self.mol_frames:
+                    indicator.pack(fill='x', before=self.mol_frames[first])
+                else:
+                    indicator.pack(fill='x')
+            elif insert_after < len(mol_names) - 1:
+                next_name = mol_names[insert_after + 1]
+                if next_name in self.mol_frames:
+                    indicator.pack(fill='x', before=self.mol_frames[next_name])
+                else:
+                    indicator.pack(fill='x')
+            else:
+                # After the last molecule row
+                indicator.pack(fill='x')
+
+    def _on_drag_release(self, event) -> None:
+        """Finalise the drop: reorder mol_dict and rebuild the panel."""
+        source = self._drag_state['source']
+        if not source:
+            return
+
+        # Remove the indicator widget
+        indicator = self._drag_state['indicator']
+        if indicator:
+            try:
+                indicator.pack_forget()
+                indicator.destroy()
+            except Exception:
+                pass
+
+        # Restore dragged-row background
+        frame = self.mol_frames.get(source)
+        original_bg = self._drag_state['original_bg'] or self.bg_color
+        if frame:
+            try:
+                frame.configure(bg=original_bg)
+                for child in frame.winfo_children():
+                    try:
+                        child.configure(bg=original_bg)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        target_idx = self._drag_state['target_idx']
+        # Reset state before any early return
+        self._drag_state = {'source': None, 'target_idx': None, 'indicator': None, 'original_bg': None}
+
+        if target_idx is None:
+            return
+
+        mol_names = list(self.mol_dict.keys())
+        if source not in mol_names:
+            return
+
+        src_idx = mol_names.index(source)
+        insert_after = target_idx
+
+        # No-op when dropped on its own position or the slot immediately above
+        if insert_after == src_idx or insert_after == src_idx - 1:
+            return
+
+        # Build the new order
+        mol_names.pop(src_idx)
+        # Adjust insert_after for the removed element
+        if insert_after > src_idx:
+            insert_after -= 1
+        mol_names.insert(insert_after + 1, source)
+
+        self.mol_dict.reorder(mol_names)
+        self._rebuild_color_and_vis_controls()
+
     def _apply_vis_col_config(self, frame):
         """Apply consistent column sizing for aligned visibility/color control columns."""
         for col, minsize in enumerate(_VIS_COL_MINSIZES):
-            frame.grid_columnconfigure(col, weight=(1 if col == 1 else 0), minsize=minsize)
+            # col 2 is the molecule-name column — let it stretch
+            frame.grid_columnconfigure(col, weight=(1 if col == 2 else 0), minsize=minsize)
 
     def _create_global_parameter_entry(self, parent, label_text, property_name, row, col, width=12, tip_text = None):
         """Create an entry bound to a global parameter in molecules_dict"""
