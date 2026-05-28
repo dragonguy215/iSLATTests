@@ -1098,11 +1098,9 @@ class Intensity(WavelengthRangeMixin):
         pd : module
             The pandas module (already imported by caller).
         full_range : bool
-            If ``True``, use all lines from the HITRAN file and
-            compute intensity and tau for every line, not just those
-            in the active wavelength window.  This reproduces the
-            behaviour from before wavelength-range filtering was
-            introduced.  If ``False``, use only the active lines.
+            If ``True``, use all lines from the HITRAN file and compute intensity and tau for every line, not just those in the active wavelength window.
+            This reproduces the behaviour from before wavelength-range filtering was introduced.
+            If ``False``, use only the active lines.
 
         Returns
         -------
@@ -1150,7 +1148,7 @@ class Intensity(WavelengthRangeMixin):
         Creates a temporary unfiltered MoleculeLineList and Intensity
         object, then runs the standard calculation pipeline with the
         same physical parameters (t_kin, n_mol, dv) stored on this
-        instance.  This avoids duplicating any calculation logic.
+        instance. This avoids duplicating any calculation logic.
 
         Parameters
         ----------
@@ -1680,7 +1678,7 @@ class Intensity(WavelengthRangeMixin):
         return self.build_table()._repr_html_() if pd is not None else None
 
     # ------------------------------------------------------------------
-    # Axis label registry  (shared with the plotting layer)
+    # Axis label registry (shared with the plotting layer)
     # ------------------------------------------------------------------
     # Population-diagram data
     # ------------------------------------------------------------------

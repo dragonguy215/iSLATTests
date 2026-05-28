@@ -205,6 +205,55 @@ def create_scrollable_frame(parent, height = 150, width = 300, vertical = False,
                         lambda event: canvasscroll.configure(scrollregion=canvasscroll.bbox("all"))
                         )
 
+        # Bind mouse-wheel scrolling so the widget scrolls the same way
+        # as dragging the scrollbar.  The scroll direction for each axis
+        # follows the platform convention (Windows delta, Linux Button-4/5).
+        def _on_vertical(event):
+            if _plat.system() == "Windows":
+                canvasscroll.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            elif event.num == 4:
+                canvasscroll.yview_scroll(-1, "units")
+            elif event.num == 5:
+                canvasscroll.yview_scroll(1, "units")
+
+        def _on_horizontal(event):
+            if _plat.system() == "Windows":
+                canvasscroll.xview_scroll(int(-1 * (event.delta / 120)), "units")
+            elif event.num == 4:
+                canvasscroll.xview_scroll(-1, "units")
+            elif event.num == 5:
+                canvasscroll.xview_scroll(1, "units")
+
+        def _bind_scroll(widget):
+            if vertical:
+                widget.bind("<MouseWheel>", _on_vertical, add="+")
+                widget.bind("<Button-4>", _on_vertical, add="+")
+                widget.bind("<Button-5>", _on_vertical, add="+")
+            if horizontal:
+                widget.bind("<Shift-MouseWheel>", _on_horizontal, add="+")
+                widget.bind("<Shift-Button-4>", _on_horizontal, add="+")
+                widget.bind("<Shift-Button-5>", _on_horizontal, add="+")
+                # Plain wheel scrolls horizontally when the frame is
+                # horizontal-only (no vertical bar).
+                if not vertical:
+                    widget.bind("<MouseWheel>", _on_horizontal, add="+")
+                    widget.bind("<Button-4>", _on_horizontal, add="+")
+                    widget.bind("<Button-5>", _on_horizontal, add="+")
+
+        def _rebind_children(root):
+            for child in root.winfo_children():
+                _bind_scroll(child)
+                _rebind_children(child)
+
+        _bind_scroll(canvasscroll)
+        _bind_scroll(data_frame)
+
+        # Re-apply bindings to all children whenever the frame is resized
+        # (which happens each time widgets are added or removed).
+        data_frame.bind("<Configure>",
+                        lambda event: _rebind_children(data_frame),
+                        add="+")
+
         return data_frame
 
 def create_wrapper_frame(parent, row, col, bg = "darkgrey", sticky = "nsew", columnspan = 1) -> tk.Frame:
