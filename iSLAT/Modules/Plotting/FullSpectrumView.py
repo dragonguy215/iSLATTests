@@ -547,6 +547,95 @@ class FullSpectrumView(ToggleMixin, PlotView):
             self._canvas = None
         if fig is not None:
             self._canvas = FigureCanvasTkAgg(fig, master=self._parent_frame)
+            self._canvas.mpl_connect(
+                "button_press_event", self._on_canvas_button_press
+            )
+
+    def _on_canvas_button_press(self, event: Any) -> None:
+        """Route right-click events to :meth:`build_context_menu`."""
+        if event.button != 3:
+            return
+        if self._canvas is None:
+            return
+        try:
+            canvas_widget = self._canvas.get_tk_widget()
+        except Exception:
+            return
+        menu = self.build_context_menu(event, canvas_widget)
+        if menu is None:
+            return
+        try:
+            x_root = canvas_widget.winfo_rootx() + int(event.x)
+            y_root = canvas_widget.winfo_rooty() + int(
+                canvas_widget.winfo_height() - event.y
+            )
+            menu.tk_popup(x_root, y_root)
+        except Exception:
+            pass
+        finally:
+            menu.grab_release()
+
+    def build_context_menu(self, event: Any, canvas_widget: Any) -> Any:
+        """Return a ``tk.Menu`` for the right-clicked panel, or ``None``."""
+        try:
+            import tkinter as tk
+        except ImportError:
+            return None
+
+        pm = self._pm
+        plot = self._plot
+
+        # Identify which panel was clicked
+        panel_idx = None
+        if plot is not None:
+            for idx, ax in self.subplots.items():
+                if event.inaxes is ax:
+                    panel_idx = idx
+                    break
+
+        menu = tk.Menu(canvas_widget, tearoff=0)
+
+        if panel_idx is not None:
+            try:
+                xmin = float(plot._panel_edges[panel_idx])
+                xmax = float(plot._panel_ends[panel_idx])
+            except Exception:
+                panel_idx = None
+
+        if panel_idx is not None:
+            def _open_in_three_panel():
+                pm.islat.display_range = (xmin, xmax)
+                # Mirror toggle_three_panel so the back-button works.
+                pm._pre_threepanel_view_name = "Full Spectrum"
+                pm.switch_view("Three Panel")
+                try:
+                    pm.ax1.set_xlim(xmin, xmax)
+                    pm.match_display_range(match_y=True)
+                except Exception as exc:
+                    debug_config.warning(
+                        "full_spectrum_view",
+                        f"build_context_menu: range update failed: {exc}",
+                    )
+                '''# Fire the span-selector so line inspection populates.
+                try:
+                    ih = getattr(pm, "interaction_handler", None)
+                    if ih is not None and ih.span_selector is not None:
+                        ih.span_selector.extents = (xmin, xmax)
+                        ih.span_selector.set_visible(True)
+                    pm.onselect(xmin, xmax)
+                except Exception as exc:
+                    debug_config.warning(
+                        "full_spectrum_view",
+                        f"build_context_menu: onselect failed: {exc}",
+                    )'''
+
+            menu.add_command(
+                label="Open in Three Panel view",
+                command=_open_in_three_panel,
+            )
+
+        self._append_save_figure_item(menu)
+        return menu
 
     # ==================================================================
     # PlotView lifecycle

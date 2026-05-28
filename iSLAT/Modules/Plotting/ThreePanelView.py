@@ -8,7 +8,7 @@ Panels:
 
 This view **composes** a :class:`MainPlotGrid` in *borrowed-axes* mode
 for all spectrum-panel rendering, mirroring how :class:`FullSpectrumView`
-composes a :class:`FullSpectrumPlot`.  The axes and canvas are still
+composes a :class:`FullSpectrumPlot`. The axes and canvas are still
 owned by the :class:`iSLATPlot` controller — :class:`MainPlotGrid`
 renders onto them without calling ``fig.clf()`` so that cached
 references in ``InteractionHandler`` stay valid.
@@ -115,7 +115,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         """Return the composed :class:`MainPlotGrid`, creating it lazily.
 
         The grid is constructed in *borrowed-axes* mode using the
-        controller's ``ax1``/``ax2``/``ax3``.  Because it never calls
+        controller's ``ax1``/``ax2``/``ax3``. Because it never calls
         ``fig.clf()``, all external references to these axes stay valid.
         """
         if self._grid is not None:
@@ -1251,7 +1251,35 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
                 self._append_save_figure_item(menu)
             return menu
 
-        # ax1 or unrecognised axes — minimal menu with just Save Figure
+        if event.inaxes == self.ax1:
+            menu = tk.Menu(canvas_widget, tearoff=0)
+            pm = self._pm
+
+            def _open_in_full_spectrum():
+                try:
+                    xmin, xmax = pm.ax1.get_xlim()
+                except Exception:
+                    xmin, xmax = None, None
+                # Mirror the toggle_full_spectrum logic so the back-button works.
+                pm._pre_fullspectrum_view_name = "Three Panel"
+                pm.switch_view("Full Spectrum")
+                if xmin is not None:
+                    try:
+                        pm._full_spectrum_view._set_display_range(xmin, xmax)
+                    except Exception as exc:
+                        debug_config.warning(
+                            "three_panel_view",
+                            f"build_context_menu: _set_display_range failed: {exc}",
+                        )
+
+            menu.add_command(
+                label="Open in Full Spectrum view",
+                command=_open_in_full_spectrum,
+            )
+            self._append_save_figure_item(menu)
+            return menu
+
+        # Unrecognised axes — minimal menu with just Save Figure
         menu = tk.Menu(canvas_widget, tearoff=0)
         self._append_save_figure_item(menu)
         return menu
