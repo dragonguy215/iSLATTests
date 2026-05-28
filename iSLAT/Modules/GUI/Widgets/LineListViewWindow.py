@@ -117,10 +117,23 @@ class LineListViewWindow(tk.Toplevel):
             pass
 
         clear_btn = ttk.Button(top, text="✕", width=3, command=self._clear_search)
-        clear_btn.grid(row=0, column=2, padx=(0, 8))
+        clear_btn.grid(row=0, column=2, padx=(0, 4))
+
+        refresh_btn = ttk.Button(top, text="Refresh", command=self._refresh)
+        refresh_btn.grid(row=0, column=3, padx=(0, 8))
+        try:
+            from iSLAT.Modules.GUI.Tooltips import CreateToolTip
+            CreateToolTip(
+                refresh_btn,
+                "Reload the line list from the molecule.\n"
+                "Useful if the line list has been filtered or changed\n"
+                "since this window was opened.",
+            )
+        except Exception:
+            pass
 
         self._export_btn = ttk.Button(top, text="Export CSV…", command=self._export_csv)
-        self._export_btn.grid(row=0, column=3)
+        self._export_btn.grid(row=0, column=4)
         try:
             from iSLAT.Modules.GUI.Tooltips import CreateToolTip
             self._export_tooltip = CreateToolTip(
@@ -161,6 +174,21 @@ class LineListViewWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     # Data loading
     # ------------------------------------------------------------------
+
+    def _refresh(self) -> None:
+        """Reload the line list from the molecule, preserving the current search."""
+        current_search = self._search_var.get()
+        self._all_rows = []
+        self._columns = []
+        self._sort_col = None
+        self._sort_reverse = False
+        self._tree.delete(*self._tree.get_children())
+        self._status_var.set("Refreshing…")
+        self.update_idletasks()
+        self._load_data()
+        # Re-apply any active search after reload
+        if current_search:
+            self._search_var.set(current_search)
 
     def _load_data(self) -> None:
         """Fetch the line list DataFrame and populate the Treeview."""
