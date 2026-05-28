@@ -695,6 +695,20 @@ class FitLinesPlotGridView(PlotView):
                         f"_open_three_panel: range update failed: {exc}",
                     )
 
+                # Create a span matching the grid panel's wavelength range
+                # so the line inspection panels populate immediately.
+                try:
+                    ih = getattr(pm, "interaction_handler", None)
+                    if ih is not None and ih.span_selector is not None:
+                        ih.span_selector.extents = (xmin, xmax)
+                        ih.span_selector.set_visible(True)
+                    pm.onselect(xmin, xmax)
+                except Exception as exc:
+                    debug_config.warning(
+                        "fit_lines_grid_view",
+                        f"_open_three_panel: span creation failed: {exc}",
+                    )
+
             try:
                 canvas_widget = fig_canvas.get_tk_widget()
                 menu = tk.Menu(canvas_widget, tearoff=0)

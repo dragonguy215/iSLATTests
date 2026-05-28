@@ -90,7 +90,7 @@ def configure_all_button_styles(theme):
 
     # -- Delete buttons in ControlPanel --
     # Override the native Aqua layout so the button can shrink to fit
-    # its text.  The default macOS theme element enforces a minimum
+    # its text. The default macOS theme element enforces a minimum
     # size; this custom layout uses generic elements instead.
     try:
         style.layout(
@@ -143,7 +143,6 @@ def create_button(frame, theme, text, command, row, column, tip_text=None):
 
         btn.grid(row=row, column=column, padx=1, pady=2, sticky="nsew")
         return btn
-
 
 def create_menu_btn(frame, theme, text, row, column):
         configure_all_button_styles(theme)

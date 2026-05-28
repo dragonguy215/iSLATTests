@@ -37,8 +37,7 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
     Inherits the observed-spectrum, molecule-overlay, summed-model, and
     annotation rendering from :class:`FullSpectrumPlot` and adds:
 
-    * A **residual sub-panel** below each spectrum panel showing
-      ``(data - model)`` with error bars.
+    * A **residual sub-panel** below each spectrum panel showing ``(data - model)`` with error bars.
     * **Per-panel** and **global** reduced chi^2 statistics.
     * Support for **nuisance parameters** (noise floor, linear continuum).
     * **Excluded wavelength ranges** and **atomic-line exclusion windows**.
@@ -713,8 +712,7 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
            to the parent by temporarily substituting plain-``Axes`` entries into ``self.subplots``.
         3. Clear and re-render each residual sub-panel with the updated residuals and recomputed y-limits.
 
-        Falls back to a full :meth:`generate_plot` if the subplot dict
-        is empty or structurally mismatched.
+        Falls back to a full :meth:`generate_plot` if the subplot dict is empty or structurally mismatched.
         """
         n = len(self._panel_edges)
         if not self.subplots or len(self.subplots) != n:
