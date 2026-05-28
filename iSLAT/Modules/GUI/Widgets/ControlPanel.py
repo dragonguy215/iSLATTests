@@ -1255,6 +1255,10 @@ class ControlPanel(ttk.Frame):
             command=lambda: self._filter_line_list_action(mol_name),
         )
         menu.add_command(
+            label="View Line List",
+            command=lambda: self._view_line_list_action(mol_name),
+        )
+        menu.add_command(
             label="Change Line List…",
             command=lambda: self._change_line_list_action(mol_name),
         )
@@ -1303,6 +1307,25 @@ class ControlPanel(ttk.Frame):
             )
         except Exception as e:
             print(f"ControlPanel: export failed for '{mol_name}' — {e}")
+
+    def _view_line_list_action(self, mol_name: str) -> None:
+        """Open a read-only popout table of the molecule's line list."""
+        mol_obj = self.islat.molecules_dict.get(mol_name)
+        if mol_obj is None:
+            return
+        try:
+            ll = mol_obj.line_list
+        except Exception:
+            ll = None
+        if ll is None:
+            msg = f"No line list loaded for '{mol_name}'."
+            if self.data_field is not None:
+                self.data_field.insert_text(msg)
+            else:
+                print(f"ControlPanel: {msg}")
+            return
+        from iSLAT.Modules.GUI.Widgets.LineListViewWindow import LineListViewWindow
+        LineListViewWindow(self, mol_obj, self.data_field)
 
     def _filter_line_list_action(self, mol_name: str) -> None:
         """Open the LineListFilterWindow for the named molecule."""
