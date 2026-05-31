@@ -278,6 +278,13 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         grid.apply_theme_to_figure()
         self._pm.make_span_selector()
 
+        # Reapply the legend toggle — _render_spectrum_panel always rebuilds
+        # the legend so we must re-hide it when the user has toggled it off.
+        if not self._pm.legend_toggle:
+            leg = self.ax1.get_legend()
+            if leg is not None:
+                leg.set_visible(False)
+
     def _do_update_model_plot(self) -> None:
         """Internal full re-render via the composed :class:`MainPlotGrid`.
 

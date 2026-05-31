@@ -861,6 +861,10 @@ class FullSpectrumView(ToggleMixin, PlotView):
 
         # Active view with a visible molecule — update in-place now.
         self._plot.update_panels_inplace()
+        # update_panels_inplace always rebuilds the legend; re-hide it when
+        # the user has toggled the legend off.
+        if not self._pm.legend_toggle:
+            self.toggle_legend(False)
         if self._canvas is not None:
             self._canvas.draw_idle()
 
