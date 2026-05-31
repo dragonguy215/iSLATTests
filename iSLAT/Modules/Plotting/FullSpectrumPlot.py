@@ -66,15 +66,13 @@ class FullSpectrumPlot(StackedSpectralPanel):
         Fractional padding above the peak flux in each panel (0.2 = 20 %).
     uniform_ylim : bool, optional
         When *True* every panel shares the same vertical scale,
-        determined by the global flux minimum and maximum across all
-        panels.  Default *False* (each panel auto-scales independently).
+        determined by the global flux minimum and maximum across all panels.
+        Default *False* (each panel auto-scales independently).
     figsize : tuple, optional
         Figure size.  Height is scaled automatically if *None*.
     wave_data_obs : np.ndarray, optional
-        Observer-frame wavelengths, used by MoleculeDict methods
-        that apply the stellar RV correction internally.
+        Observer-frame wavelengths, used by MoleculeDict methods that apply the stellar RV correction internally.
     """
-
     def __init__(
         self,
         wave_data: np.ndarray,
@@ -163,8 +161,13 @@ class FullSpectrumPlot(StackedSpectralPanel):
 
         old_edges = self._panel_edges.copy()
 
-        self._xlim_start = float(np.nanmin(self.wave_data))
-        self._xlim_end = float(np.nanmax(self.wave_data))
+        # _xlim_start/_xlim_end define the *plot display range* and are owned by the view
+        # (set via _set_display_range / plot-start / plot-range fields in the GUI).
+        # update_data must not touch them.
+        # On the very first render (no layout yet) initialise from the data bounds as a safe fallback; the view will override them once active.
+        if len(self._panel_edges) == 0:
+            self._xlim_start = float(np.nanmin(self.wave_data))
+            self._xlim_end = float(np.nanmax(self.wave_data))
         self._compute_panel_layout()
 
         return (
@@ -420,8 +423,15 @@ class FullSpectrumPlot(StackedSpectralPanel):
                     obs_updated = True
                     break
             if not obs_updated:
-                # Fallback: create from scratch
-                self._plot_observed_spectrum(ax, panel_wave, panel_flux, deduplicate=True)
+                # Fallback: no tagged artist found - draw the observed spectrum directly and tag the resulting line.
+                line, = ax.plot(
+                    panel_wave, panel_flux,
+                    color=self._get_theme_value("observed_spectrum_color", "black"),
+                    linewidth=self._get_theme_value("observed_spectrum_linewidth", 0.8),
+                    zorder=self._get_theme_value("zorder_observed", 2),
+                    label="Observed",
+                )
+                line._islat_observed = True
 
             ymin, ymax = panel_ylims[idx]
             ax.set_ylim(ymin, ymax)
