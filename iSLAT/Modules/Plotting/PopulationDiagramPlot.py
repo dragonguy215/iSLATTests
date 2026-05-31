@@ -38,6 +38,9 @@ _DEFAULT_COLORS: List[str] = [
     "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
 ]
 
+# Marker cycle for shape-by encoding
+_DEFAULT_MARKERS: List[str] = ["o", "s", "^", "D", "v", "<", ">", "p", "h", "*"]
+
 class PopulationDiagramPlot(BasePlot):
     """
     Boltzmann / rotation diagram for one or more molecules.
@@ -154,6 +157,10 @@ class PopulationDiagramPlot(BasePlot):
         # Cache for the last render_active_lines call so active scatter can
         # be restored after generate_plot clears the axes.
         self._active_lines_cache: Optional[Dict[str, Any]] = None
+        # Marker-shape mapping (set by shape_by / clear_shape_mapping)
+        self._shape_mapping: Optional[Dict[str, Any]] = None
+        # Fixed marker size override (None = use per-mode default)
+        self._marker_size: Optional[float] = None
 
     # ------------------------------------------------------------------
     # Public properties
@@ -742,6 +749,8 @@ class PopulationDiagramPlot(BasePlot):
         that the user can visually distinguish them.
         """
         single = len(self._component_data) == 1
+        all_shape_results: List[Tuple[Any, str, str]] = []
+
         for cdata in self._component_data:
             color = (
                 self._get_theme_value("scatter_main_color", "#838B8B")
@@ -752,10 +761,27 @@ class PopulationDiagramPlot(BasePlot):
             y_arr = self._get_axis_array(cdata, self._y_prop)
             if x_arr is None or y_arr is None:
                 continue
+
+            s_val = self._get_marker_size(0.5 if single else 5)
+            wav = cdata.get("wavelength")
+
+            if self._shape_mapping is not None:
+                _SA = {"lam": "wavelength", "e_up": "eu"}
+                shape_key = _SA.get(self._shape_mapping["prop"], self._shape_mapping["prop"])
+                shape_vals = _AxisReg.resolve_array(shape_key, cdata)
+                if shape_vals is not None and len(shape_vals) == len(x_arr):
+                    results = self._scatter_with_shape_groups(
+                        ax, x_arr, y_arr, shape_vals,
+                        s=s_val, color=color, alpha=0.8, picker=True,
+                        wav_arr=wav,
+                    )
+                    all_shape_results.extend(results)
+                    continue
+
             sc = ax.scatter(
                 x_arr,
                 y_arr,
-                s=0.5 if single else 5,
+                s=s_val,
                 color=color,
                 label=cdata["name"],
                 alpha=0.8,
@@ -763,9 +789,11 @@ class PopulationDiagramPlot(BasePlot):
             )
             # Tag with per-point wavelengths so shift+click can look up
             # the line wavelength regardless of the current x/y axis choice.
-            wav = cdata.get("wavelength")
             if wav is not None:
                 sc._islat_scatter_wavelengths = np.asarray(wav)
+
+        if self._shape_mapping is not None and all_shape_results:
+            self._add_shape_legend(ax, all_shape_results)
 
     def _render_component_legend(self, ax: Axes) -> None:
         """Add a legend showing component names and colors."""
@@ -879,6 +907,213 @@ class PopulationDiagramPlot(BasePlot):
             self.generate_plot()
 
     # ------------------------------------------------------------------
+    # Marker-shape mapping API
+    # ------------------------------------------------------------------
+    def shape_by(
+        self,
+        prop: str,
+        *,
+        n_bins: int = 5,
+        regenerate: bool = True,
+    ) -> None:
+        """Vary the scatter marker shape by a molecular property.
+
+        Parameters
+        ----------
+        prop : str
+            Property key — the same set accepted by :meth:`color_by`.
+        n_bins : int
+            Number of quantile bins used for *continuous* properties
+            (ignored for categorical ones).  Clamped to 2–10.
+        regenerate : bool
+            If ``True`` (default) the plot is regenerated immediately.
+        """
+        self._shape_mapping = {
+            "prop": prop,
+            "n_bins": max(2, min(10, int(n_bins))),
+        }
+        if regenerate:
+            self.generate_plot()
+
+    def clear_shape_mapping(self, *, regenerate: bool = True) -> None:
+        """Remove marker-shape mapping and revert to uniform circles.
+
+        Parameters
+        ----------
+        regenerate : bool
+            If ``True`` (default) the plot is regenerated immediately.
+        """
+        self._shape_mapping = None
+        if regenerate:
+            self.generate_plot()
+
+    # ------------------------------------------------------------------
+    # Marker-size override API
+    # ------------------------------------------------------------------
+    def set_marker_size(self, size: float, *, regenerate: bool = True) -> None:
+        """Override the scatter marker size for all points.
+
+        Parameters
+        ----------
+        size : float
+            Marker area in points\u00b2 (same unit as matplotlib ``s=``).
+        regenerate : bool
+            If ``True`` (default) the plot is regenerated immediately.
+        """
+        self._marker_size = float(size)
+        if regenerate:
+            self.generate_plot()
+
+    def clear_marker_size(self, *, regenerate: bool = True) -> None:
+        """Remove the marker-size override and revert to per-mode defaults.
+
+        Parameters
+        ----------
+        regenerate : bool
+            If ``True`` (default) the plot is regenerated immediately.
+        """
+        self._marker_size = None
+        if regenerate:
+            self.generate_plot()
+
+    def _get_marker_size(self, default: float) -> float:
+        """Return the effective marker size: override if set, else *default*."""
+        return self._marker_size if self._marker_size is not None else default
+
+    # ------------------------------------------------------------------
+    # Shape-mapping helpers
+    # ------------------------------------------------------------------
+    def _resolve_shape_indices(
+        self, shape_vals: np.ndarray
+    ) -> Tuple[np.ndarray, List[str], List[str]]:
+        """Return *(idx_arr, group_labels, markers)* for *shape_vals*.
+
+        *idx_arr* has the same length as *shape_vals*; each element is an
+        integer index into *group_labels* / *markers*.
+        """
+        _ALIASES: Dict[str, str] = {"lam": "wavelength", "e_up": "eu"}
+        prop: str = self._shape_mapping["prop"]  # type: ignore[index]
+        n_bins: int = int(self._shape_mapping.get("n_bins", 5))  # type: ignore[union-attr]
+        internal_key = _ALIASES.get(prop, prop)
+        kind = _AxisReg.get_kind(internal_key)
+
+        if kind == "categorical":
+            str_vals = np.asarray(shape_vals, dtype=str)
+            unique_labels: List[str] = list(np.unique(str_vals))
+            label_to_idx = {lbl: i for i, lbl in enumerate(unique_labels)}
+            idx_arr = np.array(
+                [label_to_idx[str(v)] for v in str_vals], dtype=int
+            )
+            markers = [
+                _DEFAULT_MARKERS[i % len(_DEFAULT_MARKERS)]
+                for i in range(len(unique_labels))
+            ]
+            return idx_arr, unique_labels, markers
+
+        # Continuous: quantile binning
+        float_vals = np.asarray(shape_vals, dtype=float)
+        finite_mask = np.isfinite(float_vals)
+        if not np.any(finite_mask):
+            return (
+                np.zeros(len(float_vals), dtype=int),
+                ["all"],
+                [_DEFAULT_MARKERS[0]],
+            )
+        quantiles = np.linspace(0, 100, n_bins + 1)
+        edges = np.unique(
+            np.nanpercentile(float_vals[finite_mask], quantiles)
+        )
+        n_actual = max(len(edges) - 1, 1)
+        idx_arr = np.zeros(len(float_vals), dtype=int)
+        for _i, _v in enumerate(float_vals):
+            if np.isfinite(_v):
+                _b = int(np.searchsorted(edges[1:], _v, side="left"))
+                idx_arr[_i] = min(_b, n_actual - 1)
+        bin_labels = [
+            f"{edges[j]:.3g}\u2013{edges[j + 1]:.3g}" for j in range(n_actual)
+        ]
+        markers = [
+            _DEFAULT_MARKERS[j % len(_DEFAULT_MARKERS)] for j in range(n_actual)
+        ]
+        return idx_arr, bin_labels, markers
+
+    def _scatter_with_shape_groups(
+        self,
+        ax: Axes,
+        x_arr: np.ndarray,
+        y_arr: np.ndarray,
+        shape_vals: np.ndarray,
+        *,
+        s: float = 5,
+        alpha: float = 0.8,
+        picker: bool = True,
+        color=None,
+        c: Optional[np.ndarray] = None,
+        norm=None,
+        cmap=None,
+        wav_arr: Optional[np.ndarray] = None,
+    ) -> List[Tuple[Any, str, str]]:
+        """Scatter with marker shape varying per group.
+
+        Returns a list of *(artist, group_label, marker)* tuples for
+        building a shape legend.
+        """
+        idx_arr, group_labels, markers = self._resolve_shape_indices(shape_vals)
+        results: List[Tuple[Any, str, str]] = []
+        for _gi, (label, marker) in enumerate(zip(group_labels, markers)):
+            gmask = idx_arr == _gi
+            if not np.any(gmask):
+                continue
+            gx, gy = x_arr[gmask], y_arr[gmask]
+            kw: Dict[str, Any] = dict(
+                s=s, alpha=alpha, picker=picker, marker=marker,
+            )
+            if c is not None:
+                kw["c"] = np.asarray(c)[gmask]
+                if norm is not None:
+                    kw["norm"] = norm
+                if cmap is not None:
+                    kw["cmap"] = cmap
+            else:
+                kw["color"] = color if color is not None else "#838B8B"
+            sc = ax.scatter(gx, gy, **kw)
+            if wav_arr is not None:
+                sc._islat_scatter_wavelengths = np.asarray(wav_arr)[gmask]
+            results.append((sc, label, marker))
+        return results
+
+    def _add_shape_legend(
+        self, ax: Axes, results: List[Tuple[Any, str, str]]
+    ) -> None:
+        """Add a legend for the marker-shape groups at lower-left."""
+        from matplotlib.lines import Line2D
+
+        prop: str = self._shape_mapping["prop"]  # type: ignore[index]
+        prop_label = self._property_label(prop)
+        handles = [
+            Line2D(
+                [0], [0],
+                marker=marker,
+                color="w",
+                markerfacecolor="#606060",
+                markeredgecolor="#606060",
+                markersize=6,
+                label=lbl,
+                linewidth=0,
+            )
+            for _, lbl, marker in results
+        ]
+        if handles:
+            ax.legend(
+                handles=handles,
+                title=prop_label,
+                loc="lower left",
+                fontsize="x-small",
+                title_fontsize="x-small",
+                framealpha=0.7,
+            )
+
+    # ------------------------------------------------------------------
     def _render_colormapped(self, ax: Axes) -> None:
         """Render all components with a single property-based colormap."""
         mapping = self._color_mapping
@@ -913,6 +1148,8 @@ class PopulationDiagramPlot(BasePlot):
         all_y: List[np.ndarray] = []
         all_vals: List[np.ndarray] = []
         all_wav: List[np.ndarray] = []
+        all_shape_vals: List[np.ndarray] = []
+        _SHAPE_ALIASES: Dict[str, str] = {"lam": "wavelength", "e_up": "eu"}
 
         for cdata in self._component_data:
             vals_arr = _AxisReg.resolve_array(internal_key, cdata)
@@ -942,6 +1179,20 @@ class PopulationDiagramPlot(BasePlot):
             all_x.append(x_arr)
             all_y.append(y_arr)
             all_vals.append(vals_arr)
+
+            # Shape-by: collect shape property values with same masking
+            if self._shape_mapping is not None:
+                _sp_key = _SHAPE_ALIASES.get(
+                    self._shape_mapping["prop"], self._shape_mapping["prop"]
+                )
+                sv = _AxisReg.resolve_array(_sp_key, cdata)
+                if sv is not None:
+                    sv = np.asarray(sv)
+                    if mask is not None:
+                        sv = sv[mask]
+                    all_shape_vals.append(sv[:len(x_arr)])
+                else:
+                    all_shape_vals.append(np.zeros(len(x_arr)))
 
         if not all_vals:
             self._render_by_component(ax)
@@ -978,23 +1229,34 @@ class PopulationDiagramPlot(BasePlot):
             norm = Normalize(vmin=vmin, vmax=vmax)
         cmap_obj = matplotlib.colormaps.get_cmap(cmap_name)
 
-        sc = ax.scatter(
-            eu_cat,
-            rd_cat,
-            c=val_cat,
-            s=5,
-            cmap=cmap_obj,
-            norm=norm,
-            alpha=0.8,
-            picker=True,
-        )
-        if all_wav:
-            sc._islat_scatter_wavelengths = np.concatenate(all_wav)
-
+        wav_cat = np.concatenate(all_wav) if all_wav else None
         label = self._property_label(display_prop)
         fig = ax.get_figure()
-        if fig is not None:
-            self._colorbar = fig.colorbar(sc, ax=ax, label=label, pad=0.02)
+
+        if self._shape_mapping is not None and all_shape_vals:
+            shape_cat = np.concatenate(all_shape_vals)
+            shape_results = self._scatter_with_shape_groups(
+                ax, eu_cat, rd_cat, shape_cat,
+                s=self._get_marker_size(5), c=val_cat, norm=norm, cmap=cmap_obj,
+                alpha=0.8, picker=True,
+                wav_arr=wav_cat,
+            )
+            if shape_results and fig is not None:
+                self._colorbar = fig.colorbar(
+                    shape_results[0][0], ax=ax, label=label, pad=0.02
+                )
+            self._add_shape_legend(ax, shape_results)
+        else:
+            sc = ax.scatter(
+                eu_cat, rd_cat,
+                c=val_cat, s=self._get_marker_size(5),
+                cmap=cmap_obj, norm=norm,
+                alpha=0.8, picker=True,
+            )
+            if wav_cat is not None:
+                sc._islat_scatter_wavelengths = wav_cat
+            if fig is not None:
+                self._colorbar = fig.colorbar(sc, ax=ax, label=label, pad=0.02)
 
     # ------------------------------------------------------------------
     def _render_categorical_colormap(
@@ -1004,6 +1266,8 @@ class PopulationDiagramPlot(BasePlot):
         all_x: List[np.ndarray] = []
         all_y: List[np.ndarray] = []
         all_labels: List[np.ndarray] = []
+        all_shape_vals: List[np.ndarray] = []
+        _SHAPE_ALIASES: Dict[str, str] = {"lam": "wavelength", "e_up": "eu"}
 
         for cdata in self._component_data:
             x_arr = self._get_axis_array(cdata, self._x_prop)
@@ -1032,6 +1296,20 @@ class PopulationDiagramPlot(BasePlot):
             all_x.append(x_arr)
             all_y.append(y_arr)
             all_labels.append(labels)
+
+            # Shape-by: collect with same masking
+            if self._shape_mapping is not None:
+                _sp_key = _SHAPE_ALIASES.get(
+                    self._shape_mapping["prop"], self._shape_mapping["prop"]
+                )
+                sv = _AxisReg.resolve_array(_sp_key, cdata)
+                if sv is not None:
+                    sv = np.asarray(sv)
+                    if mask is not None:
+                        sv = sv[mask]
+                    all_shape_vals.append(sv[:n])
+                else:
+                    all_shape_vals.append(np.zeros(n))
 
         if not all_x:
             return
@@ -1065,7 +1343,16 @@ class PopulationDiagramPlot(BasePlot):
             }
 
         colors = np.array([label_to_color[lbl] for lbl in label_cat])
-        ax.scatter(eu_cat, rd_cat, c=colors, s=5, alpha=0.8)
+
+        if self._shape_mapping is not None and all_shape_vals:
+            shape_cat = np.concatenate(all_shape_vals)
+            shape_results = self._scatter_with_shape_groups(
+                ax, eu_cat, rd_cat, shape_cat,
+                s=self._get_marker_size(5), c=colors, alpha=0.8, picker=True,
+            )
+        else:
+            ax.scatter(eu_cat, rd_cat, c=colors, s=self._get_marker_size(5), alpha=0.8)
+            shape_results = []
 
         # Legend for categories (limit to 20 entries max for readability)
         from matplotlib.lines import Line2D
@@ -1098,6 +1385,9 @@ class PopulationDiagramPlot(BasePlot):
             framealpha=0.7,
             ncol=max(1, len(entries) // 10),
         )
+
+        if self._shape_mapping is not None and shape_results:
+            self._add_shape_legend(ax, shape_results)
 
     # ------------------------------------------------------------------
     @staticmethod

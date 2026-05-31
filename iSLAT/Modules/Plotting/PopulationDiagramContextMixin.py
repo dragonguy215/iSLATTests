@@ -625,8 +625,62 @@ class PopulationDiagramContextMixin:
         y_mode_var.trace_add('write', _toggle_y_lim_frame)
         _toggle_y_lim_frame()
 
+        # ---- Marker shape by ----------------------------------------
+        ttk.Separator(win, orient="horizontal").grid(
+            row=9, column=0, columnspan=4, sticky="ew", padx=8, pady=4)
+
+        cur_shape_mapping = getattr(pdp, '_shape_mapping', None) if pdp else None
+        cur_shape_prop = cur_shape_mapping["prop"] if cur_shape_mapping else None
+        cur_shape_bins = int(cur_shape_mapping.get("n_bins", 5)) if cur_shape_mapping else 5
+
+        shape_labels = ["None"] + AXIS_LABELS
+        shape_values = [None] + AXIS_VALUES
+        init_shape_label = "None"
+        if cur_shape_prop is not None and cur_shape_prop in AXIS_VALUES:
+            init_shape_label = AXIS_LABELS[AXIS_VALUES.index(cur_shape_prop)]
+
+        tk.Label(win, text="Marker shape by:").grid(row=10, column=0, sticky="w", **pad)
+        shape_var = tk.StringVar(value=init_shape_label)
+        shape_combo = ttk.Combobox(win, textvariable=shape_var, values=shape_labels,
+                                   state="readonly", width=38)
+        shape_combo.grid(row=10, column=1, columnspan=3, sticky="ew", **pad)
+
+        bins_frame = tk.Frame(win)
+        bins_frame.grid(row=11, column=0, columnspan=4, sticky="w", **pad_tight)
+        tk.Label(bins_frame, text="Bins (continuous properties):").pack(side="left")
+        shape_bins_var = tk.IntVar(value=cur_shape_bins)
+        bins_spin = tk.Spinbox(bins_frame, from_=2, to=10, increment=1,
+                               textvariable=shape_bins_var, width=5)
+        bins_spin.pack(side="left", padx=4)
+
+        def _toggle_bins(*_):
+            sel = shape_var.get()
+            if sel == "None":
+                bins_spin.configure(state="disabled")
+            else:
+                prop_key = shape_values[shape_labels.index(sel)]
+                from iSLAT.Modules.DataTypes.PlotAxisRegistry import PlotAxisRegistry as _R2
+                kind = _R2.get_kind(prop_key) if prop_key else "continuous"
+                bins_spin.configure(state="disabled" if kind == "categorical" else "normal")
+
+        shape_var.trace_add('write', _toggle_bins)
+        _toggle_bins()
+
+        # ---- Marker size override -----------------------------------
+        ttk.Separator(win, orient="horizontal").grid(
+            row=12, column=0, columnspan=4, sticky="ew", padx=8, pady=4)
+
+        cur_marker_size = getattr(pdp, '_marker_size', None) if pdp else None
+        init_size_str = str(int(cur_marker_size)) if cur_marker_size is not None else ""
+
+        size_frame = tk.Frame(win)
+        size_frame.grid(row=13, column=0, columnspan=4, sticky="w", **pad_tight)
+        tk.Label(size_frame, text="Marker size (pt\u00b2, blank = auto):").pack(side="left")
+        marker_size_var = tk.StringVar(value=init_size_str)
+        tk.Entry(size_frame, textvariable=marker_size_var, width=7).pack(side="left", padx=4)
+
         btn_frame = tk.Frame(win)
-        btn_frame.grid(row=9, column=0, columnspan=4, pady=8)
+        btn_frame.grid(row=14, column=0, columnspan=4, pady=8)
 
         def _parse_lim(mode_var, lo_var, hi_var):
             """Return None (auto) or a (mode, lo, hi) tuple."""
@@ -651,13 +705,32 @@ class PopulationDiagramContextMixin:
                     x_log=x_log_var.get(), y_log=y_log_var.get(),
                     x_lim=_parse_lim(x_mode_var, x_lo_var, x_hi_var),
                     y_lim=_parse_lim(y_mode_var, y_lo_var, y_hi_var),
-                    regenerate=True,
+                    regenerate=False,
                 )
+                # Apply shape mapping before triggering regeneration
+                shape_sel = shape_var.get()
+                if shape_sel == "None":
+                    pdp.clear_shape_mapping(regenerate=False)
+                else:
+                    shape_prop = shape_values[shape_labels.index(shape_sel)]
+                    pdp.shape_by(shape_prop, n_bins=shape_bins_var.get(), regenerate=False)
+                # Apply marker size override
+                _sz_str = marker_size_var.get().strip()
+                if _sz_str:
+                    try:
+                        pdp.set_marker_size(float(_sz_str), regenerate=False)
+                    except ValueError:
+                        pass
+                else:
+                    pdp.clear_marker_size(regenerate=False)
+                pdp.generate_plot()
                 draw_idle()
             win.destroy()
 
         def _reset():
             if pdp is not None:
+                pdp.clear_shape_mapping(regenerate=False)
+                pdp.clear_marker_size(regenerate=False)
                 pdp.set_axes(regenerate=True)
                 draw_idle()
             win.destroy()
