@@ -1196,6 +1196,8 @@ class FullSpectrumView(ToggleMixin, PlotView):
         line_list: Optional[pd.DataFrame] = None,
         atomic_lines: Optional[pd.DataFrame] = None,
         figsize: Tuple[float, float] = (12, 16),
+        xlim_range: Optional[Tuple[float, float]] = None,
+        n_panels: Optional[int] = None,
     ) -> StackedSpectralPanel:
         """Build a fresh standalone :class:`StackedSpectralPanel` for export.
 
@@ -1206,7 +1208,7 @@ class FullSpectrumView(ToggleMixin, PlotView):
         The returned plot is **not yet rendered**; the caller is
         responsible for calling :meth:`generate_plot`.
         """
-        return FullSpectrumPlot(
+        kw: dict = dict(
             wave_data=wave,
             flux_data=flux,
             molecules=self._islat.molecules_dict,
@@ -1215,7 +1217,11 @@ class FullSpectrumView(ToggleMixin, PlotView):
             figsize=figsize,
             wave_data_obs=wave_obs,
             theme=self._pm.theme,
+            xlim_range=xlim_range,
         )
+        if n_panels is not None:
+            kw["n_panels"] = n_panels
+        return FullSpectrumPlot(**kw)
 
     def save_figure(
         self,
@@ -1263,11 +1269,32 @@ class FullSpectrumView(ToggleMixin, PlotView):
 
         # Create standalone figure via the overridable factory method
         wave, flux, wave_obs = self._load_spectrum_data()
+
+        # Use the live plot's wavelength bounds and panel count so the saved
+        # figure matches exactly what the user sees in the GUI.
+        xlim_range: Optional[Tuple[float, float]] = None
+        n_panels: Optional[int] = None
+        if self._plot is not None:
+            x_start = getattr(self._plot, '_xlim_start', None)
+            x_end   = getattr(self._plot, '_xlim_end',   None)
+            if x_start is not None and x_end is not None:
+                xlim_range = (float(x_start), float(x_end))
+            n_panels = getattr(self._plot, 'n_panels', None)
+        # Fall back to molecules' global_wavelength_range when the interactive
+        # plot is not yet rendered (e.g. called before first activation).
+        if xlim_range is None:
+            mol_dict = getattr(self._islat, 'molecules_dict', None)
+            mol_range = getattr(mol_dict, '_global_wavelength_range', None) if mol_dict else None
+            if mol_range is not None:
+                xlim_range = (float(mol_range[0]), float(mol_range[1]))
+
         standalone = self._create_standalone_plot(
             wave, flux, wave_obs,
             line_list=line_list_df,
             atomic_lines=atomic_lines_df,
             figsize=(12, 16),
+            xlim_range=xlim_range,
+            n_panels=n_panels,
         )
         standalone.generate_plot()
 
@@ -1407,6 +1434,25 @@ def output_full_spectrum(islat_ref: Any, rasterized: bool = False) -> str | None
     )
     if theme is not None:
         standalone_kwargs["theme"] = theme
+    # Respect the GUI's wavelength range so the saved figure matches
+    # what is shown on screen rather than always spanning all data.
+    mol_range = getattr(islat_ref.molecules_dict, '_global_wavelength_range', None)
+    if mol_range is not None:
+        standalone_kwargs["xlim_range"] = (float(mol_range[0]), float(mol_range[1]))
+    # Respect the GUI's panel count.
+    try:
+        gui_plot = islat_ref.GUI.plot
+        live_fsv = getattr(gui_plot, '_full_spectrum_view', None) or getattr(gui_plot, 'current_view', None)
+        live_plot = getattr(live_fsv, '_plot', None)
+        if live_plot is None:
+            # ThreePanelView / direct attribute
+            live_plot = getattr(gui_plot, '_plot', None)
+        if live_plot is not None:
+            n_panels = getattr(live_plot, 'n_panels', None)
+            if n_panels is not None:
+                standalone_kwargs["n_panels"] = n_panels
+    except Exception:
+        pass
     standalone = FullSpectrumPlot(**standalone_kwargs)
     standalone.generate_plot()
 
