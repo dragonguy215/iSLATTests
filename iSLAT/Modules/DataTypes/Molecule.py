@@ -454,14 +454,13 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
 
         # Always compute the internal spectrum on a fine grid that properly
         # Nyquist-samples the narrowest expected line width. The user's
-        # model_pixel_res is applied later via flux-conserving resampling
-        # (_spectres) in get_flux().
-        fine_dlambda = (mean_wavelength / c.SPEED_OF_LIGHT_KMS * rep_fwhm_kms) / c.PIXELS_PER_FWHM
+        # model_pixel_res is applied later via flux-conserving resampling (_spectres) in get_flux().
+        #fine_dlambda = (mean_wavelength / c.SPEED_OF_LIGHT_KMS * rep_fwhm_kms) / c.PIXELS_PER_FWHM
 
         self.spectrum = Spectrum(
             lam_min=spectrum_lam_min,
             lam_max=spectrum_lam_max,
-            dlambda=fine_dlambda,
+            dlambda=self.model_pixel_res,#fine_dlambda,
             R=spectral_resolution,
             R_func=R_func,
             distance=self._distance,
