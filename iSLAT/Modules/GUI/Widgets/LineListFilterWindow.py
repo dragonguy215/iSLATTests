@@ -1,8 +1,8 @@
 """
 LineListFilterWindow — interactive line-list filter popup.
 
-Opens a Toplevel window bound to a Molecule's MoleculeLineList.  The user
-can apply numeric range filters, quantum-label filters, and vibrational-band
+Opens a Toplevel window bound to a Molecule's MoleculeLineList.
+The user can apply numeric range filters, quantum-label filters, and vibrational-band
 filters (e.g. "v1", "v1-0", "v2-1") using the LineListMaker fluent API.
 Results can be exported to a CSV file.
 """

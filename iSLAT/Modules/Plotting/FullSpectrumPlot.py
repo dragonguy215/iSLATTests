@@ -255,8 +255,7 @@ class FullSpectrumPlot(StackedSpectralPanel):
     ) -> List[SpectralPanel]:
         """Create a single :class:`SpectrumPanel` for the given row.
 
-        The summed spectrum and molecule cache are computed once in
-        :meth:`generate_plot` and forwarded via *kwargs*.
+        The summed spectrum and molecule cache are computed once in :meth:`generate_plot` and forwarded via *kwargs*.
         """
         ax = self.fig.add_subplot(gs_slot)
 

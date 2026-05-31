@@ -232,8 +232,8 @@ class TopBar(ResizableFrame):
         create_button(self.button_frame, self.theme, "Legend", self.main_plot.toggle_legend, 0, 7, tip_text=toggle_legend_tip)
         
         # Navigate buttons - compact with minimal padding
-        retreat_tip = "Retreat the plot start\nby the current range value\nShortcut: Shift+N"
-        advance_tip = "Advance the plot start\nby the current range value\nShortcut: N"
+        retreat_tip = "Retreat the plot start\nby the current range value\nShortcut: <"
+        advance_tip = "Advance the plot start\nby the current range value\nShortcut: >"
         
         self._retreat_btn = ttk.Button(self.button_frame, text="<", command=self.retreat_plot_start, width=2)
         self._retreat_btn.grid(row=0, column=9, padx=(4, 0), pady=2, sticky="nsew")
