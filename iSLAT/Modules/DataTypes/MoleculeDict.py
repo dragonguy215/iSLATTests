@@ -1360,6 +1360,109 @@ class MoleculeDict(ObservableMixin, dict):
         print(f"MoleculeDict: duplicated '{mol_name}' → '{new_name}'")
         return new_name
 
+    def merge_molecules(
+        self,
+        mol_names: List[str],
+        new_name: Optional[str] = None,
+    ) -> Optional[str]:
+        """Merge the line lists of multiple molecules into a new molecule.
+
+        The new molecule's line list is the concatenation (sorted by wavelength) of every source molecule's line list.
+        Physical parameters (temperature, column density, etc.) are copied from the first source molecule.
+        The source molecules are left unchanged.
+
+        Parameters
+        ----------
+        mol_names : list of str
+            Keys of the molecules to merge.  Must contain at least two
+            valid entries.
+        new_name : str, optional
+            Name for the merged molecule.  A unique name is generated
+            automatically when *None*.
+
+        Returns
+        -------
+        Optional[str]
+            The key of the newly created merged molecule, or ``None`` on
+            failure.
+        """
+        valid = [n for n in mol_names if n in self]
+        if len(valid) < 2:
+            print(f"MoleculeDict.merge_molecules: need at least 2 valid molecules, got {valid}.")
+            return None
+
+        # --- Build merged MoleculeLineList via LineListMaker API ---------
+        from iSLAT.Modules.DataProcessing.LineListMaker import LineListMaker
+
+        sources = []
+        for n in valid:
+            mol = self[n]
+            try:
+                sources.append(mol.line_list)   # triggers lazy load
+            except Exception as exc:
+                print(f"MoleculeDict.merge_molecules: could not get line list for '{n}' — {exc}")
+
+        if len(sources) < 2:
+            print("MoleculeDict.merge_molecules: no line data retrieved from any source.")
+            return None
+
+        # --- Generate a unique name --------------------------------------
+        if new_name is None:
+            base = "_".join(valid)
+        else:
+            base = new_name
+        new_name = base
+        counter = 2
+        while new_name in self:
+            new_name = f"{base}_{counter}"
+            counter += 1
+
+        # LineListMaker.merge handles concat + species tagging;
+        # to_linelist() converts back to a MoleculeLineList.
+        merged_maker = LineListMaker.merge(*sources, species_override=new_name)
+        merged_ll = merged_maker.to_linelist()
+        merged_ll.molecule_id = new_name
+        if self._global_wavelength_range:
+            merged_ll._wavelength_range = self._global_wavelength_range
+
+        # --- Create a minimal Molecule and inject the merged line list ---
+        src: Molecule = self[valid[0]]
+        mol_data = {
+            "name": new_name,
+            "Molecule Name": new_name,
+            "Molecule Label": new_name,
+            "label": new_name,
+            "file": None,
+            "hitran_data": None,
+        }
+        try:
+            results = self.load_molecules(
+                [mol_data],
+                {},
+                update_global_parameters=False,
+            )
+        except Exception as exc:
+            print(f"MoleculeDict.merge_molecules: molecule load failed — {exc}")
+            return None
+
+        if results.get("success", 0) == 0:
+            print(f"MoleculeDict.merge_molecules: load returned no successes — {results.get('errors')}")
+            return None
+
+        new_mol = self.get(new_name)
+        if new_mol is None:
+            return None
+
+        # Copy physics params from the first source molecule
+        new_mol.bulk_update_parameters(src.copy_parameters(), skip_notification=True)
+        # Inject the pre-built merged line list directly, bypassing file loading
+        new_mol.lines = merged_ll
+        new_mol.intensity = None
+        new_mol.spectrum = None
+
+        print(f"MoleculeDict: merged {valid} -> '{new_name}' ({len(merged_ll)} lines)")
+        return new_name
+
     def bulk_update_parameters(
         self,
         parameter_dict: Dict[str, Any],

@@ -1394,6 +1394,17 @@ class ControlPanel(ttk.Frame):
             label="Delete",
             command=lambda: self._delete_molecule_action(mol_name),
         )
+
+        # "Merge Selected" — visible only when 2+ molecules are selected
+        # (active molecule + at least one comparison molecule).
+        selected_names = self._get_selected_molecule_names()
+        if len(selected_names) >= 2:
+            menu.add_separator()
+            menu.add_command(
+                label=f"Merge Selected ({', '.join(selected_names)})",
+                command=lambda: self._merge_molecules_action(selected_names),
+            )
+
         menu.add_separator()
         menu.add_command(
             label="Edit Name",
@@ -1447,6 +1458,41 @@ class ControlPanel(ttk.Frame):
         result = self.islat.duplicate_molecule(mol_name)
         if result is None:
             print(f"ControlPanel: failed to duplicate '{mol_name}'.")
+
+    def _get_selected_molecule_names(self) -> list:
+        """Return the names of all currently \'selected\' molecules.
+
+        Selection = the active molecule plus any comparison molecules that
+        have been shift-clicked in the control panel.
+        """
+        names: list = []
+        active = self._get_active_molecule_object()
+        if active is not None:
+            names.append(active.name)
+        for comp in self.islat.comparison_molecules:
+            comp_name = getattr(comp, 'name', str(comp))
+            if comp_name not in names:
+                names.append(comp_name)
+        return names
+
+    def _merge_molecules_action(self, mol_names: list) -> None:
+        """Merge the line lists of *mol_names* into a new molecule."""
+        if len(mol_names) < 2:
+            self.data_field.insert_text("Select at least 2 molecules to merge (active + shift-click).")
+            return
+
+        self.data_field.insert_text(f"Merging {mol_names}\u2026", clear_after=False)
+        new_name = self.islat.molecules_dict.merge_molecules(mol_names)
+        if new_name is None:
+            self.data_field.insert_text(f"Merge failed for {mol_names}.")
+            return
+
+        self.data_field.insert_text(f"Created merged molecule '{new_name}'.", clear_after=True)
+        # Rebuild the UI to show the new molecule row
+        self._rebuild_color_and_vis_controls()
+        self.plot.on_molecule_added(new_name, self.islat.molecules_dict)
+
+
 
     def _export_molecule_action(self, mol_name: str) -> None:
         """Export the named molecule's model spectrum to a CSV file."""
