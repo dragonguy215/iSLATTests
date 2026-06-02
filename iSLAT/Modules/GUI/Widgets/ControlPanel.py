@@ -1042,7 +1042,7 @@ class ControlPanel(ttk.Frame):
                 return field_config['format'].format(value)
             elif isinstance(value, str):
                 return value
-            return f"{value:.2f}"
+            return f"{value:.4g}"
         except Exception as e:
             print(f"Error with formatting: {e}")
             return ""
@@ -1232,7 +1232,7 @@ class ControlPanel(ttk.Frame):
             try:
                 # Update GUI fields from iSLAT display_range (iSLAT -> GUI)
                 start, end = value_str
-                range_val = round(end - start, 2)
+                range_val = end - start #round(end - start, 2)
                 
                 self._set_var(self.plot_start_var, self._format_value(start, "display_range_start"))
                 self._set_var(self.plot_range_var, self._format_value(range_val, "display_range_range"))
