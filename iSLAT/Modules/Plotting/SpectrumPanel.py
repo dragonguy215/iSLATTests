@@ -105,9 +105,7 @@ class SpectrumPanel(SpectralPanel):
             ax, panel_wave, panel_flux, panel_err, deduplicate=True,
         )
 
-        # NOTE: Gap indicators are drawn later by _post_render_cell()
-        # after y-limits are finalised, so that the break-mark lines
-        # and text annotations are positioned correctly.
+        # NOTE: Gap indicators are drawn later by _post_render_cell() after y-limits are finalised, so that the break-mark lines and text annotations are positioned correctly.
 
         # -- Molecule models (slice pre-computed cache) -----------------
         for m_lam, m_flux, m_color, m_label, m_name in self.mol_cache:
@@ -118,12 +116,16 @@ class SpectrumPanel(SpectralPanel):
                     m_flux[m_mask],
                     linestyle="--",
                     color=m_color,
-                    alpha=self._get_theme_value(
-                        "full_spectrum_model_alpha", 0.8
-                    ),
-                    linewidth=self._get_theme_value(
-                        "full_spectrum_model_linewidth", 0.8
-                    ),
+                    alpha = kwargs.get("model_alpha", self._get_theme_value("model_alpha", 1.0)),
+                    linewidth = kwargs.get("model_linewidth", self._get_theme_value("model_linewidth", 1.2)),
+                    #alpha=self._get_theme_value(
+                    #    #"full_spectrum_model_alpha", 0.8
+                    #    "model_alpha", 1.0
+                    #),
+                    #linewidth=self._get_theme_value(
+                    #    #"full_spectrum_model_linewidth", 0.8
+                    #    "model_linewidth", 1.2
+                    #),
                     label=m_label,
                     zorder=self._get_theme_value("zorder_model", 3),
                 )
@@ -253,7 +255,7 @@ class SpectrumPanel(SpectralPanel):
     ) -> Optional[Line2D]:
         """Plot a single molecule's model spectrum on *ax*."""
         if linewidth is None:
-            linewidth = self._get_theme_value("model_linewidth", 0.8)
+            linewidth = self._get_theme_value("model_linewidth", 1.2)
         if alpha is None:
             alpha = self._get_theme_value("model_alpha", 0.8)
         plot_lam, plot_flux = self.get_molecule_spectrum_data(

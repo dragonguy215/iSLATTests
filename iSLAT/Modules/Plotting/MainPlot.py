@@ -217,7 +217,7 @@ class iSLATPlot:
         """Apply theme colors to matplotlib figure, axes, data artists, and toolbar.
 
         Delegates figure/axes background and data-artist re-coloring to
-        :meth:`BasePlot.apply_theme_to_figure` via the three-panel-view’s
+        :meth:`BasePlot.apply_theme_to_figure` via the three-panel-view's
         grid (if available) and adds GUI-specific extras on top:
         canvas widget background, toolbar, legend frame coloring, grid
         lines, and ``axis_text_label_color`` support.

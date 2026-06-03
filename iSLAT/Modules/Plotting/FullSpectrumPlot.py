@@ -352,6 +352,8 @@ class FullSpectrumPlot(StackedSpectralPanel):
             mol_cache=mol_cache,
             summed_wave=summed_wave,
             summed_flux=summed_flux,
+            model_linewidth=kwargs.get("model_linewidth", self._get_theme_value("full_spectrum_model_linewidth", 1.0)),
+            model_alpha=kwargs.get("model_alpha", self._get_theme_value("full_spectrum_model_alpha", 0.8)),
             **kwargs,
         )
 
