@@ -379,6 +379,10 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
             is_visible=is_visible,
             force_rerender=force_rerender,
         )
+
+        # Make sure that the toggle legend state is respected
+        self._set_legend_visibility(self._pm.legend_toggle)
+
         self._canvas.draw_idle()
 
     # ------------------------------------------------------------------
