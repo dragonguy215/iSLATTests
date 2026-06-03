@@ -1,0 +1,381 @@
+"""SampleManagerWindow — popout window for managing the spectrum sample.
+
+Provides a scrollable list of all spectra in the current iSLAT sample with:
+  * Radio-button selection to switch the active spectrum.
+  * Per-row x button to remove a spectrum from the sample.
+  * Per-row parameter file assignment: choose a CSV that is loaded when the spectrum is activated; leave blank to keep whatever parameters are current.
+  * "Add Spectra…" to open a file dialog and append new files.
+  * "Clear All" to remove every entry.
+
+Usage
+-----
+    from iSLAT.Modules.GUI.Widgets.SampleManagerWindow import SampleManagerWindow
+    SampleManagerWindow.open(parent_widget, islat_instance, theme)
+"""
+from __future__ import annotations
+
+import os
+import tkinter as tk
+import tkinter.ttk as ttk
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+from iSLAT.Modules.GUI.Tooltips import CreateToolTip
+
+if TYPE_CHECKING:
+    pass
+
+class SampleManagerWindow:
+    """Singleton popout window that manages the spectrum sample."""
+    # Class-level registry: one window per (islat instance id)
+    _instances: Dict[int, "SampleManagerWindow"] = {}
+    # ------------------------------------------------------------------
+    # Public factory
+    # ------------------------------------------------------------------
+    @classmethod
+    def open(
+        cls,
+        parent: tk.Widget,
+        islat: Any,
+        theme: Optional[Dict[str, Any]] = None,
+    ) -> "SampleManagerWindow":
+        """Open (or raise) the sample manager for *islat*.
+
+        Parameters
+        ----------
+        parent:
+            Tk parent widget (used as the ``Toplevel`` parent).
+        islat:
+            The active :class:`iSLAT` instance.
+        theme:
+            Optional theme dict used for highlight colours.
+        """
+        key = id(islat)
+        existing = cls._instances.get(key)
+        if existing is not None:
+            try:
+                if existing._win.winfo_exists():
+                    existing._win.lift()
+                    existing._win.focus_force()
+                    return existing
+            except Exception:
+                pass
+            del cls._instances[key]
+
+        instance = cls(parent, islat, theme or {})
+        cls._instances[key] = instance
+        return instance
+
+    # ------------------------------------------------------------------
+    # Constructor
+    # ------------------------------------------------------------------
+    def __init__(
+        self,
+        parent: tk.Widget,
+        islat: Any,
+        theme: Dict[str, Any],
+    ) -> None:
+        self._islat = islat
+        self._theme = theme
+
+        # ------ top-level window --------------------------------------
+        self._win = tk.Toplevel(parent)
+        self._win.title("Manage Sample")
+        self._win.resizable(True, True)
+        self._win.minsize(680, 200)
+        self._win.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self._active_var = tk.IntVar(
+            value=int(getattr(islat, "sample_spectra_index", 0))
+        )
+
+        self._row_widgets: List[tk.Frame] = []
+
+        self._build_ui()
+        self._rebuild_rows()
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+    def _build_ui(self) -> None:
+        win = self._win
+
+        # Header
+        hdr = tk.Frame(win)
+        hdr.pack(fill="x", padx=8, pady=(8, 2))
+        tk.Label(hdr, text="Active", width=6, anchor="center").pack(side="left")
+        tk.Label(hdr, text="Spectrum file", anchor="w").pack(
+            side="left", padx=(4, 0)
+        )
+        tk.Label(hdr, text="Parameter file", anchor="e").pack(
+            side="right", padx=(0, 4)
+        )
+
+        ttk.Separator(win, orient="horizontal").pack(fill="x", padx=8, pady=2)
+
+        # Scrollable rows area
+        container = tk.Frame(win)
+        container.pack(fill="both", expand=True, padx=8, pady=2)
+
+        self._canvas = tk.Canvas(container, highlightthickness=0)
+        vsb = ttk.Scrollbar(
+            container, orient="vertical", command=self._canvas.yview
+        )
+        self._canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        self._canvas.pack(side="left", fill="both", expand=True)
+
+        self._rows_frame = tk.Frame(self._canvas)
+        self._rows_frame_id = self._canvas.create_window(
+            (0, 0), window=self._rows_frame, anchor="nw"
+        )
+
+        self._rows_frame.bind("<Configure>", self._on_rows_configure)
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfig(
+                self._rows_frame_id, width=e.width
+            ),
+        )
+
+        # Bottom button bar
+        ttk.Separator(win, orient="horizontal").pack(
+            fill="x", padx=8, pady=(4, 2)
+        )
+        btn_bar = tk.Frame(win)
+        btn_bar.pack(fill="x", padx=8, pady=(2, 8))
+
+        ttk.Button(
+            btn_bar, text="Add Spectra\u2026", command=self._add_spectra
+        ).pack(side="left", padx=(0, 4))
+        ttk.Button(btn_bar, text="Clear All", command=self._clear_all).pack(
+            side="left", padx=4
+        )
+        ttk.Button(btn_bar, text="Close", command=self._win.destroy).pack(
+            side="right"
+        )
+
+    # ------------------------------------------------------------------
+    # Row management
+    # ------------------------------------------------------------------
+    def _rebuild_rows(self) -> None:
+        """Destroy and recreate all spectrum rows."""
+        for w in self._rows_frame.winfo_children():
+            w.destroy()
+        self._row_widgets.clear()
+
+        islat = self._islat
+        sample: List[str] = list(getattr(islat, "sample_spectra", []))
+        cur_idx: int = int(getattr(islat, "sample_spectra_index", 0))
+        params: dict = getattr(islat, "sample_spectra_params", {})
+        self._active_var.set(cur_idx)
+
+        is_dark = "dark" in str(self._theme).lower()
+        hl_bg = "#2a5a8a" if is_dark else "#cce0f5"
+
+        for idx, path in enumerate(sample):
+            name = os.path.basename(path)
+            param_path: Optional[str] = params.get(path)
+
+            # outer container for this spectrum entry
+            outer = tk.Frame(self._rows_frame)
+            outer.pack(fill="x", pady=(2, 0))
+
+            # top row: radio + spectrum name + x
+            top_row = tk.Frame(outer)
+            top_row.pack(fill="x")
+
+            rb = tk.Radiobutton(
+                top_row,
+                variable=self._active_var,
+                value=idx,
+                command=lambda i=idx: self._activate(i),
+                width=4,
+            )
+            rb.pack(side="left")
+
+            lbl = tk.Label(top_row, text=name, anchor="w", cursor="hand2")
+            lbl.pack(side="left", fill="x", expand=True, padx=(2, 8))
+            lbl.bind("<Button-1>", lambda e, i=idx: self._activate(i))
+            CreateToolTip(lbl, path)
+
+            ttk.Button(
+                top_row,
+                text="\u2715",
+                width=2,
+                command=lambda i=idx: self._remove(i),
+            ).pack(side="right", padx=(0, 2))
+
+            if idx == cur_idx:
+                for w in (outer, top_row):
+                    w.configure(bg=hl_bg)
+                lbl.configure(bg=hl_bg, font=("TkDefaultFont", 9, "bold"))
+                rb.configure(bg=hl_bg, activebackground=hl_bg)
+
+            # bottom row: param file indicator + Browse + Clear
+            param_row = tk.Frame(outer)
+            param_row.pack(fill="x", padx=(28, 2), pady=(0, 2))
+
+            param_lbl_text = (
+                os.path.basename(param_path) if param_path else "(use existing parameters)"
+            )
+            param_lbl_kw: dict = dict(
+                text=param_lbl_text,
+                anchor="w",
+                font=("TkDefaultFont", 8, "italic" if not param_path else "normal"),
+            )
+            if not param_path:
+                param_lbl_kw["foreground"] = "#888888"
+            param_lbl = tk.Label(param_row, **param_lbl_kw)
+            param_lbl.pack(side="left", fill="x", expand=True)
+            if param_path:
+                CreateToolTip(param_lbl, param_path)
+
+            ttk.Button(
+                param_row,
+                text="Browse\u2026",
+                width=8,
+                command=lambda i=idx, p=path: self._browse_param_file(i, p),
+            ).pack(side="right", padx=(2, 0))
+
+            clear_btn = ttk.Button(
+                param_row,
+                text="Clear",
+                width=5,
+                command=lambda i=idx, p=path: self._clear_param_file(i, p),
+                state="normal" if param_path else "disabled",
+            )
+            clear_btn.pack(side="right", padx=(2, 0))
+
+            ttk.Separator(self._rows_frame, orient="horizontal").pack(
+                fill="x", padx=4, pady=1
+            )
+
+            self._row_widgets.append(outer)
+
+        self._bind_scroll(self._rows_frame)
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+        # Resize window to fit content (clamped at 600 px)
+        n = max(len(sample), 1)
+        self._win.geometry(f"680x{min(100 + n * 55, 600)}")
+
+    # ------------------------------------------------------------------
+    # Actions
+    # ------------------------------------------------------------------
+    def _activate(self, idx: int) -> None:
+        """Switch the active spectrum to *idx*."""
+        try:
+            self._islat.switch_to_spectrum(idx)
+            self._active_var.set(idx)
+        except Exception as exc:
+            print(f"[SampleManagerWindow] switch error: {exc}")
+        self._rebuild_rows()
+        self._refresh_file_pane()
+
+    def _remove(self, idx: int) -> None:
+        """Remove the spectrum at *idx* from the sample."""
+        islat = self._islat
+        sample: List[str] = list(getattr(islat, "sample_spectra", []))
+        if not sample or idx >= len(sample):
+            return
+
+        sample.pop(idx)
+        cur: int = int(getattr(islat, "sample_spectra_index", 0))
+
+        if len(sample) == 0:
+            islat.sample_spectra_index = 0
+        elif cur >= len(sample):
+            islat.sample_spectra_index = len(sample) - 1
+        elif idx < cur:
+            islat.sample_spectra_index = cur - 1
+
+        islat.sample_spectra = sample
+        self._rebuild_rows()
+        self._refresh_file_pane()
+
+    def _browse_param_file(self, idx: int, spectrum_path: str) -> None:
+        """Open a file dialog and assign a parameter CSV to *spectrum_path*."""
+        from iSLAT.Modules.GUI import GUI as GUIModule
+        from iSLAT.Modules.FileHandling.iSLATFileHandling import save_folder_path
+
+        chosen = GUIModule.file_selector(
+            title="Select Parameter File",
+            initialdir=save_folder_path,
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            allow_multiple=False,
+        )
+        if chosen:
+            path = chosen if isinstance(chosen, str) else chosen[0]
+            params: dict = getattr(self._islat, "sample_spectra_params", {})
+            params[spectrum_path] = path
+            self._islat.sample_spectra_params = params
+        self._rebuild_rows()
+
+    def _clear_param_file(self, idx: int, spectrum_path: str) -> None:
+        """Remove the parameter file assignment for *spectrum_path*."""
+        params: dict = getattr(self._islat, "sample_spectra_params", {})
+        params.pop(spectrum_path, None)
+        self._islat.sample_spectra_params = params
+        self._rebuild_rows()
+
+    def _add_spectra(self) -> None:
+        """Open a file dialog and add selected files to the sample."""
+        from iSLAT.Modules.GUI import GUI as GUIModule
+        from iSLAT.Modules.FileHandling.iSLATFileHandling import (
+            example_data_folder_path,
+        )
+
+        paths = GUIModule.file_selector(
+            title="Add Spectra to Sample",
+            initialdir=example_data_folder_path,
+            allow_multiple=True,
+        )
+        if paths:
+            if isinstance(paths, str):
+                paths = [paths]
+            self._islat.add_sample_spectra(list(paths))
+        self._rebuild_rows()
+        self._refresh_file_pane()
+
+    def _clear_all(self) -> None:
+        """Remove all spectra from the sample."""
+        self._islat.clear_sample_spectra()
+        self._rebuild_rows()
+        self._refresh_file_pane()
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _refresh_file_pane(self) -> None:
+        """Sync the FileInteractionPane label if the GUI is available."""
+        try:
+            islat = self._islat
+            if (
+                hasattr(islat, "GUI")
+                and islat.GUI
+                and hasattr(islat.GUI, "file_interaction_pane")
+            ):
+                islat.GUI.file_interaction_pane.update_file_label()
+        except Exception:
+            pass
+
+    def _on_rows_configure(self, event: Any) -> None:
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        self._canvas.itemconfig(
+            self._rows_frame_id, width=self._canvas.winfo_width()
+        )
+
+    def _bind_scroll(self, widget: tk.Widget) -> None:
+        """Recursively bind mouse-wheel scrolling to *widget* and children."""
+
+        def _on_scroll(event: Any) -> None:
+            self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        widget.bind("<MouseWheel>", _on_scroll)
+        for child in widget.winfo_children():
+            self._bind_scroll(child)
+
+    def _on_close(self) -> None:
+        key = id(self._islat)
+        SampleManagerWindow._instances.pop(key, None)
+        self._win.destroy()

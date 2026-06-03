@@ -72,6 +72,7 @@ class iSLAT:
         # === SAMPLE SPECTRA ===
         self.sample_spectra: list[str] = []       # file paths of all spectra in the sample
         self.sample_spectra_index: int = 0        # index into sample_spectra for currently displayed spectrum
+        self.sample_spectra_params: dict[str, str] = {}  # spectrum path -> parameter file path (optional override)
         
         # === PERFORMANCE FLAGS ===
         self._use_parallel_processing = False
@@ -564,6 +565,48 @@ class iSLAT:
             print("Falling back to default molecule initialization.")
             self._initialize_molecules_for_spectrum()
 
+    def _load_parameters_from_explicit_file(self, param_file: str) -> bool:
+        """Load molecule parameters from an explicitly specified CSV file.
+
+        Parameters
+        ----------
+        param_file : str
+            Absolute path to the parameter save CSV file.
+
+        Returns
+        -------
+        bool
+            ``True`` on success, ``False`` on failure.
+        """
+        if not os.path.exists(param_file):
+            print(f"[SampleManager] Parameter file not found: {param_file}")
+            return False
+        try:
+            folder = os.path.dirname(param_file)
+            fname  = os.path.basename(param_file)
+            mole_save_data = read_from_user_csv(
+                folder, fname,
+                update_save_file_names=self.user_settings.get(
+                    "update_save_file_names_in_save_csv", False
+                ),
+            )
+            if not mole_save_data:
+                print(f"[SampleManager] No molecule data in {param_file}")
+                return False
+
+            self.molecules_dict.clear()
+            self.init_molecules(mole_save_data)
+            self._molecules_loaded = True
+
+            msg = f"Loaded parameters from: {os.path.basename(param_file)}"
+            print(f"[SampleManager] {msg}")
+            if hasattr(self, 'GUI') and self.GUI and hasattr(self.GUI, 'data_field'):
+                self.GUI.data_field.insert_text(msg)
+            return True
+        except Exception as exc:
+            print(f"[SampleManager] Error loading {param_file}: {exc}")
+            return False
+
     # === SPECTRUM METHODS ===
     def add_sample_spectra(self, file_paths: list[str] | None = None):
         """
@@ -643,7 +686,12 @@ class iSLAT:
             return
         
         self.sample_spectra_index = index
-        self.load_spectrum(file_path=file_path)
+        param_file = getattr(self, 'sample_spectra_params', {}).get(file_path)
+        if param_file and os.path.exists(param_file):
+            self.load_spectrum(file_path=file_path)
+            self._load_parameters_from_explicit_file(param_file)
+        else:
+            self.load_spectrum(file_path=file_path)
 
     def cycle_spectrum(self, direction: int):
         """

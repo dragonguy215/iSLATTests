@@ -108,7 +108,7 @@ class LineListViewWindow(tk.Toplevel):
         except Exception:
             pass
 
-        clear_btn = ttk.Button(top, text="✕", width=3, command=self._clear_search)
+        clear_btn = ttk.Button(top, text="x", width=3, command=self._clear_search)
         clear_btn.grid(row=0, column=2, padx=(0, 4))
 
         refresh_btn = ttk.Button(top, text="Refresh", command=self._refresh)

@@ -12,6 +12,7 @@ from ..GUIFunctions import create_button, create_menu_btn
 from ..Tooltips import CreateToolTip, MenuToolTip
 from .ResizableFrame import ResizableFrame
 from iSLAT.Modules.GUI.Widgets.ChartWindow import MoleculeSelector
+from iSLAT.Modules.GUI.Widgets.SampleManagerWindow import SampleManagerWindow
 from iSLAT.Modules.GUI.PlotGridWindow import PlotGridWindow
 from iSLAT.Modules.GUI.FullSpectrumWindow import FullSpectrumWindow
 from iSLAT.Modules.FileHandling.iSLATFileHandling import (
@@ -183,6 +184,8 @@ class TopBar(ResizableFrame):
         spec_functions_menu.add_separator()
         spec_functions_menu.add_command(label="Output Full Spectrum (Ctrl+Shift+F)", command=lambda: output_full_spectrum(self.islat))
         spec_functions_menu.add_command(label="Display Full Spectrum (Ctrl+F)", command=lambda: FullSpectrumWindow(self.master, self.islat))
+        spec_functions_menu.add_separator()
+        spec_functions_menu.add_command(label="Manage Sample\u2026", command=self.manage_sample)
         
         spec_functions_drpwn.config(menu=spec_functions_menu)
         MenuToolTip(spec_functions_menu, {
@@ -195,6 +198,7 @@ class TopBar(ResizableFrame):
             "Subtract Models from Data":        "Subtract all visible molecule models\nfrom the observed spectrum.",
             "Output Full Spectrum (Ctrl+Shift+F)": "Save the full combined model spectrum\nto a file.",
             "Display Full Spectrum (Ctrl+F)":   "Open the full combined model spectrum\nin a separate window.",
+            "Manage Sample\u2026":              "Open the sample manager to add,\nremove, and switch between spectra.",
         })
 
         # ── Views dropdown ─────────────────────────────────────────────
@@ -1026,6 +1030,11 @@ class TopBar(ResizableFrame):
     
     def spectra_browser(self):
         print("Open spectra browser")
+
+    def manage_sample(self):
+        """Open the sample manager window."""
+        SampleManagerWindow.open(self.master, self.islat, self.theme)
+
 
     def default_molecules(self):
         self.islat.load_default_molecules()
