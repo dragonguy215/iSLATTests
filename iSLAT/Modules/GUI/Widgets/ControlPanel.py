@@ -1019,7 +1019,6 @@ class ControlPanel(ttk.Frame):
         return self._format_value(value, param_name)
         
     def _format_value(self, value, param_name) -> str:
-
         if not param_name:
             return f"{value:.2f}"
         
@@ -1042,7 +1041,7 @@ class ControlPanel(ttk.Frame):
                 return field_config['format'].format(value)
             elif isinstance(value, str):
                 return value
-            return f"{value:.4g}"
+            return f"{value:.6g}"
         except Exception as e:
             print(f"Error with formatting: {e}")
             return ""
@@ -1204,7 +1203,7 @@ class ControlPanel(ttk.Frame):
             return
         try:
             start, end = binding["getter"]()
-            range_val = round(end - start, 2)
+            range_val = end - start
             self._set_var(self.plot_start_var, self._format_value(start, "display_range_start"))
             self._set_var(self.plot_range_var, self._format_value(range_val, "display_range_range"))
         except Exception:
@@ -1214,7 +1213,7 @@ class ControlPanel(ttk.Frame):
         """Restore Plot Start / Plot Range fields from islat.display_range."""
         try:
             start, end = self.islat.display_range
-            range_val = round(end - start, 2)
+            range_val = end - start
             self._set_var(self.plot_start_var, self._format_value(start, "display_range_start"))
             self._set_var(self.plot_range_var, self._format_value(range_val, "display_range_range"))
         except Exception:
@@ -1261,7 +1260,7 @@ class ControlPanel(ttk.Frame):
         try:
             start = float(self.plot_start_var.get())
             range_val = float(self.plot_range_var.get())
-            new_start = round(start + range_val, 6)
+            new_start = start + range_val
             self._set_var(self.plot_start_var, self._format_value(new_start, "display_range_start"))
             self._update_display_range()
         except (ValueError, AttributeError):
@@ -1272,7 +1271,7 @@ class ControlPanel(ttk.Frame):
         try:
             start = float(self.plot_start_var.get())
             range_val = float(self.plot_range_var.get())
-            new_start = round(start - range_val, 6)
+            new_start = start - range_val
             self._set_var(self.plot_start_var, self._format_value(new_start, "display_range_start"))
             self._update_display_range()
         except (ValueError, AttributeError):
@@ -1705,8 +1704,8 @@ class ControlPanel(ttk.Frame):
         if (hasattr(self, 'min_wavelength_var') and hasattr(self, 'max_wavelength_var') 
             and hasattr(molecules_dict, 'global_wavelength_range')):
             min_val, max_val = molecules_dict.global_wavelength_range
-            self._set_var(self.min_wavelength_var, f'{min_val:.2e}')
-            self._set_var(self.max_wavelength_var, f'{max_val:.2e}')
+            self._set_var(self.min_wavelength_var, f'{min_val:.6g}')
+            self._set_var(self.max_wavelength_var, f'{max_val:.6g}')
 
         # Update display range fields
         self._update_display_range_fields()
@@ -1801,7 +1800,7 @@ class ControlPanel(ttk.Frame):
             
         try:
             start, end = self.islat.display_range
-            range_val = round(end - start, 2)
+            range_val = end - start
             
             # Update only if values are different to avoid unnecessary updates
             current_start = self.plot_start_var.get()
