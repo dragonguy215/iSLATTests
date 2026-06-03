@@ -14,7 +14,6 @@ every spectral panel shares the same fundamental contract:
 The :class:`StackedSpectralPanel` composer creates and manages many
 ``SpectralPanel`` instances to build multi-panel stacked figures.
 """
-
 from abc import abstractmethod
 from enum import Enum
 from typing import Optional, Tuple, Dict, Any, List, TYPE_CHECKING
@@ -101,7 +100,6 @@ class SpectralPanel(BasePlot):
     **kwargs
         Forwarded to :class:`BasePlot`.
     """
-
     #: Attribute tag used for gap-indicator artists so they can be
     #: selectively removed with :meth:`BasePlot._clear_tagged_artists`.
     _GAP_TAG = "_islat_gap_indicator"

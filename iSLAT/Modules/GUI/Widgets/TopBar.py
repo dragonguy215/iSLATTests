@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from iSLAT.Modules.Plotting.MainPlot import iSLATPlot
 
 # ---------------------------------------------------------------------------
-# TopBarSurface — ControlSurface implementation for the TopBar dynamic area
+# TopBarSurface - ControlSurface implementation for the TopBar dynamic area
 # ---------------------------------------------------------------------------
 
 class TopBarSurface(ControlSurface):
@@ -876,7 +876,7 @@ class TopBar(ResizableFrame):
             if self.islat.output_line_measurements:
                 self.islat.input_line_list = self.islat.output_line_measurements
             else:
-                # No explicit output was configured — reconstruct the default
+                # No explicit output was configured - reconstruct the default
                 # path that save_fit_results used.
                 from iSLAT.Modules.FileHandling import fit_save_lines_file_name
                 spectrum_name = getattr(self.islat, 'loaded_spectrum_name', None)
@@ -944,7 +944,7 @@ class TopBar(ResizableFrame):
             if self.control_panel is not None:
                 self.control_panel._update_molecule_parameter_fields()
         except Exception as e:
-            print(f"single_slab_fit: GUI refresh warning — {e}")
+            print(f"single_slab_fit: GUI refresh warning - {e}")
 
         try:
             slab_model.save_results(fitted_result)

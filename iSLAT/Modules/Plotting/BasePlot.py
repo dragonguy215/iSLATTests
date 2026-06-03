@@ -1,10 +1,8 @@
 """
-BasePlot — Abstract base class for all iSLAT plot types.
+BasePlot - Abstract base class for all iSLAT plot types.
 
-Provides common infrastructure for figure/axes management, theming,
-molecule rendering helpers, and show/save functionality. All plot
-classes inherit from this so they can work both inside the GUI and
-as standalone matplotlib figures in scripts or Jupyter notebooks.
+Provides common infrastructure for figure/axes management, theming, molecule rendering helpers, and show/save functionality.
+All plot classes inherit from this so they can work both inside the GUI and as standalone matplotlib figures in scripts or Jupyter notebooks.
 """
 
 from abc import ABC, abstractmethod
@@ -41,8 +39,7 @@ if TYPE_CHECKING:
 def _detect_system_theme() -> str:
     """Return ``'DarkTheme'`` or ``'LightTheme'`` based on the OS appearance.
 
-    Works on macOS (via ``defaults``), Windows (via registry), and falls
-    back to ``'LightTheme'`` on other platforms or on error.
+    Works on macOS (via ``defaults``), Windows (via registry), and falls back to ``'LightTheme'`` on other platforms or on error.
     """
     import platform
     import subprocess
@@ -68,7 +65,7 @@ def _detect_system_theme() -> str:
             winreg.CloseKey(key)
             return "LightTheme" if value == 1 else "DarkTheme"
         else:
-            # Linux / other — no universal API; default to light.
+            # Linux / other - no universal API; default to light.
             return "LightTheme"
     except Exception:
         return "LightTheme"
@@ -101,9 +98,8 @@ class BasePlot(ABC):
     """
     Abstract base class for all iSLAT plot types.
 
-    Subclasses must implement :meth:`generate_plot`.  Everything else
-    (figure lifecycle, molecule helpers, theming, show/save) is provided
-    by the base class.
+    Subclasses must implement :meth:`generate_plot`.
+    Everything else (figure lifecycle, molecule helpers, theming, show/save) is provided by the base class.
 
     Parameters
     ----------
@@ -144,10 +140,8 @@ class BasePlot(ABC):
     def apply_theme_to_figure(self, fig: Optional[MplFigure] = None) -> None:
         """Apply theme background / foreground colors to a figure and all its axes.
 
-        This sets the figure face color, axes face color, tick colors,
-        label colors, title colors, and spine colors from the theme
-        dictionary.  Call this after ``generate_plot()`` (or at the end
-        of it) to get a fully themed figure without manual per-axes work.
+        This sets the figure face color, axes face color, tick colors, label colors, title colors, and spine colors from the theme dictionary.
+        Call this after ``generate_plot()`` (or at the end of it) to get a fully themed figure without manual per-axes work.
 
         Parameters
         ----------
@@ -199,8 +193,7 @@ class BasePlot(ABC):
         Returns
         -------
         dict
-            The parsed theme dictionary, or :data:`DEFAULT_THEME` if the
-            file cannot be found.
+            The parsed theme dictionary, or :data:`DEFAULT_THEME` if the file cannot be found.
         """
         if name == "auto":
             name = _detect_system_theme()
@@ -243,24 +236,20 @@ class BasePlot(ABC):
     ) -> None:
         """Create (or replace) a text-only, per-molecule-colored legend.
 
-        Each entry is shown as bold colored text with no visible handle
-        patch, giving a compact color key above the plot.  The legend
-        texts are tagged with ``_islat_mol_color = True`` so that
-        :meth:`apply_theme_to_figure` will not overwrite them with the
-        foreground color.
+        Each entry is shown as bold colored text with no visible handle patch, giving a compact color key above the plot.
+        The legend texts are tagged with ``_islat_mol_color = True`` so that
+        :meth:`apply_theme_to_figure` will not overwrite them with the foreground color.
 
-        When *ncols* is ``None`` (the default), the number of columns is
-        auto-computed so that the legend does not exceed the width of the
-        axes.  If the labels are long, items wrap into multiple rows.
+        When *ncols* is ``None`` (the default), the number of columns is auto-computed so that the legend does not exceed the width of the axes.
+        If the labels are long, items wrap into multiple rows.
 
-        When *mol_labels* is empty the existing legend (if any) is
-        removed and no new one is created.
+        When *mol_labels* is empty the existing legend (if any) is removed and no new one is created.
 
         Parameters
         ----------
         use_figure_transform : bool
-            When True (default), *bbox_to_anchor* is interpreted in
-            figure coordinates.  When False, it uses axes coordinates.
+            When True (default), *bbox_to_anchor* is interpreted in figure coordinates.
+            When False, it uses axes coordinates.
         """
         old = ax.get_legend()
         if old is not None:
@@ -276,8 +265,7 @@ class BasePlot(ABC):
             fig = ax.get_figure()
             fig_w_in = fig.get_figwidth()
 
-            # Estimate average label width in inches (approx 0.085 in
-            # per character at the given fontsize, scaled from 10pt base)
+            # Estimate average label width in inches (approx 0.085 in per character at the given fontsize, scaled from 10pt base)
             char_w_in = 0.085 * (fontsize / 10.0)
             avg_label_w = sum(len(lbl) for lbl in mol_labels) / len(mol_labels)
             col_w_in = avg_label_w * char_w_in + 0.3  # extra for padding
@@ -288,8 +276,7 @@ class BasePlot(ABC):
 
         handles = [Patch(facecolor='none', edgecolor='none') for _ in mol_colors]
 
-        # Place the legend centered on the full figure width, pinned
-        # near the top of the figure so it sits above all panels.
+        # Place the legend centered on the full figure width, pinned near the top of the figure so it sits above all panels.
         fig = ax.get_figure()
         transform = fig.transFigure if use_figure_transform else ax.transAxes
         leg = ax.legend(
@@ -319,8 +306,7 @@ class BasePlot(ABC):
         """
         Retrieve ``(wavelength, flux)`` from a *Molecule* object.
 
-        This delegates to ``molecule.get_flux()`` and works regardless of
-        whether the molecule has already been computed or not.
+        This delegates to ``molecule.get_flux()`` and works regardless of whether the molecule has already been computed or not.
 
         Parameters
         ----------
@@ -329,15 +315,13 @@ class BasePlot(ABC):
         wave_data : np.ndarray, optional
             Wavelength array passed through to ``get_flux``.
         interpolate_to_input : bool, default False
-            When True the model flux is resampled onto *target_wavelengths*
-            (or *wave_data* when *target_wavelengths* is None).  This is
-            used by the matched-spectral-sampling feature.
+            When True the model flux is resampled onto *target_wavelengths* (or *wave_data* when *target_wavelengths* is None).
+            This is used by the matched-spectral-sampling feature.
         target_wavelengths : np.ndarray, optional
-            Rest-frame wavelength grid to interpolate onto.  When
-            *interpolate_to_input* is True and this is provided, the model
+            Rest-frame wavelength grid to interpolate onto.
+            When *interpolate_to_input* is True and this is provided, the model
             is resampled to these wavelengths (typically the data wavelengths
-            corrected for the global stellar RV) while the returned
-            wavelength array is *wave_data* (the observer-frame grid).
+            corrected for the global stellar RV) while the returned wavelength array is *wave_data* (the observer-frame grid).
         """
         if molecule is None:
             return None, None
@@ -349,8 +333,7 @@ class BasePlot(ABC):
                 interpolate_to_input=interpolate_to_input,
             )
             # When we interpolated to rest-frame target wavelengths, return
-            # the observer-frame (wave_data) wavelengths so the line is plotted
-            # at the correct observed positions.
+            # the observer-frame (wave_data) wavelengths so the line is plotted at the correct observed positions.
             if interpolate_to_input and target_wavelengths is not None and wave_data is not None:
                 lam = wave_data
             return lam, flux
@@ -368,8 +351,7 @@ class BasePlot(ABC):
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """Retrieve ``(wavelength, tau)`` from a *Molecule* object.
 
-        Mirrors :meth:`get_molecule_spectrum_data` but returns the
-        convolved optical-depth profile instead of flux.
+        Mirrors :meth:`get_molecule_spectrum_data` but returns the convolved optical-depth profile instead of flux.
 
         Parameters
         ----------
@@ -378,8 +360,7 @@ class BasePlot(ABC):
         wave_data : np.ndarray, optional
             Wavelength array passed through to ``get_tau``.
         interpolate_to_input : bool, default False
-            When True the model tau is resampled onto *target_wavelengths*
-            (or *wave_data* when *target_wavelengths* is None).
+            When True the model tau is resampled onto *target_wavelengths* (or *wave_data* when *target_wavelengths* is None).
         target_wavelengths : np.ndarray, optional
             Rest-frame wavelength grid to interpolate onto.
         """
@@ -415,9 +396,8 @@ class BasePlot(ABC):
         molecule : Molecule
             Molecule object whose intensity data is requested.
         full_range : bool, optional
-            If ``True``, return all lines in the underlying HITRAN
-            file with intensity computed for each.  Defaults to
-            ``False`` (active wavelength range only).
+            If ``True``, return all lines in the underlying HITRAN file with intensity computed for each.
+            Defaults to ``False`` (active wavelength range only).
 
         Returns
         -------
@@ -457,23 +437,18 @@ class BasePlot(ABC):
     def _ensure_figure(self, silent: bool = False, **subplot_kw) -> MplFigure:
         """Create the figure if it doesn't already exist.
 
-        The figure is **always** created via
-        :class:`~matplotlib.figure.Figure` — it is *not* registered
-        with the pyplot state machine at creation time.  This prevents
-        "leaked" figure widgets in Jupyter notebooks when plot objects
-        are used as intermediate data sources (e.g. the two source
-        plots inside a :class:`CompositeStackedPanel`).
+        The figure is **always** created via :class:`~matplotlib.figure.Figure` - it is *not* registered with the pyplot state machine at creation time.
+        This prevents "leaked" figure widgets in Jupyter notebooks when plot objects
+        are used as intermediate data sources (e.g. the two source plots inside a :class:`CompositeStackedPanel`).
 
         When the user calls :meth:`show`, the figure is registered
-        with pyplot **on demand** so that the active interactive
-        backend (ipympl ``%matplotlib widget``, inline, TkAgg, …)
-        can display it properly.
+        with pyplot **on demand** so that the active interactive backend (ipympl ``%matplotlib widget``, inline, TkAgg, …) can display it properly.
 
         Parameters
         ----------
         silent : bool
-            Kept for backward compatibility.  Has no effect — all
-            figures are now created without pyplot registration.
+            Kept for backward compatibility.
+            Has no effect - all figures are now created without pyplot registration.
         """
         if self.fig is None:
             kw: Dict[str, Any] = {"layout": "constrained"}
@@ -507,9 +482,8 @@ class BasePlot(ABC):
         wave_data : np.ndarray, optional
             Display-frame wavelength array (used for x-axis positions).
         wave_data_obs : np.ndarray, optional
-            Observer-frame wavelength array passed to
-            ``get_matched_sampling_wavelengths``.  Falls back to
-            *wave_data* when not provided.
+            Observer-frame wavelength array passed to ``get_matched_sampling_wavelengths``.
+            Falls back to *wave_data* when not provided.
         """
         # get_matched_sampling_wavelengths expects observer-frame input.
         obs = wave_data_obs if wave_data_obs is not None else wave_data
@@ -591,15 +565,13 @@ class BasePlot(ABC):
         """
         Draw vertical dotted lines + labels for a line list DataFrame.
 
-        The DataFrame must contain at least ``wave`` (or ``lam``) and
-        ``species`` columns.
+        The DataFrame must contain at least ``wave`` (or ``lam``) and ``species`` columns.
 
         Parameters
         ----------
         tag : str, optional
             When provided every created artist is stamped with
-            ``setattr(artist, tag, True)`` so callers can later remove
-            them with :meth:`_clear_tagged_artists`.
+            ``setattr(artist, tag, True)`` so callers can later remove them with :meth:`_clear_tagged_artists`.
         """
         if line_data is None or len(line_data) == 0:
             return
@@ -639,9 +611,7 @@ class BasePlot(ABC):
         Parameters
         ----------
         tag : str, optional
-            When provided every created artist is stamped with
-            ``setattr(artist, tag, True)`` so callers can later remove
-            them with :meth:`_clear_tagged_artists`.
+            When provided every created artist is stamped with ``setattr(artist, tag, True)`` so callers can later remove them with :meth:`_clear_tagged_artists`.
         """
         if atomic_df is None or len(atomic_df) == 0:
             return
@@ -678,10 +648,8 @@ class BasePlot(ABC):
     ) -> None:
         """Plot saved-line markers on *ax* with artist tagging.
 
-        Handles both point markers (``lam`` column) and range markers
-        (``xmin`` / ``xmax`` columns).  Every created artist is stamped
-        with *tag* so it can be removed later via
-        :meth:`_clear_tagged_artists`.
+        Handles both point markers (``lam`` column) and range markers (``xmin`` / ``xmax`` columns).
+        Every created artist is stamped with *tag* so it can be removed later via :meth:`_clear_tagged_artists`.
 
         Parameters
         ----------
@@ -719,8 +687,7 @@ class BasePlot(ABC):
         """List of active line artist entries managed by this panel.
 
         Each entry is ``[vline_artist, text_artist, scatter_artist, info_dict]``.
-        Use :meth:`render_active_lines` to populate and
-        :meth:`clear_active_lines` to remove all artists.
+        Use :meth:`render_active_lines` to populate and :meth:`clear_active_lines` to remove all artists.
         """
         return self._active_lines
 
@@ -734,9 +701,9 @@ class BasePlot(ABC):
 
         The default implementation is a no-op.  Subclasses should override:
 
-        * :class:`LineInspectionPlot` — renders vertical dashed line markers
+        * :class:`LineInspectionPlot` - renders vertical dashed line markers
           with energy/A-coefficient labels.
-        * :class:`PopulationDiagramPlot` — renders scatter points on the
+        * :class:`PopulationDiagramPlot` - renders scatter points on the
           Boltzmann diagram.
 
         Parameters
@@ -760,20 +727,18 @@ class BasePlot(ABC):
     def clear_active_lines(self, active_lines: List[Any]) -> None:
         """Remove all active-line artists and clear *active_lines*.
 
-        The default implementation simply clears the list without removing
-        matplotlib artists.  Subclasses override this to also call
-        ``artist.remove()`` on each stored artist before clearing.
+        The default implementation simply clears the list without removing matplotlib artists.
+        Subclasses override this to also call ``artist.remove()`` on each stored artist before clearing.
 
         Parameters
         ----------
         active_lines : list
-            The mutable active-lines list to clear (same object that was
-            passed to :meth:`render_active_lines`).
+            The mutable active-lines list to clear (same object that was passed to :meth:`render_active_lines`).
         """
         active_lines.clear()
 
     # ------------------------------------------------------------------
-    # Abstract API — subclasses must implement
+    # Abstract API - subclasses must implement
     # ------------------------------------------------------------------
     @abstractmethod
     def generate_plot(self, **kwargs) -> None:
@@ -804,13 +769,10 @@ class BasePlot(ABC):
     def show(self, block: bool = False) -> None:
         """Display the plot interactively.
 
-        Figures are created without pyplot registration (see
-        :meth:`_ensure_figure`), so this method registers the figure
-        with pyplot **on demand** before displaying.  In a Jupyter
-        notebook this lets the active interactive backend (ipympl,
-        inline, …) create the proper widget or image.  Outside of a
-        notebook the figure is registered with the GUI backend so
-        ``plt.show()`` opens a window.
+        Figures are created without pyplot registration (see :meth:`_ensure_figure`),
+        so this method registers the figure with pyplot **on demand** before displaying.
+        In a Jupyter notebook this lets the active interactive backend (ipympl, inline, …) create the proper widget or image.
+        Outside of a notebook the figure is registered with the GUI backend so ``plt.show()`` opens a window.
         """
         if self.fig is None:
             self.generate_plot()
@@ -828,13 +790,10 @@ class BasePlot(ABC):
     def _register_with_pyplot(self) -> None:
         """Ensure *self.fig* is known to pyplot's figure manager.
 
-        If the figure was created via :class:`MplFigure` (which is
-        always the case now), it has no ``number`` attribute and is
-        unknown to pyplot.  This method registers it so the active
-        backend (ipympl widget, inline, TkAgg, …) can display it.
+        If the figure was created via :class:`MplFigure` (which is always the case now), it has no ``number`` attribute and is unknown to pyplot.
+        This method registers it so the active backend (ipympl widget, inline, TkAgg, …) can display it.
 
-        Calling this more than once is safe — it's a no-op when the
-        figure is already registered.
+        Calling this more than once is safe - it's a no-op when the figure is already registered.
         """
         if self.fig is None:
             return
@@ -896,7 +855,7 @@ class BasePlot(ABC):
                 # Try pyplot close first (works for pyplot-managed figs)
                 plt.close(self.fig)
             except Exception:
-                # Figure was created with MplFigure() — not in pyplot,
+                # Figure was created with MplFigure() - not in pyplot,
                 # just clear it directly.
                 try:
                     self.fig.clear()
@@ -915,8 +874,7 @@ class BasePlot(ABC):
         """Return a PNG rendering of the figure for IPython/Jupyter.
 
         When an iSLAT plot object is the last expression in a notebook
-        cell, Jupyter calls this method automatically so the figure
-        renders inline — just like a plain matplotlib ``Figure``.
+        cell, Jupyter calls this method automatically so the figure renders inline - just like a plain matplotlib ``Figure``.
         """
         if self.fig is None:
             self.generate_plot()
@@ -935,8 +893,7 @@ class BasePlot(ABC):
     def _repr_html_(self) -> Optional[str]:
         """Return an HTML ``<img>`` tag embedding the figure as base-64.
 
-        Provides a second rich-display path for IPython/Jupyter frontends
-        that prefer HTML over raw PNG.
+        Provides a second rich-display path for IPython/Jupyter frontends that prefer HTML over raw PNG.
         """
         png = self._repr_png_()
         if png is None:

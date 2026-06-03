@@ -1,9 +1,7 @@
 """
-SpectrumPanelView — intermediate abstract base class for standalone
-single-panel views that own their own figure and canvas.
+SpectrumPanelView - intermediate abstract base class for standalone single-panel views that own their own figure and canvas.
 
-Provides the common infrastructure shared by views such as
-:class:`LineInspectionView`:
+Provides the common infrastructure shared by views such as :class:`LineInspectionView`:
 
 * Private :class:`~matplotlib.figure.Figure` /
   :class:`~matplotlib.backends.backend_tkagg.FigureCanvasTkAgg` lifecycle
@@ -13,7 +11,6 @@ Provides the common infrastructure shared by views such as
   ``activate``, ``_build_plot``, and ``update_model_plot``.
 * No-op defaults for selection / active-line helpers (override as needed).
 """
-
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -56,16 +53,15 @@ class SpectrumPanelView(PlotView):
     Expected instance attributes (set in subclass ``__init__`` via
     ``super().__init__(plot_manager)``):
 
-    * ``_pm`` — the :class:`iSLATPlot` controller
-    * ``_islat`` — the top-level iSLAT object
-    * ``_parent_frame`` — Tk frame the canvas is packed into
-    * ``_canvas`` — :class:`FigureCanvasTkAgg` (or ``None``)
-    * ``_fig`` — :class:`~matplotlib.figure.Figure` (or ``None``)
-    * ``_initialised`` — ``bool``
-    * ``_needs_refresh`` — ``bool``
-    * ``_right_click_cid`` — matplotlib connection id (or ``None``)
+    * ``_pm`` - the :class:`iSLATPlot` controller
+    * ``_islat`` - the top-level iSLAT object
+    * ``_parent_frame`` - Tk frame the canvas is packed into
+    * ``_canvas`` - :class:`FigureCanvasTkAgg` (or ``None``)
+    * ``_fig`` - :class:`~matplotlib.figure.Figure` (or ``None``)
+    * ``_initialised`` - ``bool``
+    * ``_needs_refresh`` - ``bool``
+    * ``_right_click_cid`` - matplotlib connection id (or ``None``)
     """
-
     def __init__(self, plot_manager: Any) -> None:
         self._pm = plot_manager
         self._islat = plot_manager.islat
@@ -81,9 +77,8 @@ class SpectrumPanelView(PlotView):
         self._right_click_cid: Optional[int] = None
 
     # ==================================================================
-    # Abstract — subclasses must implement
+    # Abstract - subclasses must implement
     # ==================================================================
-
     @abstractmethod
     def activate(self, parent_frame: Any) -> None:  # pragma: no cover
         """Pack the view's canvas into *parent_frame* and ensure content is fresh."""
@@ -109,7 +104,6 @@ class SpectrumPanelView(PlotView):
     # ==================================================================
     # Common canvas helpers
     # ==================================================================
-
     def _ensure_canvas(self) -> None:
         """Build (or rebuild) the :class:`FigureCanvasTkAgg`."""
         if self._canvas is not None:
@@ -185,9 +179,8 @@ class SpectrumPanelView(PlotView):
             menu.grab_release()
 
     # ==================================================================
-    # PlotView — lifecycle (concrete defaults)
+    # PlotView - lifecycle (concrete defaults)
     # ==================================================================
-
     def deactivate(self) -> None:
         """Unregister ControlBus fields and unpack the canvas."""
         bus = getattr(self._pm, "control_bus", None)
@@ -200,9 +193,8 @@ class SpectrumPanelView(PlotView):
                 pass
 
     # ==================================================================
-    # PlotView — theme (concrete default)
+    # PlotView - theme (concrete default)
     # ==================================================================
-
     def apply_theme(self, theme: dict) -> None:
         self._pm.theme = theme
         self._apply_theme_to_fig()
@@ -210,9 +202,8 @@ class SpectrumPanelView(PlotView):
             self._canvas.draw_idle()
 
     # ==================================================================
-    # PlotView — canvas / drawing (concrete)
+    # PlotView - canvas / drawing (concrete)
     # ==================================================================
-
     def draw(self) -> None:
         if self._canvas is not None:
             self._canvas.draw_idle()
@@ -227,23 +218,22 @@ class SpectrumPanelView(PlotView):
         return self._initialised
 
     # ==================================================================
-    # PlotView — toggle helpers (no-ops / simple defaults)
+    # PlotView - toggle helpers (no-ops / simple defaults)
     # ==================================================================
-
     def sync_toggle_state(self, toggle_state: dict) -> None:
         """No visible toggles apply to spectrum-panel views by default."""
         pass
 
     def toggle_summed_spectrum(self, visible: bool) -> None:
-        """No-op — override if the view shows a summed model."""
+        """No-op - override if the view shows a summed model."""
         pass
 
     def toggle_saved_lines(self, show: bool, loaded_lines: Any = None) -> None:
-        """No-op — override if the view shows saved-line annotations."""
+        """No-op - override if the view shows saved-line annotations."""
         pass
 
     def toggle_atomic_lines(self, show: bool) -> None:
-        """No-op — override if the view shows atomic-line annotations."""
+        """No-op - override if the view shows atomic-line annotations."""
         pass
 
     def toggle_legend(self, visible: Optional[bool] = None) -> None:
@@ -258,9 +248,8 @@ class SpectrumPanelView(PlotView):
         self.draw()
 
     # ==================================================================
-    # PlotView — molecule lifecycle (sensible defaults)
+    # PlotView - molecule lifecycle (sensible defaults)
     # ==================================================================
-
     def on_molecule_visibility_changed(
         self,
         molecule_name: str,
@@ -298,17 +287,16 @@ class SpectrumPanelView(PlotView):
         self.update_model_plot()
 
     # ==================================================================
-    # PlotView — selection / active-line helpers (no-op defaults)
+    # PlotView - selection / active-line helpers (no-op defaults)
     # ==================================================================
-
     def on_selection(self, xmin: float, xmax: float) -> None:
-        """No-op — override in views that respond to span-selector drags."""
+        """No-op - override in views that respond to span-selector drags."""
         pass
 
     def clear_selection(self) -> None:
-        """No-op — override in views that track a selection."""
+        """No-op - override in views that track a selection."""
         pass
 
     def clear_active_lines(self) -> None:
-        """No-op — override in views that draw active-line markers."""
+        """No-op - override in views that draw active-line markers."""
         pass

@@ -5,15 +5,11 @@ Generates a vertically stacked series of wavelength-range panels, each
 showing the observed data, individual molecule models, summed model
 spectrum, and optionally line-list annotations and atomic lines.
 
-Inherits the stacking layout from :class:`StackedSpectralPanel` and
-implements :meth:`_create_cell` to produce a single
-:class:`SpectrumPanel` per row.
+Inherits the stacking layout from :class:`StackedSpectralPanel` and implements :meth:`_create_cell` to produce a single :class:`SpectrumPanel` per row.
 
 Can be used standalone (notebook / script) or embedded in a GUI layout.
-The interactive :class:`FullSpectrumView` composes an instance of this
-class for rendering, adding span-selectors and toggle sync on top.
+The interactive :class:`FullSpectrumView` composes an instance of this class for rendering, adding span-selectors and toggle sync on top.
 """
-
 from typing import Callable, Optional, Tuple, List, Dict, Any, Union, TYPE_CHECKING
 from pathlib import Path
 
@@ -181,10 +177,8 @@ class FullSpectrumPlot(StackedSpectralPanel):
     def _build_mol_cache(self) -> Tuple[List[tuple], List[str], List[str]]:
         """Pre-compute molecule spectrum data, labels, and colors.
 
-        Returns ``(mol_cache, mol_labels, mol_colors)`` where each entry
-        in *mol_cache* is ``(wavelengths, flux, color, label, name)``.
-        Sub-classes override or reuse this to avoid duplicating the
-        molecule-caching logic.
+        Returns ``(mol_cache, mol_labels, mol_colors)`` where each entry in *mol_cache* is ``(wavelengths, flux, color, label, name)``.
+        Sub-classes override or reuse this to avoid duplicating the molecule-caching logic.
         """
         mol_cache: List[tuple] = []
         mol_labels: List[str] = []
@@ -369,13 +363,10 @@ class FullSpectrumPlot(StackedSpectralPanel):
     def update_panels_inplace(self) -> None:
         """Fast in-place update of existing subplot data without fig.clf().
 
-        This is the fast-path used by :class:`FullSpectrumView` when the
-        panel layout (edges/count) hasn't changed.  Instead of destroying
-        and re-creating every axes object, we update the data on existing
-        ``Line2D`` artists and ``PolyCollection`` fills.
+        This is the fast-path used by :class:`FullSpectrumView` when the panel layout (edges/count) hasn't changed.
+        Instead of destroying and re-creating every axes object, we update the data on existing ``Line2D`` artists and ``PolyCollection`` fills.
 
-        Falls back to a full :meth:`generate_plot` if the subplot dict is
-        empty (first render) or structurally mismatched.
+        Falls back to a full :meth:`generate_plot` if the subplot dict is empty (first render) or structurally mismatched.
         """
         n = len(self._panel_edges)
         if not self.subplots or len(self.subplots) != n:
@@ -493,7 +484,6 @@ class FullSpectrumPlot(StackedSpectralPanel):
     # ------------------------------------------------------------------
     # Convenience helpers
     # ------------------------------------------------------------------
-
     def _plot_summed_spectrum(
         self,
         ax: "Axes",

@@ -1,10 +1,7 @@
 """
-PopulationDiagramContextMixin — shared right-click context menu for the
-population (Boltzmann) diagram panel.
+PopulationDiagramContextMixin - shared right-click context menu for the population diagram panel.
 
-Both :class:`ThreePanelView` and :class:`PopulationDiagramView` inherit
-this mixin so that the *Color By* and *Axis Settings* dialogs, and the
-menu-building logic, live in exactly one place.
+Both :class:`ThreePanelView` and :class:`PopulationDiagramView` inherit this mixin so that the *Color By* and *Axis Settings* dialogs, and the menu-building logic, live in exactly one place.
 
 Usage::
 
@@ -14,7 +11,6 @@ Usage::
             draw_idle = ...  # callable that flushes the canvas
             return self._build_population_diagram_menu(pdp, canvas_widget, draw_idle)
 """
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable, Optional
@@ -23,15 +19,11 @@ class PopulationDiagramContextMixin:
     """Mixin that supplies the population-diagram right-click menu and dialogs.
 
     Methods intentionally receive ``pdp`` (a :class:`PopulationDiagramPlot`)
-    and ``draw_idle`` (a zero-argument callable that flushes the canvas) as
-    explicit parameters so the mixin stays decoupled from any particular view
-    structure.
+    and ``draw_idle`` (a zero-argument callable that flushes the canvas) as explicit parameters so the mixin stays decoupled from any particular view structure.
     """
-
     # ------------------------------------------------------------------
-    # Public helper — build the tk.Menu
+    # Public helper - build the tk.Menu
     # ------------------------------------------------------------------
-
     def _build_population_diagram_menu(
         self,
         pdp: Any,
@@ -59,7 +51,6 @@ class PopulationDiagramContextMixin:
         menu = tk.Menu(canvas_widget, tearoff=0)
 
         # ---- helpers --------------------------------------------------
-
         def _color_by_dialog():
             self._open_color_by_dialog(pdp, canvas_widget, draw_idle)
 
@@ -155,7 +146,7 @@ class PopulationDiagramContextMixin:
             active_name = getattr(pm, 'active_view_name', None)
 
             if active_name == "Three Panel":
-                # Inside the three-panel layout — offer to pop out to standalone views
+                # Inside the three-panel layout - offer to pop out to standalone views
                 def _to_population_diagram():
                     pm.switch_view("Population Diagram")
 
@@ -171,7 +162,7 @@ class PopulationDiagramContextMixin:
                     command=_to_line_inspection,
                 )
             else:
-                # Already in a standalone view — offer to go back or cross-navigate
+                # Already in a standalone view - offer to go back or cross-navigate
                 def _to_three_panel():
                     pm.switch_view("Three Panel")
 
@@ -192,13 +183,12 @@ class PopulationDiagramContextMixin:
     # ------------------------------------------------------------------
     # Save active lines as line list
     # ------------------------------------------------------------------
-
     def _get_active_lines_info(self, pdp: Any) -> list:
         """Return the list of ``info_dict`` entries for currently active lines.
 
         Tries, in order:
-        1. ``self.active_lines`` — populated by :class:`ThreePanelView`.
-        2. ``pdp._active_lines_cache`` — populated by the standalone
+        1. ``self.active_lines`` - populated by :class:`ThreePanelView`.
+        2. ``pdp._active_lines_cache`` - populated by the standalone
            :class:`PopulationDiagramView`.
 
         Returns an empty list when no active lines are available.
@@ -219,8 +209,7 @@ class PopulationDiagramContextMixin:
         return []
 
     def _save_active_lines_as_line_list(self, parent_widget: Any) -> None:
-        """Open a save-as dialog and write the currently active lines to a
-        CSV line list file compatible with iSLAT's fitting workflow.
+        """Open a save-as dialog and write the currently active lines to a CSV line list file compatible with iSLAT's fitting workflow.
 
         Each row contains the columns produced by
         :meth:`LineSaveService.format_line_for_save`:
@@ -248,7 +237,7 @@ class PopulationDiagramContextMixin:
             )
             return
 
-        # Build rows — derive xmin/xmax as a ±0.015 µm window if not present
+        # Build rows - derive xmin/xmax as a ±0.015 µm window if not present
         _DEFAULT_HALF_WIN = 0.015
         rows = []
         for info in info_list:
@@ -476,7 +465,6 @@ class PopulationDiagramContextMixin:
     # ------------------------------------------------------------------
     # Axis Settings dialog
     # ------------------------------------------------------------------
-
     def _open_axis_settings_dialog(
         self,
         pdp: Any,

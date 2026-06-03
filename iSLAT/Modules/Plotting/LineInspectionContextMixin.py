@@ -1,5 +1,5 @@
 """
-LineInspectionContextMixin — shared right-click context menu for the
+LineInspectionContextMixin - shared right-click context menu for the
 line inspection panel (ax2).
 
 :class:`ThreePanelView` inherits this mixin so that the line-inspection
@@ -14,7 +14,6 @@ Usage::
                 return self._build_line_inspection_menu(canvas_widget)
             return None
 """
-
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -22,10 +21,8 @@ from typing import Any, Optional
 class LineInspectionContextMixin:
     """Mixin that supplies the line inspection panel right-click menu.
 
-    Requires that the host class exposes ``self._islat`` (the main iSLAT
-    application object with a ``GUI.top_bar`` attribute).
+    Requires that the host class exposes ``self._islat`` (the main iSLAT application object with a ``GUI.top_bar`` attribute).
     """
-
     def _toggle_inspection_summed(self, insp_ax: Any) -> None:
         """Toggle the summed-model fill on *insp_ax* only.
 
@@ -48,7 +45,7 @@ class LineInspectionContextMixin:
         currently_visible = any(c.get_visible() for c in existing)
 
         if existing:
-            # Just flip visibility — no re-render needed.
+            # Just flip visibility - no re-render needed.
             for c in existing:
                 c.set_visible(not currently_visible)
         else:
@@ -121,7 +118,7 @@ class LineInspectionContextMixin:
                 islat.GUI.top_bar.save_all_lines_in_range()
 
         # ------------------------------------------------------------------
-        # Spectrum-navigation helpers — only available from ThreePanelView
+        # Spectrum-navigation helpers - only available from ThreePanelView
         # (i.e. when self has ax1 / ax2 / _pm).
         # ------------------------------------------------------------------
         ax1 = getattr(self, 'ax1', None)
@@ -177,7 +174,7 @@ class LineInspectionContextMixin:
                 pm.islat.display_range = (new_lo, new_hi)
             _refresh_ax1()
 
-        # Resolve the inspection axes — ax2 for ThreePanelView, or the
+        # Resolve the inspection axes - ax2 for ThreePanelView, or the
         # standalone plot ax for LineInspectionView.
         insp_ax = ax2 or getattr(getattr(self, '_plot', None), 'ax', None)
 
@@ -230,7 +227,7 @@ class LineInspectionContextMixin:
             active_name = getattr(pm, 'active_view_name', None)
 
             if active_name == "Three Panel":
-                # Inside the three-panel layout — offer to pop out to standalone views
+                # Inside the three-panel layout - offer to pop out to standalone views
                 def _to_line_inspection():
                     pm.switch_view("Line Inspection")
 
@@ -246,7 +243,7 @@ class LineInspectionContextMixin:
                     command=_to_population_diagram,
                 )
             else:
-                # Already in a standalone view — offer to go back or cross-navigate
+                # Already in a standalone view - offer to go back or cross-navigate
                 def _to_three_panel():
                     pm.switch_view("Three Panel")
 

@@ -1,5 +1,5 @@
 """
-PopulationDiagramPlot — Boltzmann / rotation diagram.
+PopulationDiagramPlot - Boltzmann / rotation diagram.
 
 Plots ``ln(4πF / (hv A_u g_u))`` vs upper-state energy *E_u* using the computed intensity data from one or more :class:`Molecule` / :class:`Intensity` objects.
 
@@ -8,7 +8,6 @@ Supports **multi-molecule / multi-component** overlays with automatic color codi
 
 Can be used standalone (notebook / script) or embedded in a GUI layout.
 """
-
 from __future__ import annotations
 
 from typing import (
@@ -77,10 +76,10 @@ class PopulationDiagramPlot(BasePlot):
     color : str, optional
         Marker color when *intensity* is given directly.
     radius : float, optional
-        Emitting radius in AU — required when *intensity* is given
+        Emitting radius in AU - required when *intensity* is given
         directly.  Defaults to ``1.0``.
     distance : float, optional
-        Distance to source in pc — required when *intensity* is given
+        Distance to source in pc - required when *intensity* is given
         directly.  Defaults to ``160.0``.
     highlight_lines : list, optional
         List of ``(MoleculeLine, intensity, tau)`` tuples rendered as
@@ -90,7 +89,6 @@ class PopulationDiagramPlot(BasePlot):
     ax : Axes, optional
         Pre-existing axes for embedding.
     """
-
     def __init__(
         self,
         molecule: Optional["Molecule"] = None,
@@ -261,7 +259,7 @@ class PopulationDiagramPlot(BasePlot):
         for line, intensity, tau_val in line_data:
             frac = intensity / max_intensity
             if frac < threshold:
-                continue  # skipped by both panels — al_idx unchanged
+                continue  # skipped by both panels - al_idx unchanged
 
             # This line passed threshold → a vline may exist at active_lines[al_idx].
             current_al_idx = al_idx
@@ -554,7 +552,7 @@ class PopulationDiagramPlot(BasePlot):
         if self._active_lines_cache is not None:
             cache = self._active_lines_cache
             al = cache["active_lines"]
-            # Do NOT call al.clear() here — that would destroy the vline
+            # Do NOT call al.clear() here - that would destroy the vline
             # entries added by LineInspectionPlot.render_active_lines,
             # making the vlines in the inspection panel un-pickable after
             # an axis change.  Instead, just null out the stale scatter
@@ -605,7 +603,7 @@ class PopulationDiagramPlot(BasePlot):
             for idx, mol in enumerate(mol_seq):
                 components.append(self._mol_to_component(mol, idx=idx))
             # Ensure distinct colors when multiple components share a
-            # color — assign from the default cycle in that case.
+            # color - assign from the default cycle in that case.
             if len(components) > 1:
                 self._deduplicate_colors(components)
             return components
@@ -841,23 +839,23 @@ class PopulationDiagramPlot(BasePlot):
         prop : str
             The property name to color by.  Supported values:
 
-            * ``'e_up'``   — upper-level energy (K)
-            * ``'e_low'``  — lower-level energy (K)
-            * ``'a_stein'``— Einstein A coefficient
-            * ``'g_up'``   — upper-state degeneracy
-            * ``'g_low'``  — lower-state degeneracy
-            * ``'wavelength'`` / ``'lam'``  — line wavelength
-            * ``'intens'`` — model intensity
-            * ``'lev_up'`` — upper quantum-state label (categorical)
-            * ``'lev_low'``— lower quantum-state label (categorical)
-            * ``'tau'``     — line-center opacity
-            * ``'component'`` — which molecule / component the point
+            * ``'e_up'``   - upper-level energy (K)
+            * ``'e_low'``  - lower-level energy (K)
+            * ``'a_stein'``- Einstein A coefficient
+            * ``'g_up'``   - upper-state degeneracy
+            * ``'g_low'``  - lower-state degeneracy
+            * ``'wavelength'`` / ``'lam'``  - line wavelength
+            * ``'intens'`` - model intensity
+            * ``'lev_up'`` - upper quantum-state label (categorical)
+            * ``'lev_low'``- lower quantum-state label (categorical)
+            * ``'tau'``     - line-center opacity
+            * ``'component'`` - which molecule / component the point
               belongs to (categorical)
-            * ``'molecule'`` — alias for ``'component'``; colors each
+            * ``'molecule'`` - alias for ``'component'``; colors each
               point by which molecule it belongs to (categorical)
             * Any quantum-field name defined in the molecule's schema,
               e.g. ``"J"``, ``"v"``, ``"Ka"``, ``"Kc"``, ``"v1"``,
-              ``"v2"`` — colors by upper-state quantum number value.
+              ``"v2"`` - colors by upper-state quantum number value.
               Use ``"qn_upper:FIELD"`` / ``"qn_lower:FIELD"`` prefixes
               to explicitly target the upper or lower state (bare names
               default to the upper state).
@@ -921,7 +919,7 @@ class PopulationDiagramPlot(BasePlot):
         Parameters
         ----------
         prop : str
-            Property key — the same set accepted by :meth:`color_by`.
+            Property key - the same set accepted by :meth:`color_by`.
         n_bins : int
             Number of quantile bins used for *continuous* properties
             (ignored for categorical ones).  Clamped to 2–10.
@@ -1444,11 +1442,11 @@ class PopulationDiagramPlot(BasePlot):
         x_lim : tuple or None
             Axis limit override for the X axis.  Three forms are accepted:
 
-            * ``None`` — use matplotlib auto-limits (default).
-            * ``('exact', min_val, max_val)`` — pin the axis to the given
+            * ``None`` - use matplotlib auto-limits (default).
+            * ``('exact', min_val, max_val)`` - pin the axis to the given
               numeric values (either may be ``None`` to leave that bound
               automatic).
-            * ``('percentile', p_min, p_max)`` — set the limits from the
+            * ``('percentile', p_min, p_max)`` - set the limits from the
               *p_min*-th and *p_max*-th percentile of the plotted X data
               (0-100, either may be ``None`` to leave that bound automatic).
 
@@ -1614,7 +1612,7 @@ class PopulationDiagramPlot(BasePlot):
         if hasattr(molecules, 'add_active_molecule_change_callback'):
             self._enter_all_molecules_mode(molecules)
         else:
-            # Plain list — not persistent, clear any prior mode
+            # Plain list - not persistent, clear any prior mode
             self._exit_all_molecules_mode()
 
     # ------------------------------------------------------------------

@@ -134,7 +134,7 @@ class iSLATPlot:
             "Line Grid": self._fit_lines_grid_view,
         }
 
-        # View-change callbacks — notified when active_view switches
+        # View-change callbacks - notified when active_view switches
         self._view_change_callbacks: list = []
 
         # --- ControlBus: central registry for surface-agnostic UI controls ---
@@ -163,7 +163,7 @@ class iSLATPlot:
         self._register_update_callbacks()
     
     # ------------------------------------------------------------------
-    # Backward-compatible properties — read / write the toggle_state dict
+    # Backward-compatible properties - read / write the toggle_state dict
     # ------------------------------------------------------------------
     @property
     def atomic_toggle(self) -> bool:
@@ -231,7 +231,7 @@ class iSLATPlot:
                 grid.theme = self.theme
                 grid.apply_theme_to_figure(self.fig)
             else:
-                # Grid not yet created — use a lightweight proxy.
+                # Grid not yet created - use a lightweight proxy.
                 class _ThemeProxy(BasePlot):
                     def generate_plot(self, **kw): pass
                 proxy = _ThemeProxy(fig=self.fig, theme=self.theme)
@@ -281,7 +281,7 @@ class iSLATPlot:
             debug_config.error("main_plot", f"Could not apply plot theming: {e}")
     
     # ------------------------------------------------------------------
-    # View registry — lets external callers enumerate and switch views
+    # View registry - lets external callers enumerate and switch views
     # ------------------------------------------------------------------
     @property
     def views(self) -> dict:
@@ -385,7 +385,7 @@ class iSLATPlot:
             xmin, xmax = current_selection
             self.active_view.on_selection(xmin, xmax)
         else:
-            # No selection — let the active view refresh its panels
+            # No selection - let the active view refresh its panels
             self.active_view.on_active_molecule_changed(
                 new_molecule=getattr(self.islat, 'active_molecule', None),
                 current_selection=None,
@@ -516,7 +516,7 @@ class iSLATPlot:
     def onselect(self, xmin, xmax):
         self.current_selection = (xmin, xmax)
         self.toggle_state["current_selection"] = (xmin, xmax)
-        # Clear previous fit result — it belongs to the old selection
+        # Clear previous fit result - it belongs to the old selection
         self.fit_result = None
         mask = (self.islat.wave_data >= xmin) & (self.islat.wave_data <= xmax)
         self.selected_wave = self.islat.wave_data[mask]
@@ -527,7 +527,6 @@ class iSLATPlot:
     # ------------------------------------------------------------------
     # Data-access & interaction helpers
     # ------------------------------------------------------------------
-
     def get_molecule_line_data(
         self, molecule: 'Molecule', xmin: float, xmax: float,
     ) -> List[Tuple['MoleculeLine', float, Optional[float]]]:
@@ -628,12 +627,12 @@ class iSLATPlot:
         self.active_view.toggle_legend(self.legend_toggle)
 
     def remove_atomic_lines(self):
-        """Remove atomic lines — delegates to the active view."""
+        """Remove atomic lines - delegates to the active view."""
         self.atomic_toggle = False
         self.active_view.toggle_atomic_lines(False)
 
     def plot_atomic_lines(self, data_field=None, atomic_lines=None):
-        """Plot atomic lines — delegates to the active view."""
+        """Plot atomic lines - delegates to the active view."""
         self.atomic_toggle = True
         self.active_view.toggle_atomic_lines(True)
 
@@ -642,7 +641,7 @@ class iSLATPlot:
         self.interaction_handler.handle_click_event(event)
     
     def on_active_molecule_changed(self):
-        """Called when the active molecule changes — delegates to the active view."""
+        """Called when the active molecule changes - delegates to the active view."""
         self.active_view.on_active_molecule_changed(
             new_molecule=getattr(self.islat, 'active_molecule', None),
             current_selection=getattr(self, 'current_selection', None),
@@ -650,7 +649,7 @@ class iSLATPlot:
         self._mark_inactive_views_stale()
 
     def on_molecule_parameter_changed(self, molecule_name, parameter_name, old_value, new_value):
-        """Called when any molecule parameter changes — delegates to the active view."""
+        """Called when any molecule parameter changes - delegates to the active view."""
         if parameter_name == 'is_visible':
             return
         self.active_view.on_molecule_parameter_changed(
@@ -661,12 +660,12 @@ class iSLATPlot:
         self._mark_inactive_views_stale()
 
     def on_molecule_deleted(self, molecule_name):
-        """Called when a molecule is deleted — delegates to the active view."""
+        """Called when a molecule is deleted - delegates to the active view."""
         self.active_view.on_molecule_deleted(molecule_name)
         self._mark_inactive_views_stale()
     
     def on_molecule_visibility_changed(self, molecule_name, is_visible):
-        """Called when a molecule's visibility changes — delegates to the active view."""
+        """Called when a molecule's visibility changes - delegates to the active view."""
         if not hasattr(self.islat, 'molecules_dict'):
             return
         self.active_view.on_molecule_visibility_changed(
@@ -739,12 +738,12 @@ class iSLATPlot:
             return []
     
     def plot_saved_lines(self, loaded_lines=None, data_field=None):
-        """Plot saved lines — delegates to the active view."""
+        """Plot saved lines - delegates to the active view."""
         self.line_toggle = True
         self.active_view.toggle_saved_lines(True, loaded_lines=loaded_lines)
 
     def remove_saved_lines(self):
-        """Remove saved lines — delegates to the active view."""
+        """Remove saved lines - delegates to the active view."""
         self.line_toggle = False
         self.active_view.toggle_saved_lines(False)
 
@@ -765,7 +764,7 @@ class iSLATPlot:
         if theme:
             self.theme = theme
 
-        # Propagate to both views — the currently invisible view will
+        # Propagate to both views - the currently invisible view will
         # also be themed so the next activate() doesn't flash stale
         # colors.
         self._three_panel_view.apply_theme(self.theme)

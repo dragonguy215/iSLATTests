@@ -1,12 +1,10 @@
 """
-LineListFilterWindow — interactive line-list filter popup.
+LineListFilterWindow - interactive line-list filter popup.
 
 Opens a Toplevel window bound to a Molecule's MoleculeLineList.
-The user can apply numeric range filters, quantum-label filters, and vibrational-band
-filters (e.g. "v1", "v1-0", "v2-1") using the LineListMaker fluent API.
+The user can apply numeric range filters, quantum-label filters, and vibrational-band filters (e.g. "v1", "v1-0", "v2-1") using the LineListMaker fluent API.
 Results can be exported to a CSV file.
 """
-
 from __future__ import annotations
 
 import tkinter as tk
@@ -23,7 +21,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # LineListFilterWindow
 # ---------------------------------------------------------------------------
-
 class LineListFilterWindow(tk.Toplevel):
     """Interactive popup for filtering a molecule's line list.
 
@@ -39,7 +36,6 @@ class LineListFilterWindow(tk.Toplevel):
         iSLAT instance.  Required for "Apply to Molecule" and
         "Duplicate & Apply" GUI refresh.
     """
-
     def __init__(self, parent, mol_obj: "Molecule", data_field=None, islat=None):
         super().__init__(parent)
         self.mol_obj = mol_obj
@@ -66,7 +62,6 @@ class LineListFilterWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
-
     def _constrain_to_screen(self):
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
@@ -359,7 +354,6 @@ class LineListFilterWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     # Logic
     # ------------------------------------------------------------------
-
     def _parse_float(self, s: str) -> Optional[float]:
         s = s.strip()
         if not s:
@@ -505,7 +499,6 @@ class LineListFilterWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     # Line-list assignment helpers
     # ------------------------------------------------------------------
-
     @staticmethod
     def _assign_line_list(mol_obj, new_ll) -> None:
         """Replace *mol_obj*'s line list and invalidate all cached results.
@@ -547,7 +540,7 @@ class LineListFilterWindow(tk.Toplevel):
         if len(self._maker) == 0:
             messagebox.showwarning(
                 "Empty Result",
-                "The filtered line list is empty — not applied.",
+                "The filtered line list is empty - not applied.",
                 parent=self,
             )
             return
@@ -575,7 +568,7 @@ class LineListFilterWindow(tk.Toplevel):
         if len(self._maker) == 0:
             messagebox.showwarning(
                 "Empty Result",
-                "The filtered line list is empty — not applied.",
+                "The filtered line list is empty - not applied.",
                 parent=self,
             )
             return
@@ -628,7 +621,7 @@ class LineListFilterWindow(tk.Toplevel):
                 else:
                     cp._update_molecule_parameter_fields()
         except Exception as e:
-            print(f"LineListFilterWindow: GUI refresh error — {e}")
+            print(f"LineListFilterWindow: GUI refresh error - {e}")
 
     def _export_csv(self):
         mol_name = getattr(self.mol_obj, "name", "molecule")

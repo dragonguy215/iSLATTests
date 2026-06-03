@@ -1,8 +1,7 @@
 """
 ResidualPanel -- Concrete :class:`SpectralPanel` for residual display.
 
-Renders the ``(observed - model)`` residual with error bars, a zero
-reference line, optional error-envelope bands, and excluded-range shading.
+Renders the ``(observed - model)`` residual with error bars, a zero reference line, optional error-envelope bands, and excluded-range shading.
 This is the lower sub-panel in each :class:`ResidualSpectrumPlot` row.
 """
 
@@ -50,7 +49,6 @@ class ResidualPanel(SpectralPanel):
     **kwargs
         Forwarded to :class:`SpectralPanel` / :class:`BasePlot`.
     """
-
     def __init__(
         self,
         wave_data: np.ndarray,

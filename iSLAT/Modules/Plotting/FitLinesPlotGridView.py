@@ -1,5 +1,5 @@
 """
-FitLinesPlotGridView — :class:`PlotView` for displaying a :class:`FitLinesPlotGrid` within the main iSLAT plotting area.
+FitLinesPlotGridView - :class:`PlotView` for displaying a :class:`FitLinesPlotGrid` within the main iSLAT plotting area.
 
 Shows a grid of individual line-fit results for the current fitting session. 
 When multiple grids are available (e.g. after a batch fit) they are presented in a :class:`ttk.Notebook` 
@@ -16,7 +16,6 @@ Typical usage::
     main_plot.fit_lines_grid_view.set_plot_grids([plot_grid])
     main_plot.switch_view("Line Grid")
 """
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -76,7 +75,6 @@ class FitLinesPlotGridView(PlotView):
     plot_manager : iSLATPlot
         The main controller (``iSLAT.Modules.Plotting.MainPlot.iSLATPlot``).
     """
-
     def __init__(self, plot_manager: Any) -> None:
         self._pm = plot_manager
         self._islat = plot_manager.islat
@@ -106,12 +104,11 @@ class FitLinesPlotGridView(PlotView):
     # ==================================================================
     # Public API
     # ==================================================================
-
     def set_plot_grids(self, plot_grids: List[FitLinesPlotGrid]) -> None:
         """Set the list of :class:`FitLinesPlotGrid` objects to display.
 
-        Calling this method marks the view as needing a refresh.  If the
-        view is already active the display is updated immediately.
+        Calling this method marks the view as needing a refresh.
+        If the view is already active the display is updated immediately.
 
         Parameters
         ----------
@@ -127,16 +124,14 @@ class FitLinesPlotGridView(PlotView):
     # ==================================================================
     # Internal helpers
     # ==================================================================
-
     def _build_line_list_preview(self) -> Optional[FitLinesPlotGrid]:
         """Build a :class:`FitLinesPlotGrid` from the loaded line list with no fit data.
 
         Returns a grid whose panels show the observed spectrum around every
-        line in ``islat.input_line_list`` but with *no* Gaussian overlay —
+        line in ``islat.input_line_list`` but with *no* Gaussian overlay -
         identical to the post-fit grid except fit results are absent.
 
-        Returns ``None`` if the required data (line list file, wave/flux
-        arrays) is unavailable.
+        Returns ``None`` if the required data (line list file, wave/flux arrays) is unavailable.
         """
         try:
             import pandas as pd
@@ -190,7 +185,7 @@ class FitLinesPlotGridView(PlotView):
             return None
 
         n = len(fit_csv_dict)
-        # Null fit tuples — _post_render handles None gracefully
+        # Null fit tuples - _post_render handles None gracefully
         null_fits = [None] * n
         fit_data_tuple_list = (null_fits, null_fits, null_fits)
 
@@ -300,10 +295,10 @@ class FitLinesPlotGridView(PlotView):
         self._container_frame.pack(fill="both", expand=True)
 
         if len(self._plot_grids) == 1:
-            # Single grid — no notebook overhead, just one scrollable canvas
+            # Single grid - no notebook overhead, just one scrollable canvas
             self._create_scrollable_tab(self._container_frame, self._plot_grids[0])
         else:
-            # Multiple grids — tabbed notebook, one tab per grid
+            # Multiple grids - tabbed notebook, one tab per grid
             self._notebook = ttk.Notebook(self._container_frame)
             self._notebook.pack(fill="both", expand=True)
             for plot_grid in self._plot_grids:
@@ -314,8 +309,7 @@ class FitLinesPlotGridView(PlotView):
     def _show_placeholder(self) -> None:
         """Display the placeholder figure inside the parent frame.
 
-        If a line list is loaded but no fit has been run, automatically
-        renders a preview grid instead of a blank placeholder.
+        If a line list is loaded but no fit has been run, automatically renders a preview grid instead of a blank placeholder.
         """
         # Try to build a line-list preview before falling back to blank
         preview = self._build_line_list_preview()
@@ -346,8 +340,7 @@ class FitLinesPlotGridView(PlotView):
     ) -> None:
         """Build a scrollable matplotlib canvas for *plot_grid* inside *parent*.
 
-        The layout mirrors
-        :meth:`~iSLAT.Modules.GUI.PlotGridWindow.PlotGridWindow._create_tab`.
+        The layout mirrors :meth:`~iSLAT.Modules.GUI.PlotGridWindow.PlotGridWindow._create_tab`.
 
         Parameters
         ----------
@@ -460,17 +453,13 @@ class FitLinesPlotGridView(PlotView):
         scroll_canvas.bind("<Leave>", unbind_mousewheel)
 
     # ==================================================================
-    # Overlay helpers — molecule model lines
+    # Overlay helpers - molecule model lines
     # ==================================================================
-
     def _apply_model_line_overlays(self) -> None:
         """Plot visible molecule model lines on every panel of every plot grid.
 
-        Mirrors the ``mol_cache`` rendering loop inside
-        :meth:`SpectrumPanel.generate_plot` so that overlays are
-        consistent in style.  Each plotted artist is tagged with
-        ``._molecule_name`` so it can be found by
-        :meth:`_remove_model_line_overlays`.
+        Mirrors the ``mol_cache`` rendering loop inside :meth:`SpectrumPanel.generate_plot` so that overlays are consistent in style.
+        Each plotted artist is tagged with ``._molecule_name`` so it can be found by :meth:`_remove_model_line_overlays`.
         """
         import numpy as np
 
@@ -541,9 +530,8 @@ class FitLinesPlotGridView(PlotView):
         self.draw()
 
     # ==================================================================
-    # PlotView — lifecycle
+    # PlotView - lifecycle
     # ==================================================================
-
     def activate(self, parent_frame: Any) -> None:
         """Pack the fit-lines grid view into *parent_frame* and refresh if needed.
 
@@ -601,9 +589,8 @@ class FitLinesPlotGridView(PlotView):
         self._initialised = False
 
     # ==================================================================
-    # PlotView — interaction context
+    # PlotView - interaction context
     # ==================================================================
-
     def build_context_menu(self, event: Any, canvas_widget: Any) -> Any:
         """No custom right-click menu via the main InteractionHandler.
 
@@ -620,14 +607,13 @@ class FitLinesPlotGridView(PlotView):
     ) -> None:
         """Attach a right-click context-menu handler to *fig_canvas*.
 
-        Builds an ``Axes → fit-index`` lookup from the grid's ``axs`` array
-        and ``fit_csv_dict``.  When the user right-clicks an individual
-        panel two actions are offered:
+        Builds an ``Axes → fit-index`` lookup from the grid's ``axs`` array and ``fit_csv_dict``. 
+        When the user right-clicks an individual panel two actions are offered:
 
-        * **Open in Line Inspection** — switches to the standalone Line
+        * **Open in Line Inspection** - switches to the standalone Line
           Inspection view and calls ``on_selection(xmin, xmax)`` so the
           panel's wavelength range is shown immediately.
-        * **Open in Three Panel (centered)** — switches to the Three Panel
+        * **Open in Three Panel (centered)** - switches to the Three Panel
           view and centers the spectrum overview on the panel's line.
         """
         if tk is None or fig_canvas is None or plot_grid.axs is None:
@@ -743,9 +729,8 @@ class FitLinesPlotGridView(PlotView):
         fig_canvas.mpl_connect("button_press_event", _on_button_press)
 
     # ==================================================================
-    # PlotView — theme
+    # PlotView - theme
     # ==================================================================
-
     def apply_theme(self, theme: dict) -> None:
         """Apply the current theme to all embedded figures and canvases."""
         self._pm.theme = theme
@@ -775,9 +760,8 @@ class FitLinesPlotGridView(PlotView):
                 pass
 
     # ==================================================================
-    # PlotView — core rendering
+    # PlotView - core rendering
     # ==================================================================
-
     def update_model_plot(
         self,
         wave_data: Any = None,
@@ -806,15 +790,14 @@ class FitLinesPlotGridView(PlotView):
         current_selection: Optional[Tuple[float, float]] = None,
         force_rerender: bool = False,
     ) -> None:
-        """No-op — fit-lines grids do not react to molecule visibility changes."""
+        """No-op - fit-lines grids do not react to molecule visibility changes."""
         pass
 
     # ==================================================================
-    # PlotView — selection / line inspection (no-ops)
+    # PlotView - selection / line inspection (no-ops)
     # ==================================================================
-
     def on_selection(self, xmin: float, xmax: float) -> None:
-        """No-op — this view does not respond to span-selector events."""
+        """No-op - this view does not respond to span-selector events."""
         pass
 
     def clear_selection(self) -> None:
@@ -822,13 +805,12 @@ class FitLinesPlotGridView(PlotView):
         pass
 
     def clear_active_lines(self) -> None:
-        """No-op — no active-line markers in this view."""
+        """No-op - no active-line markers in this view."""
         pass
 
     # ==================================================================
-    # PlotView — molecule lifecycle (no-ops)
+    # PlotView - molecule lifecycle (no-ops)
     # ==================================================================
-
     def on_active_molecule_changed(
         self,
         new_molecule: Optional["Molecule"] = None,
@@ -854,9 +836,8 @@ class FitLinesPlotGridView(PlotView):
         pass
 
     # ==================================================================
-    # PlotView — toggle helpers (all no-ops for this view)
+    # PlotView - toggle helpers (all no-ops for this view)
     # ==================================================================
-
     def sync_toggle_state(self, toggle_state: dict) -> None:
         """Apply the summed-spectrum toggle state when this view becomes active."""
         summed = toggle_state.get("summed", False)
@@ -958,9 +939,8 @@ class FitLinesPlotGridView(PlotView):
         self.draw()
 
     # ==================================================================
-    # PlotView — canvas / drawing
+    # PlotView - canvas / drawing
     # ==================================================================
-
     def draw(self) -> None:
         """Flush all pending changes to every embedded canvas."""
         for canvas in self._tab_canvases:

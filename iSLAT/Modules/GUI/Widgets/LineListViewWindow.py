@@ -1,11 +1,10 @@
 """
-LineListViewWindow — read-only popout table for a molecule's line list.
+LineListViewWindow - read-only popout table for a molecule's line list.
 
 Opens a Toplevel window displaying the MoleculeLineList as a sortable,
 searchable ttk.Treeview table.  Columns are auto-discovered from the
 DataFrame returned by ``MoleculeLineList.get_pandas_table()``.
 """
-
 from __future__ import annotations
 
 import tkinter as tk
@@ -15,13 +14,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from iSLAT.Modules.DataTypes.Molecule import Molecule
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 _FLOAT_FMT = "{:.6g}"   # compact scientific/decimal formatting for floats
-
 
 def _fmt(value) -> str:
     """Format a single cell value for display."""
@@ -37,11 +34,9 @@ def _fmt(value) -> str:
         pass
     return str(value)
 
-
 # ---------------------------------------------------------------------------
 # LineListViewWindow
 # ---------------------------------------------------------------------------
-
 class LineListViewWindow(tk.Toplevel):
     """Read-only popout table showing a molecule's line list DataFrame.
 
@@ -54,7 +49,6 @@ class LineListViewWindow(tk.Toplevel):
     data_field : optional
         iSLAT data field for status messages (``insert_text`` interface).
     """
-
     def __init__(self, parent, mol_obj: "Molecule", data_field=None):
         super().__init__(parent)
         self.mol_obj = mol_obj
@@ -76,7 +70,6 @@ class LineListViewWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     # Geometry
     # ------------------------------------------------------------------
-
     def _constrain_to_screen(self) -> None:
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
@@ -90,7 +83,6 @@ class LineListViewWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
-
     def _build_ui(self) -> None:
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
@@ -174,7 +166,6 @@ class LineListViewWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     # Data loading
     # ------------------------------------------------------------------
-
     def _refresh(self) -> None:
         """Reload the line list from the molecule, preserving the current search."""
         current_search = self._search_var.get()
@@ -267,7 +258,6 @@ class LineListViewWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
-
     def _on_search_change(self, *_) -> None:
         query = self._search_var.get().lower()
         if not query:
@@ -285,7 +275,6 @@ class LineListViewWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     # Column sorting
     # ------------------------------------------------------------------
-
     def _sort_by(self, col: str) -> None:
         """Sort Treeview rows by the clicked column header."""
         if self._sort_col == col:
@@ -327,7 +316,6 @@ class LineListViewWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     # Export
     # ------------------------------------------------------------------
-
     def _export_csv(self) -> None:
         """Save selected rows (or all visible rows if none selected) to a CSV file."""
         selected = self._tree.selection()

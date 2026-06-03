@@ -1,11 +1,10 @@
 """
-LineInspectionPlot — Zoomed-in view of a narrow wavelength region.
+LineInspectionPlot - Zoomed-in view of a narrow wavelength region.
 
 Shows the observed spectrum, overlaid molecule model(s), and optionally individual line markers with energy/A-coefficient labels.
 
 Can be used standalone (notebook / script) or embedded in a GUI layout.
 """
-
 from typing import Optional, Tuple, List, Dict, Any, Union, TYPE_CHECKING
 import numpy as np
 import pandas as pd
@@ -92,7 +91,7 @@ class LineInspectionPlot(SpectrumPanel):
             self.wave_data_obs = self.wave_data
 
     # ------------------------------------------------------------------
-    def generate_plot(self, **kwargs) -> None:  # noqa: D401
+    def generate_plot(self, **kwargs) -> None:
         """Generate (or regenerate) the line inspection plot."""
         ax = self._resolve_axes()
 
@@ -110,9 +109,8 @@ class LineInspectionPlot(SpectrumPanel):
         max_y = float(np.nanmax(obs_flux)) if len(obs_flux) > 0 else 0.15
 
         # -- molecule model(s) ------------------------------------------
-        # Determine matched spectral sampling settings (same logic as
-        # FullSpectrumPlot) so the line inspection plot honours the
-        # "Match Pix. Sampling" toggle.
+        # Determine matched spectral sampling settings (same logic as FullSpectrumPlot)
+        # so the line inspection plot honours the "Match Pix. Sampling" toggle.
         use_interp = False
         target_wave = None
         if self.molecules is not None and hasattr(self.molecules, 'get_matched_sampling_wavelengths'):
@@ -252,9 +250,7 @@ class LineInspectionPlot(SpectrumPanel):
     ) -> None:
         """Render vertical dashed line markers for *line_data* on this panel.
 
-        Creates ``vlines`` + text labels for each line that exceeds the
-        intensity *threshold* (as a fraction of the strongest line) and
-        appends ``[vline, text, None, info_dict]`` entries to *active_lines*.
+        Creates ``vlines`` + text labels for each line that exceeds the intensity *threshold* (as a fraction of the strongest line) and appends ``[vline, text, None, info_dict]`` entries to *active_lines*.
 
         Parameters
         ----------
@@ -273,9 +269,7 @@ class LineInspectionPlot(SpectrumPanel):
         molecule_color : str
             Molecule color stored in the info dict.
         """
-        # Use the already-resolved axes directly — do NOT call _resolve_axes()
-        # here as that clears the axes and would wipe the already-rendered
-        # observed spectrum and molecule model.
+        # Use the already-resolved axes directly - do NOT call _resolve_axes() here as that clears the axes and would wipe the already-rendered observed spectrum and molecule model.
         ax = self._ax if self._ax is not None else self._external_ax
         if not line_data or ax is None:
             return
@@ -341,12 +335,8 @@ class LineInspectionPlot(SpectrumPanel):
     ) -> Dict[str, Any]:
         """Build a structured information dict for a single molecular line.
 
-        Delegates to
-        :meth:`~iSLAT.Modules.DataTypes.Intensity.Intensity.get_line_info`
-        so that the data object owns the canonical implementation.
-        This method is kept here for backward compatibility; all callers
-        that already use ``LineInspectionPlot.get_line_info`` continue to
-        work unchanged.
+        Delegates to :meth:`~iSLAT.Modules.DataTypes.Intensity.Intensity.get_line_info` so that the data object owns the canonical implementation.
+        This method is kept here for backward compatibility; all callers that already use ``LineInspectionPlot.get_line_info`` continue to work unchanged.
 
         Parameters
         ----------
@@ -358,9 +348,9 @@ class LineInspectionPlot(SpectrumPanel):
             Line opacity.
         data_flux_in_range : float, optional
             Observed (data) flux integral in the selection range
-            (erg s⁻¹ cm⁻²).
+            (erg s^-1 cm^-2).
         model_flux_in_range : float, optional
-            Model flux integral in the selection range (erg s⁻¹ cm⁻²).
+            Model flux integral in the selection range (erg s^-1 cm^-2).
         molecule : Molecule, optional
             Active molecule.  When provided the instrumental, Keplerian,
             and convolved FWHM at the line wavelength are included in the
@@ -394,9 +384,7 @@ class LineInspectionPlot(SpectrumPanel):
     ) -> "pd.DataFrame":
         """Build a :class:`~pandas.DataFrame` with one row per molecular line.
 
-        Delegates to
-        :meth:`~iSLAT.Modules.DataTypes.Intensity.Intensity.get_line_info_dataframe`
-        so that the data object owns the canonical implementation.
+        Delegates to :meth:`~iSLAT.Modules.DataTypes.Intensity.Intensity.get_line_info_dataframe` so that the data object owns the canonical implementation.
         This method is kept here for backward compatibility.
 
         Parameters

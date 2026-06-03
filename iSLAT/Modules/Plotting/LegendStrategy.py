@@ -1,13 +1,13 @@
 """
-LegendStrategy — Swappable legend providers for all iSLAT plots.
+LegendStrategy - Swappable legend providers for all iSLAT plots.
 
 Defines a :class:`LegendStrategy` abstract base class and two concrete
 implementations:
 
-* :class:`StandardLegend` — the default for most plots.  Displays a
+* :class:`StandardLegend` - the default for most plots.  Displays a
   standard matplotlib legend built from the visible labelled artists
   on an axes.
-* :class:`MoleculeColorLegend` — the default for stacked-panel plots
+* :class:`MoleculeColorLegend` - the default for stacked-panel plots
   (:class:`FullSpectrumPlot`, :class:`ResidualSpectrumPlot`).  Renders
   a compact, text-only, per-molecule-color legend above the panel
   area.
@@ -32,7 +32,6 @@ Swap the legend with a custom implementation::
 
     plot = FullSpectrumPlot(wave, flux, legend_strategy=MinimalLegend())
 """
-
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -45,11 +44,9 @@ from matplotlib.figure import Figure as MplFigure
 class LegendStrategy(ABC):
     """Interface for pluggable legend providers.
 
-    Subclasses must implement all four methods.  Each method receives
-    the *axes* that owns the matplotlib legend object, along with any
-    extra data needed to build, remove, or style it.
+    Subclasses must implement all four methods.
+    Each method receives the *axes* that owns the matplotlib legend object, along with any extra data needed to build, remove, or style it.
     """
-
     @abstractmethod
     def build_legend(
         self,
@@ -68,7 +65,7 @@ class LegendStrategy(ABC):
         ax : Axes
             The axes that will own the legend artist.
         fig : Figure
-            The parent figure — used for width / height queries.
+            The parent figure - used for width / height queries.
         labels : list[str]
             Display names (one per entry).
         colors : list[str]
@@ -96,17 +93,14 @@ class LegendStrategy(ABC):
         """
 
 # ======================================================================
-# Concrete implementation — standard artist-based legend
+# Concrete implementation - standard artist-based legend
 # ======================================================================
 class StandardLegend(LegendStrategy):
     """Standard matplotlib legend built from visible labelled artists.
 
-    This is the default strategy used by :class:`BasePlot` and all
-    non-stacked plot classes (e.g. :class:`LineInspectionPlot`,
-    :class:`MainPlotGrid`).  It filters the axes' handles/labels to
-    only visible artists and creates a regular ``ax.legend()``.
+    This is the default strategy used by :class:`BasePlot` and all non-stacked plot classes (e.g. :class:`LineInspectionPlot`, :class:`MainPlotGrid`).
+    It filters the axes' handles/labels to only visible artists and creates a regular ``ax.legend()``.
     """
-
     def build_legend(
         self,
         ax: Axes,
@@ -119,7 +113,7 @@ class StandardLegend(LegendStrategy):
     ) -> None:
         """Build a legend from the visible labelled artists on *ax*.
 
-        The *labels* and *colors* parameters are **ignored** — the legend
+        The *labels* and *colors* parameters are **ignored** - the legend
         is derived from the axes' own ``get_legend_handles_labels()``.
         This keeps the call signature compatible with the ABC while
         preserving the standard-plot behaviour.
@@ -168,21 +162,16 @@ class StandardLegend(LegendStrategy):
             text.set_color(fg)
 
 # ======================================================================
-# Concrete implementation — molecule color legend
+# Concrete implementation - molecule color legend
 # ======================================================================
 class MoleculeColorLegend(LegendStrategy):
     """Compact, text-only, per-molecule-colored legend.
 
-    Each entry is rendered as bold colored text with an invisible
-    handle patch, giving a color key above the plot.  The number of
-    columns is determined at render time so that the legend fits within
-    the *panel* width and does not overlap the panels or the title.
+    Each entry is rendered as bold colored text with an invisible handle patch, giving a color key above the plot.
+    The number of columns is determined at render time so that the legend fits within the *panel* width and does not overlap the panels or the title.
 
-    Legend text objects are tagged with ``_islat_mol_color = True`` so
-    that the theme system does not overwrite them with the foreground
-    color.
+    Legend text objects are tagged with ``_islat_mol_color = True`` so that the theme system does not overwrite them with the foreground color.
     """
-
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
@@ -276,8 +265,7 @@ class MoleculeColorLegend(LegendStrategy):
     ) -> int:
         """Determine the number of columns that fit within the panel width.
 
-        Uses the matplotlib renderer when available for exact text
-        measurement; falls back to a character-width heuristic otherwise.
+        Uses the matplotlib renderer when available for exact text measurement; falls back to a character-width heuristic otherwise.
         """
         import numpy as np
 
@@ -338,10 +326,8 @@ class MoleculeColorLegend(LegendStrategy):
     def _safe_y_anchor(fig: MplFigure) -> float:
         """Compute a y-anchor in figure coordinates that avoids the title.
 
-        The legend is placed in the gap between the top of the panel
-        area (``subplots_adjust(top=…)``) and the figure edge (y = 1.0).
-        If a ``suptitle`` exists, the anchor is shifted down so the
-        legend sits just below the title.
+        The legend is placed in the gap between the top of the panel area (``subplots_adjust(top=…)``) and the figure edge (y = 1.0).
+        If a ``suptitle`` exists, the anchor is shifted down so the legend sits just below the title.
         """
         # Determine the top edge of the panel area.
         sp = fig.subplotpars

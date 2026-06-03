@@ -129,7 +129,7 @@ class MenuToolTip:
         if not tip_text:
             return
 
-        # Use the pointer position — reliable even for native OS menus
+        # Use the pointer position - reliable even for native OS menus
         x = self.menu.winfo_pointerx() + 20
         y = self.menu.winfo_pointery()
         self._show(tip_text, x, y)

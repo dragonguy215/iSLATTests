@@ -60,7 +60,6 @@ class FitLinesPlotGrid(CompositePlot):
     # ------------------------------------------------------------------
     # CompositePlot abstract-method implementations
     # ------------------------------------------------------------------
-
     def _build_layout(self) -> np.ndarray:
         """Create the 2-D axes grid for the fit-line subplots.
 
@@ -152,7 +151,7 @@ class FitLinesPlotGrid(CompositePlot):
                 line_title = f"Line {idx + 1}"
 
             if fitted_wave is None or fitted_flux is None:
-                # No fit result — show the spectrum slice without a Gaussian overlay
+                # No fit result - show the spectrum slice without a Gaussian overlay
                 ax.set_title(line_title, fontsize=9, pad=2)
             else:
                 line_color = 'lime' if self.fit_csv_dict[idx].get('Fit_det', False) else 'red'

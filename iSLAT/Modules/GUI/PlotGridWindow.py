@@ -124,7 +124,7 @@ class PlotGridWindow(tk.Toplevel):
         
         scroll_canvas.bind("<Configure>", configure_inner_frame)
         
-        # Mouse wheel scrolling — cross-platform (Windows, macOS, Linux)
+        # Mouse wheel scrolling - cross-platform (Windows, macOS, Linux)
         def on_mousewheel(event):
             if event.num == 4:
                 scroll_canvas.yview_scroll(-1, "units")

@@ -8,7 +8,6 @@ Each cell in the stacked layout contains two sub-panels produced by :meth:`_crea
 
 Designed for best-fit comparison plots, works with any model flux array.
 """
-
 from typing import Optional, Tuple, List, Dict, Any, Union, TYPE_CHECKING
 from pathlib import Path
 

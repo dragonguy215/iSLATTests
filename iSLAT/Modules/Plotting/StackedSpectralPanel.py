@@ -1,16 +1,12 @@
 """
 StackedSpectralPanel -- Abstract composer for vertically stacked spectral panels.
 
-Manages a collection of :class:`SpectralPanel` instances laid out in a
-vertical stack using matplotlib's :class:`~matplotlib.gridspec.GridSpec`.
-Each row (cell) may contain an **arbitrary number** of sub-panels
-arranged vertically with configurable height ratios -- for example a
-single spectrum axes (as in :class:`FullSpectrumPlot`) or a spectrum +
-residual pair (as in :class:`ResidualSpectrumPlot`).
+Manages a collection of :class:`SpectralPanel` instances laid out in a vertical stack using matplotlib's :class:`~matplotlib.gridspec.GridSpec`.
+Each row (cell) may contain an **arbitrary number** of sub-panels arranged vertically with configurable height ratios. 
 
-Concrete subclasses must implement :meth:`_create_cell` to produce the
-panels and axes for each wavelength row, and may override hooks like
-:meth:`_post_render_cell` and :meth:`_cell_height_ratios`.
+For example, a single spectrum axes (as in :class:`FullSpectrumPlot`) or a spectrum + residual pair (as in :class:`ResidualSpectrumPlot`).
+
+Concrete subclasses must implement :meth:`_create_cell` to produce the panels and axes for each wavelength row, and may override hooks like :meth:`_post_render_cell` and :meth:`_cell_height_ratios`.
 
 Usage sketch::
 
@@ -24,7 +20,6 @@ Usage sketch::
     plot.generate_plot()
     plot.show()
 """
-
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -97,7 +92,6 @@ class StackedSpectralPanel(CompositePlot):
     **kwargs
         Forwarded to :class:`BasePlot`.
     """
-
     def __init__(
         self,
         wave_data: np.ndarray,
@@ -175,7 +169,7 @@ class StackedSpectralPanel(CompositePlot):
         """Compute :attr:`_panel_edges` and :attr:`_panel_ends`.
 
         When :attr:`x_scaling` is ``WAVELENGTH`` (default) each panel
-        covers an equal wavelength width — the classic behaviour.
+        covers an equal wavelength width - the classic behaviour.
 
         When :attr:`x_scaling` is ``DATA_DENSITY`` the panel boundaries
         are chosen so that each panel contains approximately the same
@@ -185,9 +179,9 @@ class StackedSpectralPanel(CompositePlot):
 
         After this method runs:
 
-        * ``_panel_edges[i]`` — left boundary of panel *i*
-        * ``_panel_ends[i]``  — right boundary of panel *i*
-        * ``_step``           — uniform step width (``WAVELENGTH`` mode)
+        * ``_panel_edges[i]`` - left boundary of panel *i*
+        * ``_panel_ends[i]``  - right boundary of panel *i*
+        * ``_step``           - uniform step width (``WAVELENGTH`` mode)
           **or** ``None`` (``DATA_DENSITY`` mode).
         """
         start = self._xlim_start
@@ -234,7 +228,7 @@ class StackedSpectralPanel(CompositePlot):
         wave_in_range = np.sort(self.wave_data[mask])
 
         if len(wave_in_range) < n_panels or n_panels <= 1:
-            # Not enough data — fall back to equal-wavelength.
+            # Not enough data - fall back to equal-wavelength.
             step = (end - start) / max(n_panels, 1)
             edges = np.arange(start, end, step)
             return edges, np.append(edges[1:], end)
@@ -261,7 +255,6 @@ class StackedSpectralPanel(CompositePlot):
     # ------------------------------------------------------------------
     # CompositePlot abstract-method implementations
     # ------------------------------------------------------------------
-
     def _build_layout(self) -> "GridSpec":
         """Create the outer ``GridSpec`` for the stacked rows.
 
@@ -807,7 +800,7 @@ class StackedSpectralPanel(CompositePlot):
 
         Cells from *other* are paired with cells from *self* by
         **closest matching wavelength range** (midpoint proximity).
-        Each matched pair occupies two consecutive rows — *self*'s cell
+        Each matched pair occupies two consecutive rows - *self*'s cell
         on top, *other*'s cell directly beneath.
 
         Unmatched cells (those with no close counterpart in the partner
@@ -880,7 +873,7 @@ def _extract_cell_kwargs(ssp: StackedSpectralPanel) -> Dict[str, Any]:
     For :class:`FullSpectrumPlot` (and its subclass
     :class:`ResidualSpectrumPlot`) this includes the molecule cache and
     summed spectrum arrays.  For unknown subclasses we return an empty
-    dict — callers can always extend this function.
+    dict - callers can always extend this function.
     """
     kw: Dict[str, Any] = {}
 

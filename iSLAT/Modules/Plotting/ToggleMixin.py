@@ -1,5 +1,5 @@
 """
-ToggleMixin — shared toggle-state management for PlotView implementations.
+ToggleMixin - shared toggle-state management for PlotView implementations.
 
 Both :class:`ThreePanelView` and :class:`FullSpectrumView` need to
 reconcile visual state (atomic lines, saved lines, summed spectrum,
@@ -41,7 +41,6 @@ Hook methods (must be implemented by the concrete view):
     ``draw()``
         Flush pending changes to the canvas.
 """
-
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -51,7 +50,7 @@ class ToggleMixin:
     """Mixin providing toggle-state reconciliation for :class:`PlotView` subclasses."""
 
     # ------------------------------------------------------------------
-    # Hooks — concrete views must implement these
+    # Hooks - concrete views must implement these
     # ------------------------------------------------------------------
     @abstractmethod
     def _iter_toggle_axes(self):
@@ -183,7 +182,7 @@ class ToggleMixin:
         self.draw()
 
     # ------------------------------------------------------------------
-    # Optional hook — saved-line data storage
+    # Optional hook - saved-line data storage
     # ------------------------------------------------------------------
     def _set_saved_line_data(self, data: Any) -> None:
         """Store saved-line data.  Default stores on ``self.line_data``."""

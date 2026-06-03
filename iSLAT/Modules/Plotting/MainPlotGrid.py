@@ -1,15 +1,13 @@
 """
-MainPlotGrid — Three-panel composite plot for iSLAT spectral analysis.
+MainPlotGrid - Three-panel composite plot for iSLAT spectral analysis.
 
 Layout (GridSpec 2x2):
     Row 0, spanning both columns : full spectrum with molecule overlays
     Row 1, left column           : line inspection (zoomed region)
     Row 1, right column          : population (rotation) diagram
 
-The grid can be used entirely standalone in a notebook / script, or
-its axes can be shared with the GUI embedding layer.
+The grid can be used entirely standalone in a notebook / script, or its axes can be shared with the GUI embedding layer.
 """
-
 from typing import Optional, Tuple, List, Dict, Any, Union, TYPE_CHECKING
 import numpy as np
 import pandas as pd
@@ -84,7 +82,7 @@ class MainPlotGrid(CompositePlot):
         Pre-existing axes for the top spectrum panel.  When provided
         together with *ax_inspection* and *ax_popdiagram* the grid
         operates in **borrowed-axes mode**: :meth:`generate_plot` will
-        *not* call ``fig.clf()`` or create new axes — it renders
+        *not* call ``fig.clf()`` or create new axes - it renders
         directly onto the supplied axes.  This is the mode used by
         ``ThreePanelView`` for GUI embedding.
     ax_inspection : Axes, optional
@@ -113,7 +111,7 @@ class MainPlotGrid(CompositePlot):
         **kwargs,
     ):
         # When all three axes are supplied we are in "borrowed-axes" mode:
-        # the caller owns the figure and axes — we just render onto them.
+        # the caller owns the figure and axes - we just render onto them.
         # Pass the figure extracted from the first supplied axes so
         # BasePlot.fig is set correctly even in borrowed mode.
         borrowed = (
@@ -145,7 +143,7 @@ class MainPlotGrid(CompositePlot):
         # Borrowed-axes mode flag
         self._borrowed_axes: bool = borrowed
 
-        # Panel axes — either injected (borrowed) or created in generate_plot
+        # Panel axes - either injected (borrowed) or created in generate_plot
         self.ax_spectrum: Optional[Axes] = ax_spectrum
         self.ax_inspection: Optional[Axes] = ax_inspection
         self.ax_popdiagram: Optional[Axes] = ax_popdiagram
@@ -190,12 +188,12 @@ class MainPlotGrid(CompositePlot):
         :meth:`create_three_panel_axes`, and the full theme is applied.
 
         In **borrowed-axes mode** (axes were supplied to ``__init__``)
-        the existing axes are simply cleared and re-rendered — the
+        the existing axes are simply cleared and re-rendered - the
         figure layout and axes identities are *not* touched, so cached
         references held by ``InteractionHandler`` remain valid.
         """
         if self._borrowed_axes:
-            # Borrowed mode — render onto the pre-existing axes.
+            # Borrowed mode - render onto the pre-existing axes.
             # Do NOT call fig.clf() or create_three_panel_axes().
             self._render_spectrum_panel()
             self._render_inspection_panel()
@@ -204,7 +202,7 @@ class MainPlotGrid(CompositePlot):
             self.apply_theme_to_figure()
             return
 
-        # Standalone mode — full figure rebuild.
+        # Standalone mode - full figure rebuild.
         self._ensure_figure()
         self.fig.clf()
 
@@ -228,7 +226,6 @@ class MainPlotGrid(CompositePlot):
     # ------------------------------------------------------------------
     # CompositePlot abstract-method implementations
     # ------------------------------------------------------------------
-
     def _build_layout(self) -> tuple:
         """Create the three-panel GridSpec layout on ``self.fig``.
 
@@ -278,7 +275,7 @@ class MainPlotGrid(CompositePlot):
 
         # In borrowed-axes mode, preserve user zoom / pan limits across
         # re-renders so the display doesn't jump.  The sentinel (0, 1)
-        # means "axes have never been rendered into yet" — skip restore.
+        # means "axes have never been rendered into yet" - skip restore.
         _restore_lims = False
         if self._borrowed_axes:
             _prev_xlim = ax.get_xlim()
@@ -415,13 +412,13 @@ class MainPlotGrid(CompositePlot):
             # Show all visible molecules
             lip_molecules = self.molecules
         elif isinstance(self.inspection_molecules, (list, tuple)):
-            # Show a specific subset by name — build a lightweight copy
+            # Show a specific subset by name - build a lightweight copy
             if self.molecules is not None:
                 from iSLAT.Modules.DataTypes.MoleculeDict import MoleculeDict as _MD
                 lip_molecules = _MD.__new__(_MD)
                 dict.__init__(lip_molecules)
                 # Initialise the internal caches that MoleculeDict.__init__
-                # normally creates — without these, get_visible_molecules()
+                # normally creates - without these, get_visible_molecules()
                 # and other helpers will raise AttributeError.
                 lip_molecules._visible_molecules = set()
                 lip_molecules._summed_flux_cache = {}
@@ -828,8 +825,7 @@ class MainPlotGrid(CompositePlot):
     ) -> Any:
         """Plot scatter points for active lines on the population diagram.
 
-        Delegates to :meth:`PopulationDiagramPlot.render_active_lines` via
-        the persistent :attr:`pop_diagram_panel` instance.
+        Delegates to :meth:`PopulationDiagramPlot.render_active_lines` via the persistent :attr:`pop_diagram_panel` instance.
 
         Returns the :class:`PathCollection` scatter artist, or *None*.
         """
@@ -845,7 +841,6 @@ class MainPlotGrid(CompositePlot):
     # ==================================================================
     # GUI line-inspection & population-diagram rendering
     # ==================================================================
-
     def render_line_inspection_plot(
         self,
         wave_data: np.ndarray,
@@ -975,7 +970,7 @@ class MainPlotGrid(CompositePlot):
         if ax is None:
             return
 
-        # Cache check — skip re-render if molecule and parameters unchanged.
+        # Cache check - skip re-render if molecule and parameters unchanged.
         current_hash = None
         if molecule is not None and hasattr(molecule, '_compute_intensity_hash'):
             current_hash = (molecule.name, molecule._compute_intensity_hash())

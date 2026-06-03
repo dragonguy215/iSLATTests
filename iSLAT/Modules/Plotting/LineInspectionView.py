@@ -1,11 +1,9 @@
 """
-LineInspectionView — :class:`SpectrumPanelView` for a standalone full-size line inspection plot.
+LineInspectionView - :class:`SpectrumPanelView` for a standalone full-size line inspection plot.
 
-Shows a :class:`LineInspectionPlot` for the most recent span-selector
-selection in a dedicated figure that fills the main plotting area.
+Shows a :class:`LineInspectionPlot` for the most recent span-selector selection in a dedicated figure that fills the main plotting area.
 When no selection has been made yet the view displays a placeholder.
 """
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, List, Optional, Tuple
@@ -37,12 +35,10 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
     """
     Standalone line-inspection view.
 
-    Renders a :class:`LineInspectionPlot` for the currently selected wavelength range (taken from the main controller's
-    ``toggle_state["current_selection"]``).
-    The view owns its own :class:`~matplotlib.figure.Figure` and
-    :class:`~matplotlib.backends.backend_tkagg.FigureCanvasTkAgg` so it
-    can be swapped in / out of the main window independently of the
-    three-panel and full-spectrum views.
+    Renders a :class:`LineInspectionPlot` for the currently selected wavelength range (taken from the main controller's ``toggle_state["current_selection"]``).
+    
+    The view owns its own :class:`~matplotlib.figure.Figure` and :class:`~matplotlib.backends.backend_tkagg.FigureCanvasTkAgg` so it
+    can be swapped in / out of the main window independently of the three-panel and full-spectrum views.
 
     When no selection has been made a placeholder message is shown.
 
@@ -51,7 +47,6 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
     plot_manager : iSLATPlot
         The main controller (``iSLAT.Modules.Plotting.MainPlot.iSLATPlot``).
     """
-
     def __init__(self, plot_manager: Any) -> None:
         super().__init__(plot_manager)
 
@@ -69,7 +64,6 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
     # ==================================================================
     # Internal helpers
     # ==================================================================
-
     def _get_active_molecule(self) -> Optional["Molecule"]:
         return getattr(self._islat, "active_molecule", None)
 
@@ -93,7 +87,7 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
 
         sel = self._current_selection
         if sel is None:
-            # No selection yet — draw a placeholder
+            # No selection yet - draw a placeholder
             ax.set_title("Line Inspection")
             ax.set_xlabel("Wavelength (µm)")
             ax.set_ylabel("Flux density (Jy)")
@@ -230,19 +224,16 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
     def sync_toggle_state(self, toggle_state: dict) -> None:
         """Apply the summed-spectrum toggle state when this view becomes active.
 
-        Because :meth:`_build_plot` already checks ``summed_toggle`` during
-        construction, this is only needed when the toggle is turned on *after*
-        the plot has been built (e.g. switching into this view while the
-        toggle is already set).
+        Because :meth:`_build_plot` already checks ``summed_toggle`` during construction, this is only needed when the toggle is turned on *after*
+        the plot has been built (e.g. switching into this view while the toggle is already set).
         """
         summed = toggle_state.get("summed", False)
         if summed and self._initialised:
             self.toggle_summed_spectrum(True)
 
     # ==================================================================
-    # PlotView — display range sync
+    # PlotView - display range sync
     # ==================================================================
-
     def _get_display_range(self) -> Tuple[float, float]:
         """Return the current selection bounds for the Plot Start/Range controls."""
         if self._current_selection is not None:
@@ -254,8 +245,7 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
         self.on_selection(float(start), float(end))
 
     def _register_control_fields(self) -> None:
-        """Register a :class:`DisplayRangeField` that routes the Plot Start / Plot Range
-        controls in the control panel to this view's inspection window."""
+        """Register a :class:`DisplayRangeField` that routes the Plot Start / Plot Range controls in the control panel to this view's inspection window."""
         bus = getattr(self._pm, 'control_bus', None)
         if bus is None:
             return
@@ -272,9 +262,8 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
         )
 
     # ==================================================================
-    # Pick event — active line interaction
+    # Pick event - active line interaction
     # ==================================================================
-
     def _connect_pick_event(self) -> None:
         """Connect a pick-event handler to the current canvas (idempotent)."""
         if self._canvas is None or self._pick_cid is not None:
@@ -378,9 +367,8 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
                 debug_config.warning("line_inspection_view", f"data_field update failed: {exc}")
 
     # ==================================================================
-    # PlotView — lifecycle
+    # PlotView - lifecycle
     # ==================================================================
-
     def activate(self, parent_frame: Any) -> None:
         """Pack the line-inspection canvas into *parent_frame*."""
         self._parent_frame = parent_frame
@@ -408,9 +396,8 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
             self._canvas.draw_idle()
 
     # ==================================================================
-    # PlotView — interaction context
+    # PlotView - interaction context
     # ==================================================================
-
     def build_context_menu(self, event: Any, canvas_widget: Any) -> Any:
         """Return the line-inspection right-click menu."""
         menu = self._build_line_inspection_menu(canvas_widget)
@@ -439,9 +426,8 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
         self.selected_line = None
 
     # ==================================================================
-    # PlotView — core rendering
+    # PlotView - core rendering
     # ==================================================================
-
     def update_model_plot(
         self,
         wave_data: Any = None,
@@ -465,9 +451,8 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
                 self._canvas.draw_idle()
 
     # ==================================================================
-    # PlotView — selection (override base no-ops)
+    # PlotView - selection (override base no-ops)
     # ==================================================================
-
     def on_selection(self, xmin: float, xmax: float) -> None:
         """Update the displayed wavelength range when the user makes a new selection."""
         self._current_selection = (xmin, xmax)
@@ -500,9 +485,8 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
                 self._canvas.draw_idle()
 
     # ==================================================================
-    # PlotView — molecule lifecycle (override to preserve selection)
+    # PlotView - molecule lifecycle (override to preserve selection)
     # ==================================================================
-
     def on_active_molecule_changed(
         self,
         new_molecule: Optional["Molecule"] = None,

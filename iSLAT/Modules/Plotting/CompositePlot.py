@@ -1,29 +1,28 @@
 """
-CompositePlot — Abstract base for multi-panel composite plot objects.
+CompositePlot - Abstract base for multi-panel composite plot objects.
 
 A :class:`CompositePlot` owns an ordered collection of :class:`BasePlot`
 child panels that share a single figure.  Concrete subclasses supply:
 
-* :meth:`_build_layout` — creates the axes / gridspec layout on the
+* :meth:`_build_layout` - creates the axes / gridspec layout on the
   figure and returns it.
-* :meth:`_create_panels` — instantiates the child :class:`BasePlot`
+* :meth:`_create_panels` - instantiates the child :class:`BasePlot`
   objects, attaches axes from the layout, and registers each one via
   :meth:`_register_panel`.
 
 The default :meth:`generate_plot` orchestrates the full build cycle::
 
-    _ensure_figure() → fig.clf() → child_panels.clear()
-    → _build_layout() → _create_panels()
-    → for each panel: panel.generate_plot()
-    → _post_render() → apply_theme_to_figure()
+    _ensure_figure() -> fig.clf() -> child_panels.clear()
+    -> _build_layout() -> _create_panels()
+    -> for each panel: panel.generate_plot()
+    -> _post_render() -> apply_theme_to_figure()
 
 Subclasses that need different sequencing (e.g. borrowed-axes mode in
 :class:`MainPlotGrid`, or per-row y-limit normalisation in
 :class:`StackedSpectralPanel`) should override :meth:`generate_plot`
-directly — the shared child-panel registry and helper methods remain
+directly - the shared child-panel registry and helper methods remain
 available regardless.
 """
-
 from abc import abstractmethod
 from typing import Any, Dict, Iterator, List, Optional, TYPE_CHECKING
 
@@ -50,7 +49,7 @@ class CompositePlot(BasePlot):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        #: Ordered mapping of ``name → panel`` for every child panel
+        #: Ordered mapping of ``name -> panel`` for every child panel
         #: registered by :meth:`_register_panel`.
         self.child_panels: Dict[str, "BasePlot"] = {}
 
@@ -70,7 +69,7 @@ class CompositePlot(BasePlot):
         -------
         Any
             Whatever the subclass needs to attach axes to its child
-            panels — a tuple of :class:`~matplotlib.axes.Axes`, a
+            panels - a tuple of :class:`~matplotlib.axes.Axes`, a
             :class:`~matplotlib.gridspec.GridSpec`, a 2-D NumPy array of
             :class:`~matplotlib.axes.Axes`, etc.
         """
@@ -106,10 +105,10 @@ class CompositePlot(BasePlot):
 
         The default implementation follows the sequence::
 
-            _ensure_figure → fig.clf → child_panels.clear
-            → _build_layout → _create_panels
-            → for each panel: panel.generate_plot
-            → _post_render → apply_theme_to_figure
+            _ensure_figure -> fig.clf -> child_panels.clear
+            -> _build_layout -> _create_panels
+            -> for each panel: panel.generate_plot
+            -> _post_render -> apply_theme_to_figure
 
         Subclasses with non-standard layouts (e.g. borrowed-axes mode)
         should override this method.

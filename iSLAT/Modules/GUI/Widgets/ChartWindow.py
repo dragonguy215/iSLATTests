@@ -209,7 +209,7 @@ class MoleculeSelector:
         file_path = os.path.join(str(hitran_data_folder_path), f"data_Hitran_{isotopologue}.par")
 
         self.data_field.insert_text(
-            f"{isotopologue} downloaded from HITRAN — adding to iSLAT…",
+            f"{isotopologue} downloaded from HITRAN - adding to iSLAT…",
             clear_after=True, console_print=True,
         )
 

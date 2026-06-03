@@ -1,13 +1,9 @@
 """
 SpectrumPanel -- Concrete :class:`SpectralPanel` for observed spectrum display.
 
-Renders observed data, individual molecule models, a summed model
-spectrum, and optionally line-list annotations and atomic-line markers
-onto a single axes.  This is the panel type used by
-:class:`FullSpectrumPlot` (one per row) and the upper sub-panel in each
-:class:`ResidualSpectrumPlot` row.
+Renders observed data, individual molecule models, a summed model spectrum, and optionally line-list annotations and atomic-line markers onto a single axes.
+This is the panel type used by :class:`FullSpectrumPlot` (one per row) and the upper sub-panel in each :class:`ResidualSpectrumPlot` row.
 """
-
 from typing import Optional, Tuple, List, Dict, Any, TYPE_CHECKING
 
 import numpy as np
@@ -358,7 +354,7 @@ class SpectrumPanel(SpectralPanel):
         ax : Axes
             Target matplotlib Axes.
         fit_results_data : tuple
-            ``(gauss_fits, fitted_waves, fitted_fluxes)`` — each element is
+            ``(gauss_fits, fitted_waves, fitted_fluxes)`` - each element is
             an iterable of per-fit values in the same order.
         color : str
             Line and fill color applied to every fit.
@@ -421,7 +417,7 @@ class SpectrumPanel(SpectralPanel):
         xmin, xmax : float
             Wavelength range of the current selection.
         user_settings : dict, optional
-            iSLAT user settings — used for ``clear_old_fits`` and
+            iSLAT user settings - used for ``clear_old_fits`` and
             ``fit_line_uncertainty``.  Falls back to safe defaults.
         legend_visible : bool
             Whether the legend should be visible after rendering.

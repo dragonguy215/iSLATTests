@@ -10,7 +10,6 @@ Renders the convolved optical-depth profile τ(λ) for one or more molecules on 
 
 Used both as a standalone single-panel plot and as the cell type created by :class:`OpticalDepthSpectrumPlot`.
 """
-
 from typing import Optional, List, Tuple, TYPE_CHECKING
 
 import numpy as np

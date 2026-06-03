@@ -1,10 +1,9 @@
 """
-PopulationDiagramView — :class:`PlotView` for a standalone full-size population (Boltzmann) diagram.
+PopulationDiagramView - :class:`PlotView` for a standalone full-size population (Boltzmann) diagram.
 
 Shows the :class:`PopulationDiagramPlot` for the currently active molecule in a dedicated figure that fills the main plotting area.
 All spectrum-specific toggles (summed spectrum, saved lines, atomic lines) are no-ops for this view.
 """
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -42,19 +41,15 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
     """
     Standalone population-diagram view.
 
-    Renders a :class:`PopulationDiagramPlot` for the currently active
-    molecule (or all visible molecules when no single molecule is
-    selected).  The view owns its own :class:`~matplotlib.figure.Figure`
-    and :class:`~matplotlib.backends.backend_tkagg.FigureCanvasTkAgg` so
-    it can be swapped in / out of the main window independently of the
-    three-panel and full-spectrum views.
+    Renders a :class:`PopulationDiagramPlot` for the currently active molecule (or all visible molecules when no single molecule is selected).
+    The view owns its own :class:`~matplotlib.figure.Figure` and :class:`~matplotlib.backends.backend_tkagg.FigureCanvasTkAgg` so
+    it can be swapped in / out of the main window independently of the three-panel and full-spectrum views.
 
     Parameters
     ----------
     plot_manager : iSLATPlot
         The main controller (``iSLAT.Modules.Plotting.MainPlot.iSLATPlot``).
     """
-
     def __init__(self, plot_manager: Any) -> None:
         self._pm = plot_manager
         self._islat = plot_manager.islat
@@ -75,7 +70,6 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
     # ==================================================================
     # Internal helpers
     # ==================================================================
-
     def _get_active_molecule(self) -> Optional["Molecule"]:
         return getattr(self._islat, "active_molecule", None)
 
@@ -108,7 +102,7 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
                 theme=self._pm.theme,
             )
         else:
-            # No data yet — draw an empty placeholder
+            # No data yet - draw an empty placeholder
             self._plot = None
             ax.set_title("Population Diagram")
             ax.set_xlabel("Upper energy level  $E_u$  (K)")
@@ -138,7 +132,7 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
         stays packed and visible.
         """
         if self._fig is None:
-            # No figure yet — fall back to a full build.
+            # No figure yet - fall back to a full build.
             self._build_plot()
             return
 
@@ -225,9 +219,8 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
                 pass
 
     # ==================================================================
-    # PlotView — lifecycle
+    # PlotView - lifecycle
     # ==================================================================
-
     def activate(self, parent_frame: Any) -> None:
         """Pack the population-diagram canvas into *parent_frame*."""
         self._parent_frame = parent_frame
@@ -286,9 +279,8 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
                 pass
 
     # ==================================================================
-    # PlotView — interaction context
+    # PlotView - interaction context
     # ==================================================================
-
     def build_context_menu(self, event: Any, canvas_widget: Any) -> Any:
         """Delegate to the shared population-diagram context menu builder."""
         draw_idle = self._canvas.draw_idle if self._canvas is not None else lambda: None
@@ -298,9 +290,8 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
         return menu
 
     # ==================================================================
-    # PlotView — theme
+    # PlotView - theme
     # ==================================================================
-
     def apply_theme(self, theme: dict) -> None:
         self._pm.theme = theme
         self._apply_theme_to_fig()
@@ -308,9 +299,8 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
             self._canvas.draw_idle()
 
     # ==================================================================
-    # PlotView — core rendering
+    # PlotView - core rendering
     # ==================================================================
-
     def update_model_plot(
         self,
         wave_data: Any = None,
@@ -343,11 +333,10 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
         self.update_model_plot()
 
     # ==================================================================
-    # PlotView — selection / line inspection (no-op for this view)
+    # PlotView - selection / line inspection (no-op for this view)
     # ==================================================================
-
     def on_selection(self, xmin: float, xmax: float) -> None:
-        """No-op — this view does not show a spectrum."""
+        """No-op - this view does not show a spectrum."""
         pass
 
     def clear_selection(self) -> None:
@@ -355,13 +344,12 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
         pass
 
     def clear_active_lines(self) -> None:
-        """No-op — no active-line markers in this view."""
+        """No-op - no active-line markers in this view."""
         pass
 
     # ==================================================================
-    # PlotView — molecule lifecycle
+    # PlotView - molecule lifecycle
     # ==================================================================
-
     def on_active_molecule_changed(
         self,
         new_molecule: Optional["Molecule"] = None,
@@ -382,7 +370,7 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
         if not self._initialised or self._fig is None:
             self._needs_refresh = True
             return
-        # Refresh in-place — do NOT destroy and recreate the canvas.
+        # Refresh in-place - do NOT destroy and recreate the canvas.
         self._refresh_plot()
         self._apply_theme_to_fig()
         if self._canvas is not None:
@@ -393,15 +381,14 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
         self.update_model_plot()
 
     # ==================================================================
-    # PlotView — toggle helpers (most are no-ops for this view)
+    # PlotView - toggle helpers (most are no-ops for this view)
     # ==================================================================
-
     def sync_toggle_state(self, toggle_state: dict) -> None:
         """No visible toggles apply to the population diagram view."""
         pass
 
     def toggle_summed_spectrum(self, visible: bool) -> None:
-        """No-op — no spectrum in this view."""
+        """No-op - no spectrum in this view."""
         pass
 
     def toggle_legend(self, visible: Optional[bool] = None) -> None:
@@ -419,17 +406,16 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
             self._canvas.draw_idle()
 
     def toggle_saved_lines(self, show: bool, loaded_lines: Any = None) -> None:
-        """No-op — no saved lines in the population diagram."""
+        """No-op - no saved lines in the population diagram."""
         pass
 
     def toggle_atomic_lines(self, show: bool) -> None:
-        """No-op — no atomic lines in the population diagram."""
+        """No-op - no atomic lines in the population diagram."""
         pass
 
     # ==================================================================
-    # PlotView — canvas / drawing
+    # PlotView - canvas / drawing
     # ==================================================================
-
     def draw(self) -> None:
         if self._canvas is not None:
             self._canvas.draw_idle()

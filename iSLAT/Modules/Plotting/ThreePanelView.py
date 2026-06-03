@@ -1,19 +1,15 @@
 """
-ThreePanelView — :class:`PlotView` implementation for the standard 3-panel layout.
+ThreePanelView - :class:`PlotView` implementation for the standard 3-panel layout.
 
 Panels:
     1. Full spectrum overview  (ax1)
     2. Line inspection zoom    (ax2)
     3. Population diagram      (ax3)
 
-This view **composes** a :class:`MainPlotGrid` in *borrowed-axes* mode
-for all spectrum-panel rendering, mirroring how :class:`FullSpectrumView`
-composes a :class:`FullSpectrumPlot`. The axes and canvas are still
-owned by the :class:`iSLATPlot` controller — :class:`MainPlotGrid`
-renders onto them without calling ``fig.clf()`` so that cached
-references in ``InteractionHandler`` stay valid.
+This view **composes** a :class:`MainPlotGrid` in *borrowed-axes* mode for all spectrum-panel rendering, mirroring how :class:`FullSpectrumView` composes a :class:`FullSpectrumPlot`. 
+The axes and canvas are still owned by the :class:`iSLATPlot` controller
+- :class:`MainPlotGrid` renders onto them without calling ``fig.clf()`` so that cached references in ``InteractionHandler`` stay valid.
 """
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, List
@@ -58,11 +54,9 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
     Standard 3-panel GUI view backed by a :class:`MainPlotGrid`.
 
     The grid is created lazily in *borrowed-axes* mode on first render:
-    it receives the controller's ``ax1``/``ax2``/``ax3`` and renders
-    directly onto them.  Toggle-state management (atomic lines, saved
-    lines, summed spectrum, legend) is provided by :class:`ToggleMixin`.
+    it receives the controller's ``ax1``/``ax2``/``ax3`` and renders directly onto them.
+    Toggle-state management (atomic lines, saved lines, summed spectrum, legend) is provided by :class:`ToggleMixin`.
     """
-
     def __init__(self, plot_manager: Any) -> None:
         """
         Parameters
@@ -73,7 +67,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         self._pm = plot_manager  # short alias for the controller
         self._needs_refresh: bool = True  # Set True when data changes; cleared after re-render
 
-        # MainPlotGrid in borrowed-axes mode — created lazily in
+        # MainPlotGrid in borrowed-axes mode - created lazily in
         # _ensure_grid() because wave_data/flux_data are not available
         # until the first render call.
         self._grid: MainPlotGrid | None = None
@@ -186,11 +180,11 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         self.apply_theme(self._pm.theme)
 
         if self._needs_refresh:
-            # Data changed while we were inactive — full re-render
+            # Data changed while we were inactive - full re-render
             self._do_update_model_plot()
             self._needs_refresh = False
         else:
-            # Simple view toggle — just sync overlay state
+            # Simple view toggle - just sync overlay state
             self.sync_toggle_state(self._pm.toggle_state)
 
         # Restore the span selector and active line selection
@@ -273,12 +267,12 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         grid.error_data = getattr(islat, 'err_data', None)
         grid.wave_data_obs = wave_data_obs
 
-        # Re-render only the spectrum panel — leaves inspection + pop panels alone.
+        # Re-render only the spectrum panel - leaves inspection + pop panels alone.
         grid._render_spectrum_panel()
         grid.apply_theme_to_figure()
         self._pm.make_span_selector()
 
-        # Reapply the legend toggle — _render_spectrum_panel always rebuilds
+        # Reapply the legend toggle - _render_spectrum_panel always rebuilds
         # the legend so we must re-hide it when the user has toggled it off.
         if not self._pm.legend_toggle:
             leg = self.ax1.get_legend()
@@ -296,11 +290,11 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         islat = self._islat
 
         if not hasattr(islat, 'molecules_dict') or len(islat.molecules_dict) == 0:
-            # No molecules — clear all molecule artists from the spectrum axes.
+            # No molecules - clear all molecule artists from the spectrum axes.
             if self._grid is not None:
                 self._grid.clear_all_molecule_lines()
             else:
-                # Grid not yet created — clear directly from ax1
+                # Grid not yet created - clear directly from ax1
                 for line in self._pm.ax1.lines[:]:
                     if getattr(line, "_molecule_name", None) is not None:
                         line.remove()
@@ -327,7 +321,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
             wave_data_obs=wave_data_obs,
         )
 
-        # Respect summed_toggle — hide the summed fill if the user toggled it off.
+        # Respect summed_toggle - hide the summed fill if the user toggled it off.
         if not self._pm.summed_toggle:
             BasePlot._clear_tagged_artists(
                 grid.ax_spectrum, "_islat_summed", lines=False,
@@ -363,7 +357,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         force_rerender: bool = False,
     ) -> None:
         """
-        Fast incremental update — toggle one molecule's artists on ax1.
+        Fast incremental update - toggle one molecule's artists on ax1.
 
         Delegates to :meth:`MainPlotGrid.handle_molecule_visibility_change`
         which handles artist toggling, summed-spectrum update, and legend
@@ -389,7 +383,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
     # Selection & line-inspection
     # ------------------------------------------------------------------
     def on_selection(self, xmin: float, xmax: float) -> None:
-        """Handle a span-selector drag — render line inspection + population diagram.
+        """Handle a span-selector drag - render line inspection + population diagram.
 
         All active molecules (primary + comparison) have their lines rendered
         in ax2 using each molecule's own color.  The population diagram (ax3)
@@ -494,7 +488,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         parameter_name: str,
         current_selection: Optional[Tuple[float, float]] = None,
     ) -> None:
-        """A molecule parameter changed — update spectrum + possibly line inspection."""
+        """A molecule parameter changed - update spectrum + possibly line inspection."""
         # Visibility changes are handled separately
         if parameter_name == 'is_visible':
             return
@@ -529,7 +523,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
             self._canvas.draw_idle()
 
     def on_molecule_deleted(self, molecule_name: str) -> None:
-        """A molecule was removed — clear and rebuild everything."""
+        """A molecule was removed - clear and rebuild everything."""
         if self._grid is not None:
             self._grid.clear_all_molecule_lines()
         else:
@@ -546,7 +540,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
         self._do_update_model_plot()
 
     # ------------------------------------------------------------------
-    # Private helpers — line inspection rendering
+    # Private helpers - line inspection rendering
     # ------------------------------------------------------------------
     def _get_line_threshold(self) -> float:
         """Return the line-intensity threshold (0-1) from user settings.
@@ -596,7 +590,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
     ) -> None:
         """Render the line-inspection panel (ax2) with vertical markers.
 
-        Kept for backward compatibility — delegates to
+        Kept for backward compatibility - delegates to
         :meth:`_render_line_inspection_multi` with a single-molecule list.
         """
         active_mol = self._islat.active_molecule
@@ -704,10 +698,10 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
                 self._active_scatter_collections[molecule.name] = (sc, point_count)
 
     # ------------------------------------------------------------------
-    # Private helpers — pick / highlight interaction
+    # Private helpers - pick / highlight interaction
     # ------------------------------------------------------------------
     def _on_pick_line(self, event: Any) -> None:
-        """Handle line pick events — self-contained interaction logic."""
+        """Handle line pick events - self-contained interaction logic."""
         picked_value = self._handle_line_pick_event(event)
         if picked_value:
             self.selected_line = picked_value
@@ -730,7 +724,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
                     self._trigger_inspection_from_wavelength(float(lam))
                     return  # draw_idle will be called inside the trigger
 
-        # Shift+click on a base (non-active) scatter point on ax3 —
+        # Shift+click on a base (non-active) scatter point on ax3 -
         # picked_value will be None here because the artist is not in
         # active_lines, but the scatter may still carry a wavelength tag.
         mouse_event = getattr(event, 'mouseevent', None)
@@ -1234,7 +1228,6 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
     # ------------------------------------------------------------------
     # Interaction context
     # ------------------------------------------------------------------
-
     def build_context_menu(self, event: Any, canvas_widget: Any) -> Any:
         """Return a ``tk.Menu`` appropriate for the right-clicked axes, or ``None``."""
         try:
@@ -1290,7 +1283,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
             self._append_save_figure_item(menu)
             return menu
 
-        # Unrecognised axes — minimal menu with just Save Figure
+        # Unrecognised axes - minimal menu with just Save Figure
         menu = tk.Menu(canvas_widget, tearoff=0)
         self._append_save_figure_item(menu)
         return menu

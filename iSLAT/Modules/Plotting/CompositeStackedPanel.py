@@ -11,7 +11,6 @@ A composite of a :class:`FullSpectrumPlot` and a
 :class:`ResidualSpectrumPlot` correctly produces the expected single-axes
 and spectrum+residual rows, respectively.
 """
-
 from __future__ import annotations
 
 from typing import (
@@ -33,19 +32,14 @@ if TYPE_CHECKING:
     from matplotlib.gridspec import SubplotSpec
 
 class CompositeStackedPanel(StackedSpectralPanel):
-    """Concrete :class:`StackedSpectralPanel` that composites rows from
-    two (or more) source stacked-spectral plots into a single figure.
+    """Concrete :class:`StackedSpectralPanel` that composites rows from two (or more) source stacked-spectral plots into a single figure.
 
-    Each row in the composite figure is backed by a specific
-    ``(source_plot, cell_index)`` pair.  Cell creation, rendering, and
-    post-render decoration are all delegated to the source plot that
-    owns the row, so a composite of a :class:`FullSpectrumPlot` and a
-    :class:`ResidualSpectrumPlot` correctly produces the expected
+    Each row in the composite figure is backed by a specific ``(source_plot, cell_index)`` pair.
+    Cell creation, rendering, and post-render decoration are all delegated to the source plot that
+    owns the row, so a composite of a :class:`FullSpectrumPlot` and a :class:`ResidualSpectrumPlot` correctly produces the expected
     single-axes and spectrum+residual rows, respectively.
 
-    Use :meth:`from_pair` (or the more convenient
-    :meth:`StackedSpectralPanel.stack_with` / ``+`` operator) to build
-    instances.
+    Use :meth:`from_pair` (or the more convenient :meth:`StackedSpectralPanel.stack_with` / ``+`` operator) to build instances.
 
     Attributes
     ----------
@@ -58,7 +52,6 @@ class CompositeStackedPanel(StackedSpectralPanel):
     sources : tuple[StackedSpectralPanel, StackedSpectralPanel]
         The two source plots that were combined.
     """
-
     def __init__(
         self,
         row_plan: List[Tuple[StackedSpectralPanel, int]],
@@ -90,7 +83,7 @@ class CompositeStackedPanel(StackedSpectralPanel):
         self.sources = sources
         self.labels = labels
 
-        # Override the panel_edges computed by the parent — they are
+        # Override the panel_edges computed by the parent - they are
         # meaningless for a composite; we only need the *count*.
         self._panel_edges = np.arange(len(row_plan), dtype=float)
         self._panel_ends = np.arange(1, len(row_plan) + 1, dtype=float)
@@ -191,15 +184,13 @@ class CompositeStackedPanel(StackedSpectralPanel):
         )
 
     # ------------------------------------------------------------------
-    # Gap-skip override — delegate to the source that owns the row
+    # Gap-skip override - delegate to the source that owns the row
     # ------------------------------------------------------------------
     def _cell_has_data(self, xmin: float, xmax: float) -> bool:
         """Delegate to the real source plot for the row at this position.
 
-        The composite uses dummy panel_edges, so the base-class
-        implementation (which checks ``self.wave_data``) would give
-        wrong results.  Instead we look up the source that owns each
-        row and ask *it* whether the cell has data.
+        The composite uses dummy panel_edges, so the base-class implementation (which checks ``self.wave_data``) would give wrong results.
+        Instead we look up the source that owns each row and ask *it* whether the cell has data.
         """
         # xmin in the composite is a dummy integer (0, 1, 2, ...).
         # Map it back to the row_plan entry.
@@ -211,7 +202,7 @@ class CompositeStackedPanel(StackedSpectralPanel):
         return owner._cell_has_data(edge, owner._panel_ends[cell_idx])
 
     # ------------------------------------------------------------------
-    # _create_cell — delegate to the source plot
+    # _create_cell - delegate to the source plot
     # ------------------------------------------------------------------
     def _create_cell(
         self,
@@ -230,7 +221,7 @@ class CompositeStackedPanel(StackedSpectralPanel):
         return owner._create_cell(cell_idx, real_xmin, real_xmax, gs_slot, **kw)
 
     # ------------------------------------------------------------------
-    # _post_render_cell — delegate to the source plot
+    # _post_render_cell - delegate to the source plot
     # ------------------------------------------------------------------
     def _post_render_cell(
         self,
@@ -243,7 +234,7 @@ class CompositeStackedPanel(StackedSpectralPanel):
         owner._post_render_cell(cell_idx, cell_panels, is_last)
 
     # ------------------------------------------------------------------
-    # generate_plot — override to handle fig redirection + auto-labels
+    # generate_plot - override to handle fig redirection + auto-labels
     # ------------------------------------------------------------------
     def generate_plot(self, **kwargs) -> None:
         """Build the composite figure.
@@ -252,8 +243,7 @@ class CompositeStackedPanel(StackedSpectralPanel):
         the composite figure so that ``_create_cell`` (which calls
         ``self.fig.add_subplot``) renders into the correct figure.
 
-        When *labels* are set, each panel's top-left corner is annotated
-        with the corresponding source label.
+        When *labels* are set, each panel's top-left corner is annotated with the corresponding source label.
         """
         n = len(self.row_plan)
         self._ensure_figure()

@@ -7,7 +7,6 @@ Inherits the stacking layout from :class:`StackedSpectralPanel` and implements :
 
 Can be combined with :class:`FullSpectrumPlot` using the ``+`` operator or :meth:`stack_with` to produce a composite flux + τ overview.
 """
-
 from typing import Optional, Tuple, List, Dict, Any, TYPE_CHECKING
 
 import numpy as np

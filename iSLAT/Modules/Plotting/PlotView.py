@@ -1,12 +1,10 @@
 """
-PlotView — abstract interface for switchable plot views in the iSLAT GUI.
+PlotView - abstract interface for switchable plot views in the iSLAT GUI.
 
-The iSLATPlot controller owns one *active_view* at a time.  Every user-facing
-action (toggle molecule, toggle summed spectrum, toggle legend, …) is
-forwarded to the active view's implementation, eliminating scattered
-``if is_full_spectrum`` checks throughout the codebase.
+The iSLATPlot controller owns one *active_view* at a time.
+
+Every user-facing action (toggle molecule, toggle summed spectrum, toggle legend, …) is forwarded to the active view's implementation, eliminating scattered ``if is_full_spectrum`` checks throughout the codebase.
 """
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -23,10 +21,8 @@ class PlotView(ABC):
     Abstract base for a swappable plot view inside the main iSLAT window.
 
     Each view owns a matplotlib *Figure* and a Tk *FigureCanvasTkAgg*.
-    The controller (:class:`iSLATPlot`) calls these methods without knowing
-    which concrete view is active.
+    The controller (:class:`iSLATPlot`) calls these methods without knowing which concrete view is active.
     """
-
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -35,8 +31,7 @@ class PlotView(ABC):
         """
         Make this view the visible one.
 
-        Pack / display the view's canvas inside *parent_frame* and ensure
-        the rendered content is up-to-date.
+        Pack / display the view's canvas inside *parent_frame* and ensure the rendered content is up-to-date.
         """
         ...
 
@@ -45,8 +40,7 @@ class PlotView(ABC):
         """
         Hide this view (pack_forget the canvas).
 
-        The view should **not** destroy its resources — it may be
-        reactivated later.
+        The view should **not** destroy its resources - it may be reactivated later.
         """
         ...
 
@@ -65,8 +59,7 @@ class PlotView(ABC):
         """
         Full re-render of the model spectrum (observed + molecules + sum).
 
-        Called when a new spectrum is loaded, molecule parameters change
-        globally, or the user switches into this view.
+        Called when a new spectrum is loaded, molecule parameters change globally, or the user switches into this view.
         """
         ...
 
@@ -84,17 +77,13 @@ class PlotView(ABC):
         """
         Lightweight update after a single molecule's visibility is toggled.
 
-        Implementations should **not** reload data from disk — only update
-        the artists that changed.
+        Implementations should **not** reload data from disk - only update the artists that changed.
 
         Parameters
         ----------
         force_rerender : bool
-            When *True* the molecule's artists must be re-rendered from
-            current parameters (e.g. because parameters changed while the
-            molecule was hidden).  Implementations should remove the stale
-            artists and create fresh ones instead of just toggling
-            visibility.
+            When *True* the molecule's artists must be re-rendered from current parameters (e.g. because parameters changed while the molecule was hidden).
+            Implementations should remove the stale artists and create fresh ones instead of just toggling visibility.
         """
         ...
 
@@ -105,11 +94,8 @@ class PlotView(ABC):
     def on_selection(self, xmin: float, xmax: float) -> None:
         """Handle a wavelength-range selection (span selector drag).
 
-        The view should render the line inspection panel, populate the
-        population diagram scatter points, and highlight the strongest
-        line.  Views that do not support interactive selection (e.g.
-        :class:`FullSpectrumView`) should implement this as a no-op or
-        as a deferred switch back to the three-panel view.
+        The view should render the line inspection panel, populate the population diagram scatter points, and highlight the strongest line.
+        Views that do not support interactive selection (e.g. :class:`FullSpectrumView`) should implement this as a no-op or as a deferred switch back to the three-panel view.
         """
         ...
 
@@ -134,9 +120,8 @@ class PlotView(ABC):
     ) -> None:
         """The user selected a different active molecule.
 
-        If a selection is active the view should re-run the line
-        inspection / population diagram for the new molecule.  Otherwise
-        only the population-diagram title and base diagram need updating.
+        If a selection is active the view should re-run the line inspection / population diagram for the new molecule.
+        Otherwise only the population-diagram title and base diagram need updating.
         """
         ...
 
@@ -149,15 +134,13 @@ class PlotView(ABC):
     ) -> None:
         """A single molecule's parameter changed (not visibility).
 
-        The view should update the spectrum if the molecule is visible,
-        and refresh the line-inspection / population diagram if the
-        molecule is the active one.
+        The view should update the spectrum if the molecule is visible, and refresh the line-inspection / population diagram if the molecule is the active one.
         """
         ...
 
     @abstractmethod
     def on_molecule_deleted(self, molecule_name: str) -> None:
-        """A molecule was removed from the dict — update all panels."""
+        """A molecule was removed from the dict - update all panels."""
         ...
 
     # ------------------------------------------------------------------
@@ -168,13 +151,9 @@ class PlotView(ABC):
         """
         Apply a new theme dictionary to this view.
 
-        Implementations must propagate the theme to every owned figure,
-        axes, canvas widget, and sub-plot delegate so that switching
-        between views always reflects the current theme.
+        Implementations must propagate the theme to every owned figure, axes, canvas widget, and sub-plot delegate so that switching between views always reflects the current theme.
 
-        Called by the controller's :meth:`iSLATPlot.apply_theme` and
-        automatically on :meth:`activate` when the theme has changed
-        since the view was last visible.
+        Called by the controller's :meth:`iSLATPlot.apply_theme` and automatically on :meth:`activate` when the theme has changed since the view was last visible.
         """
         ...
 
@@ -184,8 +163,7 @@ class PlotView(ABC):
     @abstractmethod
     def sync_toggle_state(self, toggle_state: dict) -> None:
         """
-        Reconcile the view's visual state with the canonical *toggle_state*
-        dict from the controller.
+        Reconcile the view's visual state with the canonical *toggle_state* dict from the controller.
 
         Called by the controller when this view is **activated** so that
         overlays (atomic lines, saved lines, summed spectrum, legend) match
@@ -228,8 +206,8 @@ class PlotView(ABC):
         Save the current view's figure to a file.
 
         The default implementation saves the figure returned by
-        :meth:`get_figure`.  Subclasses may override this to produce a
-        *different* figure for export (e.g. with toggle state baked in).
+        :meth:`get_figure`.
+        Subclasses may override this to produce a *different* figure for export (e.g. with toggle state baked in).
 
         Parameters
         ----------
