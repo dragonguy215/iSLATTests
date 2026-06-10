@@ -167,7 +167,7 @@ class FitLinesPlotGridView(PlotView):
             xmin = getattr(row, "xmin", None)
             xmax = getattr(row, "xmax", None)
             if xmin is None or xmax is None:
-                # Fall back to a ±0.015 µm window around lam if bounds missing
+                # Fall back to a +/-0.015 um window around lam if bounds missing
                 lam = getattr(row, "lam", None)
                 if lam is None:
                     continue
@@ -202,6 +202,8 @@ class FitLinesPlotGridView(PlotView):
                 flux_data=flux,
                 err_data=err,
                 spectrum_name=spectrum_name,
+                # set cols dynamically based on the number of lines and the figure SUBPLOT_WIDTH_INCHES constant, which determines how many panels can fit horizontally in a typical display width.
+                cols=min(n, max(1, int(plt.gcf().get_size_inches()[0] // SUBPLOT_WIDTH_INCHES)))
             )
             grid.generate_plot()
             return grid
@@ -369,10 +371,14 @@ class FitLinesPlotGridView(PlotView):
         )
 
         # --- Configure figure size ------------------------------------------
-        fig_width = SUBPLOT_WIDTH_INCHES * plot_grid.cols
-        fig_height = SUBPLOT_WIDTH_INCHES * plot_grid.rows  # same as width → square cells
-        plot_grid.fig.set_size_inches(fig_width, fig_height)
+        # The figure is sized dynamically in :meth:`_fit_grid_to_width` so it
+        # always fills the available horizontal space while keeping panels
+        # roughly square.  These values are only an initial guess that is
+        # corrected by the first ``<Configure>`` event of the scroll canvas.
         plot_grid.fig.set_dpi(150)
+        fig_width = SUBPLOT_WIDTH_INCHES * plot_grid.cols
+        fig_height = SUBPLOT_WIDTH_INCHES * plot_grid.rows  # same as width -> square cells
+        plot_grid.fig.set_size_inches(fig_width, fig_height)
         # Disable any active layout engine before calling subplots_adjust,
         # which is incompatible with constrained_layout / tight_layout.
         # Using None (not the string "none") fully removes the engine.
@@ -390,7 +396,7 @@ class FitLinesPlotGridView(PlotView):
         plot_grid.fig.subplots_adjust(
             left=0.06, right=0.98,
             top=0.96, bottom=0.05,
-            wspace=0.35, hspace=0.65,
+            wspace=0.18, hspace=0.32,
         )
 
         # Compact font sizes for dense subplot grids
@@ -437,6 +443,11 @@ class FitLinesPlotGridView(PlotView):
 
         def configure_inner_frame(event):
             scroll_canvas.itemconfig(canvas_window, width=event.width)
+            # Resize the embedded figure so it fills the available width while keeping each panel roughly square.
+            # Guard against redundant redraws when the width has not actually changed.
+            if getattr(fig_canvas, "_islat_last_w", None) != event.width:
+                fig_canvas._islat_last_w = event.width  # type: ignore[attr-defined]
+                self._fit_grid_to_width(plot_grid, fig_canvas, event.width)
 
         scroll_canvas.bind("<Configure>", configure_inner_frame)
 
@@ -451,6 +462,44 @@ class FitLinesPlotGridView(PlotView):
 
         scroll_canvas.bind("<Enter>", bind_mousewheel)
         scroll_canvas.bind("<Leave>", unbind_mousewheel)
+
+    def _fit_grid_to_width(
+        self,
+        plot_grid: FitLinesPlotGrid,
+        fig_canvas: "FigureCanvasTkAgg",
+        avail_px: int,
+    ) -> None:
+        """Resize *plot_grid*'s figure to fill *avail_px* pixels horizontally.
+
+        Each panel keeps a roughly square aspect ratio: the total figure
+        height is set to ``(avail_px / cols) * rows`` pixels so that every
+        cell is as tall as it is wide.
+
+        Parameters
+        ----------
+        plot_grid : FitLinesPlotGrid
+            The grid whose figure to resize.
+        fig_canvas : FigureCanvasTkAgg
+            The Tk-embedded canvas wrapping ``plot_grid.fig``.
+        avail_px : int
+            The width, in pixels, that is currently available for the figure.
+        """
+        if fig_canvas is None or avail_px <= 1:
+            return
+        cols = max(1, int(plot_grid.cols))
+        rows = max(1, int(plot_grid.rows))
+        dpi = plot_grid.fig.get_dpi() or 100
+        cell_px = avail_px / cols
+        total_h_px = int(round(cell_px * rows))
+        # Update the matplotlib figure size (inches) so it renders at the
+        # correct scale, then match the Tk widget's pixel dimensions.
+        plot_grid.fig.set_size_inches(avail_px / dpi, total_h_px / dpi)
+        widget = fig_canvas.get_tk_widget()
+        widget.config(width=int(avail_px), height=total_h_px)
+        try:
+            fig_canvas.draw_idle()
+        except Exception:
+            pass
 
     # ==================================================================
     # Overlay helpers - molecule model lines
@@ -529,6 +578,19 @@ class FitLinesPlotGridView(PlotView):
             self._remove_model_line_overlays()
         self.draw()
 
+    def _refresh_model_line_overlays(self) -> None:
+        """Re-render model line overlays to reflect the current molecule state.
+
+        Acts as the single update path used by the molecule visibility, parameter, and model-change callbacks.
+        When the master ``show_model_lines`` switch is off (or no grids are present) this is a no-op so that toggling the switch remains the only way to display overlays.
+        When on, all existing overlays are cleared and re-drawn from the currently *visible* molecules, so visibility toggles and parameter edits are reflected immediately.
+        """
+        if not (self._show_model_lines and self._plot_grids):
+            return
+        self._remove_model_line_overlays()
+        self._apply_model_line_overlays()
+        self.draw()
+
     # ==================================================================
     # PlotView - lifecycle
     # ==================================================================
@@ -536,8 +598,7 @@ class FitLinesPlotGridView(PlotView):
         """Pack the fit-lines grid view into *parent_frame* and refresh if needed.
 
         If no plot grids have been set but a line list is loaded, a preview
-        grid is built automatically from the line list so the view is never
-        shown empty when data are available.
+        grid is built automatically from the line list so the view is never shown empty when data are available.
         """
         self._parent_frame = parent_frame
 
@@ -554,15 +615,101 @@ class FitLinesPlotGridView(PlotView):
         self.apply_theme(self._pm.theme)
         self._register_control_fields()
 
+    # ------------------------------------------------------------------
+    # Grid-shape control-field helpers (n_cols / n_rows)
+    # ------------------------------------------------------------------
+    def _get_n_cols(self) -> int:
+        """Return the current column count of the displayed grid(s)."""
+        if self._plot_grids:
+            return int(self._plot_grids[0].cols)
+        return 10
+
+    def _set_n_cols(self, value: Any) -> None:
+        """Set the number of columns for every displayed grid and re-render."""
+        self._apply_grid_shape(cols=max(1, int(value)))
+
+    def _get_n_rows(self) -> int:
+        """Return the current row count of the displayed grid(s)."""
+        if self._plot_grids:
+            return int(self._plot_grids[0].rows)
+        return 1
+
+    def _set_n_rows(self, value: Any) -> None:
+        """Set the number of rows for every displayed grid and re-render."""
+        self._apply_grid_shape(rows=max(1, int(value)))
+
+    def _apply_grid_shape(
+        self,
+        cols: Optional[int] = None,
+        rows: Optional[int] = None,
+    ) -> None:
+        """Apply a new ``cols`` / ``rows`` shape to all grids and rebuild.
+
+        Only the dimension(s) supplied are changed; the other keeps its current value.
+        Each affected grid is regenerated and the embedded canvases are recreated so the new layout fills the display.
+        """
+        if not self._plot_grids:
+            return
+
+        changed = False
+        for grid in self._plot_grids:
+            new_cols = grid.cols if cols is None else cols
+            new_rows = grid.rows if rows is None else rows
+            if new_cols == grid.cols and new_rows == grid.rows:
+                continue
+            grid.cols = new_cols
+            grid.rows = new_rows
+            try:
+                grid.generate_plot()
+                changed = True
+            except Exception as exc:
+                debug_config.warning(
+                    "fit_lines_grid_view",
+                    f"_apply_grid_shape: regenerate failed: {exc}",
+                )
+
+        if not changed:
+            return
+
+        # Re-apply model-line overlays since generate_plot() cleared the axes.
+        if self._show_model_lines:
+            self._apply_model_line_overlays()
+
+        self._rebuild_display()
+
     def _register_control_fields(self) -> None:
-        """Register a ``show_model_lines`` :class:`ToggleField` on the top bar."""
+        """Register the grid-shape entries and the ``show_model_lines`` toggle.
+
+        Two :class:`EntryField` objects (``n_cols`` / ``n_rows``) are placed on
+        the control panel - mirroring the ``n_panels`` field of the full
+        spectrum view - and a ``show_model_lines`` :class:`ToggleField` is placed on the top bar.
+        """
         bus = getattr(self._pm, "control_bus", None)
         if bus is None:
             return
 
-        from iSLAT.Modules.GUI.ControlField import ToggleField
+        from iSLAT.Modules.GUI.ControlField import EntryField, ToggleField
 
         bus.unregister_owner(self)
+
+        bus.register_many(
+            [
+                EntryField(
+                    "n_cols", "N Cols:",
+                    self._get_n_cols, self._set_n_cols,
+                    datatype="int", width=5, owner=self,
+                    tip="Number of columns in the\nfit-lines plot grid",
+                ),
+                EntryField(
+                    "n_rows", "N Rows:",
+                    self._get_n_rows, self._set_n_rows,
+                    datatype="int", width=5, owner=self,
+                    tip="Number of rows in the\nfit-lines plot grid",
+                ),
+            ],
+            "control_panel",
+        )
+
         bus.register(
             ToggleField(
                 "show_model_lines",
@@ -584,8 +731,7 @@ class FitLinesPlotGridView(PlotView):
         if self._show_model_lines:
             self._remove_model_line_overlays()
         self._teardown_display()
-        # Force a full rebuild on the next activation so the widgets are
-        # recreated inside whatever parent frame activate() receives.
+        # Force a full rebuild on the next activation so the widgets are recreated inside whatever parent frame activate() receives.
         self._initialised = False
 
     # ==================================================================
@@ -595,8 +741,7 @@ class FitLinesPlotGridView(PlotView):
         """No custom right-click menu via the main InteractionHandler.
 
         Context menus for individual panels are handled by per-canvas
-        ``button_press_event`` listeners attached in
-        :meth:`_connect_panel_context_menu`.
+        ``button_press_event`` listeners attached in :meth:`_connect_panel_context_menu`.
         """
         return None
 
@@ -607,7 +752,7 @@ class FitLinesPlotGridView(PlotView):
     ) -> None:
         """Attach a right-click context-menu handler to *fig_canvas*.
 
-        Builds an ``Axes → fit-index`` lookup from the grid's ``axs`` array and ``fit_csv_dict``. 
+        Builds an ``Axes -> fit-index`` lookup from the grid's ``axs`` array and ``fit_csv_dict``. 
         When the user right-clicks an individual panel two actions are offered:
 
         * **Open in Line Inspection** - switches to the standalone Line
@@ -619,7 +764,7 @@ class FitLinesPlotGridView(PlotView):
         if tk is None or fig_canvas is None or plot_grid.axs is None:
             return
 
-        # Build ax → (idx, fit_entry) lookup once.
+        # Build ax -> (idx, fit_entry) lookup once.
         ax_map: Dict[Any, Tuple[int, dict]] = {}
         for idx, entry in plot_grid.fit_csv_dict.items():
             if idx >= plot_grid.rows * plot_grid.cols:
@@ -681,8 +826,7 @@ class FitLinesPlotGridView(PlotView):
                         f"_open_three_panel: range update failed: {exc}",
                     )
 
-                # Create a span matching the grid panel's wavelength range
-                # so the line inspection panels populate immediately.
+                # Create a span matching the grid panel's wavelength range so the line inspection panels populate immediately.
                 try:
                     ih = getattr(pm, "interaction_handler", None)
                     if ih is not None and ih.span_selector is not None:
@@ -772,13 +916,10 @@ class FitLinesPlotGridView(PlotView):
     ) -> None:
         """Refresh molecule model line overlays when the model changes.
 
-        If ``show_model_lines`` is active the overlays are removed and
-        re-drawn so that changes in molecule parameters are reflected.
+        If ``show_model_lines`` is active the overlays are removed and re-drawn so that changes in molecule parameters are reflected.
         """
-        if self._show_model_lines and self._plot_grids:
-            self._remove_model_line_overlays()
-            self._apply_model_line_overlays()
-            self.draw()
+        self._refresh_model_line_overlays()
+        self._refresh_summed_spectrum()
 
     def on_molecule_visibility_changed(
         self,
@@ -790,8 +931,14 @@ class FitLinesPlotGridView(PlotView):
         current_selection: Optional[Tuple[float, float]] = None,
         force_rerender: bool = False,
     ) -> None:
-        """No-op - fit-lines grids do not react to molecule visibility changes."""
-        pass
+        """Re-render model line overlays when a molecule's visibility changes.
+
+        The ``show_model_lines`` switch is the master control: while it is on,
+        any molecule whose own visibility is enabled is overlaid, and any molecule that becomes hidden is removed.
+        While it is off this is a no-op.
+        """
+        self._refresh_model_line_overlays()
+        self._refresh_summed_spectrum()
 
     # ==================================================================
     # PlotView - selection / line inspection (no-ops)
@@ -826,14 +973,13 @@ class FitLinesPlotGridView(PlotView):
         current_selection: Optional[Tuple[float, float]] = None,
     ) -> None:
         """Refresh molecule model line overlays when a parameter changes."""
-        if self._show_model_lines and self._plot_grids:
-            self._remove_model_line_overlays()
-            self._apply_model_line_overlays()
-            self.draw()
+        self._refresh_model_line_overlays()
+        self._refresh_summed_spectrum()
 
     def on_molecule_deleted(self, molecule_name: str) -> None:
-        """No-op."""
-        pass
+        """Refresh model line overlays so a deleted molecule's line is removed."""
+        self._refresh_model_line_overlays()
+        self._refresh_summed_spectrum()
 
     # ==================================================================
     # PlotView - toggle helpers (all no-ops for this view)
@@ -903,6 +1049,34 @@ class FitLinesPlotGridView(PlotView):
                         coll.set_visible(False)
 
         self.draw()
+
+    def _is_summed_visible(self) -> bool:
+        """Return ``True`` if the summed-spectrum toggle is currently on."""
+        toggle_state = getattr(self._pm, "toggle_state", None)
+        if isinstance(toggle_state, dict):
+            return bool(toggle_state.get("summed", False))
+        return False
+
+    def _refresh_summed_spectrum(self) -> None:
+        """Recompute and re-render the summed model fill if it is visible.
+
+        The cached summed-fill collections are removed outright (not just
+        hidden) so that :meth:`toggle_summed_spectrum` recomputes the summed flux from the current molecule parameters.
+        No-op when the summed toggle is off or no grids are present.
+        """
+        if not (self._plot_grids and self._is_summed_visible()):
+            return
+        for plot_grid in self._plot_grids:
+            for panel in plot_grid.iter_panels():
+                ax = getattr(panel, "ax", None)
+                if ax is None:
+                    continue
+                for coll in [c for c in ax.collections if hasattr(c, "_islat_summed")]:
+                    try:
+                        coll.remove()
+                    except Exception:
+                        pass
+        self.toggle_summed_spectrum(True)
 
     def toggle_legend(self, visible: Optional[bool] = None) -> None:
         """No-op."""

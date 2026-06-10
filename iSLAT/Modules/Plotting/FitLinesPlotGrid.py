@@ -66,8 +66,7 @@ class FitLinesPlotGrid(CompositePlot):
         Returns
         -------
         np.ndarray
-            2-D array of shape ``(rows, cols)`` containing the
-            :class:`~matplotlib.axes.Axes` objects.
+            2-D array of shape ``(rows, cols)`` containing the :class:`~matplotlib.axes.Axes` objects.
         """
         axs = self.fig.subplots(self.rows, self.cols)
         # Normalise to a 2-D array regardless of grid shape.
@@ -83,10 +82,8 @@ class FitLinesPlotGrid(CompositePlot):
     def _create_panels(self, layout: np.ndarray) -> None:
         """Create one :class:`SpectrumPanel` per fit entry and register it.
 
-        Each panel covers the cropped wavelength range
-        ``[xmin - extra, xmax + extra]`` for its fit.  The Gaussian
-        fit overlay and axis decoration are handled in
-        :meth:`_post_render` after all panels have been rendered.
+        Each panel covers the cropped wavelength range ``[xmin - extra, xmax + extra]`` for its fit.
+        The Gaussian fit overlay and axis decoration are handled in :meth:`_post_render` after all panels have been rendered.
         """
         gauss_fits, fitted_waves, fitted_fluxes = self.fit_data_tuple_list
         for idx, _ in enumerate(zip(gauss_fits, fitted_waves, fitted_fluxes)):
@@ -182,19 +179,22 @@ class FitLinesPlotGrid(CompositePlot):
                 lbl.set_ha('right')
                 lbl.set_va('center')
 
-            if col == 0:
-                ax.set_xlabel("λ (μm)", fontsize=5, labelpad=1)
-            else:
-                ax.set_xlabel("")
-
-            if col == 0:
-                ax.set_ylabel("Flux (Jy)", fontsize=5, labelpad=1)
+            # Per-panel axis labels are intentionally omitted; a single shared
+            # x-label and y-label are drawn at the figure level below.
+            ax.set_xlabel("")
+            ax.set_ylabel("")
 
         # Hide unused subplots
         for idx in range(n_plots, self.rows * self.cols):
             row = idx // self.cols
             col = idx % self.cols
             self.axs[row, col].set_visible(False)
+
+        # Shared figure-level axis labels (rendered once), mirroring the
+        # full-spectrum plot's use of supxlabel / supylabel.
+        fg = self.theme.get("foreground", "black") if isinstance(self.theme, dict) else "black"
+        self.fig.supxlabel("λ (μm)", fontsize=9, color=fg, y=0.01)
+        self.fig.supylabel("Flux (Jy)", fontsize=9, color=fg, x=0.01)
     
     def plot(self):
         self.generate_plot()
