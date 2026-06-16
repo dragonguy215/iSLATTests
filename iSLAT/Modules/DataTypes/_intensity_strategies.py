@@ -1,16 +1,11 @@
 """Strategy pattern for intensity calculation methods.
 
-Defines a :class:`IntensityStrategy` Protocol and concrete implementations
-for each calculation method supported by :class:`Intensity`.  New methods
-can be added by implementing the protocol and registering via
-``Intensity.register_strategy()``.
+Defines a :class:`IntensityStrategy` Protocol and concrete implementations for each calculation method supported by :class:`Intensity`.
+New methods can be added by implementing the protocol and registering via ``Intensity.register_strategy()``.
 
-The strategy is called by :meth:`Intensity._calc_intensity_core` during
-the final intensity-from-tau step.  Everything upstream (Boltzmann
-factors, optical-depth computation, partition function interpolation)
-is method-agnostic and stays in the core.
+The strategy is called by :meth:`Intensity._calc_intensity_core` during the final intensity-from-tau step.
+Everything upstream (Boltzmann factors, optical-depth computation, partition function interpolation) is method-agnostic and stays in the core.
 """
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -20,11 +15,9 @@ import numpy as np
 if TYPE_CHECKING:
     from .Intensity import Intensity
 
-
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 #  Protocol
-# ═══════════════════════════════════════════════════════════════════
-
+# ===================================================================
 @runtime_checkable
 class IntensityStrategy(Protocol):
     """Protocol for intensity calculation strategies.
@@ -74,13 +67,11 @@ class IntensityStrategy(Protocol):
         """
         ...
 
-
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 #  Concrete strategies
-# ═══════════════════════════════════════════════════════════════════
-
+# ===================================================================
 class RadexStrategy:
-    """Simple ``1 − e^{−τ}`` formula (van der Tak et al. 2007).
+    """Simple ``1 - e^{−τ}`` formula (van der Tak et al. 2007).
 
     Saturates at τ ≈ a few; identical to curve-of-growth for τ < 1.
     """
@@ -106,12 +97,11 @@ class RadexStrategy:
             * (-np.expm1(-center_tau))
         )
 
-
 class CurveOfGrowthStrategy:
     """Full curve-of-growth with overlap treatment (Banzatti et al. 2012).
 
     Delegates to ``Intensity._fint_multi`` which handles isolated-line
-    fast paths, tau-regime shortcuts, and multi-line Gauss–Legendre
+    fast paths, tau-regime shortcuts, and multi-line Gauss-Legendre
     quadrature for blended groups.
     """
 
@@ -131,13 +121,11 @@ class CurveOfGrowthStrategy:
             center_tau, dv_vals, bb_vals, freq_ratio, sqrt_ln2_inv, frequencies
         )
 
-
 class CurveOfGrowthNoOverlapStrategy:
     """Curve-of-growth without overlap grouping.
 
-    Uses the same Gauss–Legendre quadrature as :class:`CurveOfGrowthStrategy`
-    but treats every line independently (the original iSLAT method before
-    the overlap rewrite).
+    Uses the same Gauss-Legendre quadrature as :class:`CurveOfGrowthStrategy`
+    but treats every line independently (the original iSLAT method before the overlap rewrite).
     """
 
     __slots__ = ()
@@ -171,11 +159,9 @@ class CurveOfGrowthNoOverlapStrategy:
             * fint_vals
         )
 
-
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 #  Default registry
-# ═══════════════════════════════════════════════════════════════════
-
+# ===================================================================
 #: Mapping of method name → strategy instance.
 #: ``Intensity._get_strategy()`` consults this when dispatching.
 DEFAULT_STRATEGIES: dict[str, IntensityStrategy] = {

@@ -4,7 +4,7 @@ import traceback
 import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import messagebox, filedialog
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import iSLAT.Modules.FileHandling.iSLATFileHandling as ifh
 import iSLAT.Constants as c
@@ -1326,15 +1326,15 @@ class TopBar(ResizableFrame):
                     clear_after=True
                 )
 
-    def retreat_plot_start(self):
+    def retreat_plot_start(self, extra_amount: Optional[float] = None):
         """Retreat the plot start by the current range value."""
         if self.control_panel:
-            self.control_panel.retreat_plot_start()
+            self.control_panel.retreat_plot_start(extra_amount=extra_amount)
     
-    def advance_plot_start(self):
+    def advance_plot_start(self, extra_amount: Optional[float] = None):
         """Advance the plot start by the current range value."""
         if self.control_panel:
-            self.control_panel.advance_plot_start()
+            self.control_panel.advance_plot_start(extra_amount=extra_amount)
     
     def toggle_legend(self):
         #print("Toggled legend on plot")

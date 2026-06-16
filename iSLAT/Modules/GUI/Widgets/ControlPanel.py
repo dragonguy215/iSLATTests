@@ -2,6 +2,7 @@
 import platform
 import tkinter as tk
 from tkinter import ttk, colorchooser, simpledialog, messagebox
+from typing import Optional
 import numpy as np
 from iSLAT.Modules.DataTypes.Molecule import Molecule
 from iSLAT.Modules.FileHandling.iSLATFileHandling import load_control_panel_fields_config
@@ -1255,23 +1256,27 @@ class ControlPanel(ttk.Frame):
             except (ValueError, AttributeError):
                 pass
 
-    def advance_plot_start(self):
+    def advance_plot_start(self, extra_amount: Optional[float] = None):
         """Add the current plot range to the plot start value."""
         try:
             start = float(self.plot_start_var.get())
-            range_val = float(self.plot_range_var.get())
-            new_start = start + range_val
+            #range_val = float(self.plot_range_var.get())
+            if extra_amount is None:
+                extra_amount = float(self.plot_range_var.get())
+            new_start = start + extra_amount
             self._set_var(self.plot_start_var, self._format_value(new_start, "display_range_start"))
             self._update_display_range()
         except (ValueError, AttributeError):
             pass
 
-    def retreat_plot_start(self):
+    def retreat_plot_start(self, extra_amount: Optional[float] = None):
         """Subtract the current plot range from the plot start value."""
         try:
             start = float(self.plot_start_var.get())
-            range_val = float(self.plot_range_var.get())
-            new_start = start - range_val
+            #range_val = float(self.plot_range_var.get())
+            if extra_amount is None:
+                extra_amount = float(self.plot_range_var.get())
+            new_start = start - extra_amount
             self._set_var(self.plot_start_var, self._format_value(new_start, "display_range_start"))
             self._update_display_range()
         except (ValueError, AttributeError):

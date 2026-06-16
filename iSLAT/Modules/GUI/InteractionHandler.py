@@ -548,12 +548,24 @@ class InteractionHandler:
         
         #elif keysym == ',' or keysym == '<':
         elif keysym in [',', '<', 'comma', 'less']: # needed for mac for some reason
-            self._retreat_plot_start()
+            shift_pressed = bool(event.state & 0x1)
+            if shift_pressed:
+                self._retreat_plot_start(extra_amount=float(self.islat.GUI.control_panel.plot_range_var.get())/2)
+            else:
+                self._retreat_plot_start()
             return 'break'
+            #self._retreat_plot_start()
+            #return 'break'
 
         elif keysym in ['.', '>', 'period', 'greater']:
-            self._advance_plot_start()
+            shift_pressed = bool(event.state & 0x1)
+            if shift_pressed:
+                self._advance_plot_start(extra_amount=float(self.islat.GUI.control_panel.plot_range_var.get())/2)
+            else:
+                self._advance_plot_start()
             return 'break'
+            #self._advance_plot_start()
+            #return 'break'
 
     def _cycle_spectrum_previous(self):
         """Switch to the previous spectrum in the sample list."""
@@ -653,15 +665,15 @@ class InteractionHandler:
         if hasattr(self.plot_manager, 'toggle_residuals'):
             self.plot_manager.toggle_residuals()
 
-    def _advance_plot_start(self):
+    def _advance_plot_start(self, extra_amount: Optional[float] = None):
         """Advance the plot start by the current plot range value."""
         if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'control_panel'):
-            self.islat.GUI.control_panel.advance_plot_start()
+            self.islat.GUI.control_panel.advance_plot_start(extra_amount=extra_amount)
 
-    def _retreat_plot_start(self):
+    def _retreat_plot_start(self, extra_amount: Optional[float] = None):
         """Retreat the plot start by the current plot range value."""
         if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'control_panel'):
-            self.islat.GUI.control_panel.retreat_plot_start()
+            self.islat.GUI.control_panel.retreat_plot_start(extra_amount=extra_amount)
 
     def _toggle_atomic_lines(self):
         """Toggle atomic lines visibility"""

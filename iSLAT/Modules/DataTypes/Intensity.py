@@ -791,13 +791,11 @@ class Intensity(WavelengthRangeMixin):
 
     def calc_intensity(self, t_kin: Optional[float] = None, n_mol: Optional[float] = None, 
                       dv: Optional[float] = None, method: Literal["curve_growth", "radex", "curve_growth_no_overlap"] = "curve_growth") -> None:
-        """Calculate the intensity for a given set of physical parameters. This implements Eq. A1 and A2 in
-        Banzatti et al. 2012.
+        """Calculate the intensity for a given set of physical parameters. This implements Eq. A1 and A2 in Banzatti et al. 2012.
 
         The calculation method to obtain the intensity from the opacity can be switched between the curve-of-growth
         method used in Banzatti et al. 2012, which considers broadening for high values of tau and the simple expression
-        used e.g. in RADEX (van der Tak et al. 2007) which saturates at tau ~ few. For low values (tau < 1), they
-        yield the same values.
+        used e.g. in RADEX (van der Tak et al. 2007) which saturates at tau ~ few. For low values (tau < 1), they yield the same values.
 
         Parameters
         ----------
