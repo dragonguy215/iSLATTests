@@ -14,6 +14,7 @@ from .ResizableFrame import ResizableFrame
 from iSLAT.Modules.GUI.Widgets.ChartWindow import MoleculeSelector
 from iSLAT.Modules.GUI.Widgets.SampleManagerWindow import SampleManagerWindow
 from iSLAT.Modules.GUI.Widgets.SortMoleculesWindow import SortMoleculesWindow
+from iSLAT.Modules.GUI.Widgets.BulkApplyWindow import BulkApplyPropertiesWindow
 from iSLAT.Modules.GUI.PlotGridWindow import PlotGridWindow
 from iSLAT.Modules.GUI.FullSpectrumWindow import FullSpectrumWindow
 from iSLAT.Modules.FileHandling.iSLATFileHandling import (
@@ -34,7 +35,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # TopBarSurface - ControlSurface implementation for the TopBar dynamic area
 # ---------------------------------------------------------------------------
-
 class TopBarSurface(ControlSurface):
     """Concrete :class:`ControlSurface` that renders :class:`ControlField` objects
     inside the TopBar's dynamic button area.
@@ -49,7 +49,6 @@ class TopBarSurface(ControlSurface):
     container:
         The ``tk.Frame`` that acts as the widget parent.
     """
-
     def __init__(self, container) -> None:
         super().__init__()
         self._container = container
@@ -57,7 +56,6 @@ class TopBarSurface(ControlSurface):
     # ------------------------------------------------------------------
     # Internal rebuild
     # ------------------------------------------------------------------
-
     def _rebuild(self) -> None:
         from iSLAT.Modules.GUI.ControlField import RenderContext
 
@@ -80,7 +78,6 @@ class TopBarSurface(ControlSurface):
                     w.pack(side="left", padx=2, pady=2)
                 except Exception:
                     pass
-
 
 class TopBar(ResizableFrame):
     def __init__(
@@ -146,6 +143,7 @@ class TopBar(ResizableFrame):
         molecule_menu.add_command(label="Default Molecules", command=self.default_molecules)
         molecule_menu.add_command(label="Add Molecules", command=self.add_molecule)
         molecule_menu.add_command(label="Sort Molecules", command=self.sort_molecules)
+        molecule_menu.add_command(label="Bulk Apply Properties", command=self.bulk_apply_properties)
         molecule_menu.add_command(label="Export Models", command=self.export_models)
         molecule_menu.add_separator()
         molecule_menu.add_command(label="Save Parameters (Ctrl+S)", command=self.save_parameters)
@@ -159,6 +157,7 @@ class TopBar(ResizableFrame):
             "Default Molecules":                   "Load the default set of molecules\nfor the current spectrum.",
             "Add Molecules":                       "Add a molecule from the available\nHITRAN files.",
             "Sort Molecules":                      "Sort the molecules in the control panel\nby a chosen property (temperature, radius,\ncolumn density, …), ascending or descending.",
+            "Bulk Apply Properties":               "Set one or more properties on many molecules\nat once, optionally only the visible ones.",
             "Export Models":                       "Export current model spectra\nto CSV files for external use.",
             "Save Parameters (Ctrl+S)":            "Save current molecule parameters\nto the default save file\nfor this spectrum.",
             "Load Parameters (Ctrl+L)":            "Load molecule parameters from\nthe default save file\nfor this spectrum.",
@@ -1048,6 +1047,12 @@ class TopBar(ResizableFrame):
     def sort_molecules(self):
         """Open the popout window for sorting molecules in the control panel."""
         SortMoleculesWindow.open(
+            self.master, self.islat, self.control_panel, self.theme
+        )
+
+    def bulk_apply_properties(self):
+        """Open the popout window for bulk-applying properties to molecules."""
+        BulkApplyPropertiesWindow.open(
             self.master, self.islat, self.control_panel, self.theme
         )
 
