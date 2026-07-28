@@ -309,9 +309,25 @@ class MainPlotGrid(CompositePlot):
         summed_wave: Optional[np.ndarray] = None
         summed_flux: Optional[np.ndarray] = None
         if self.molecules is not None:
+            # Resolve the "match spectral sampling" (pixel-res) toggle the
+            # same way FullSpectrumPlot._build_mol_cache() does, so that
+            # individual molecule lines honor it just like the summed fill
+            # (get_summed_flux already applies this internally).
+            use_interp = False
+            target_wave = None
+            ref_wave = self.wave_data_obs if self.wave_data_obs is not None else self.wave_data
+            if ref_wave is not None and hasattr(self.molecules, 'get_matched_sampling_wavelengths'):
+                use_interp, target_wave = self.molecules.get_matched_sampling_wavelengths(ref_wave)
+                if not use_interp:
+                    target_wave = None
+
             for mol in self.molecules.get_visible_molecules(return_objects=True):
                 try:
-                    lam, flux = self.get_molecule_spectrum_data(mol, self.wave_data)
+                    lam, flux = self.get_molecule_spectrum_data(
+                        mol, self.wave_data,
+                        interpolate_to_input=use_interp,
+                        target_wavelengths=target_wave,
+                    )
                     if lam is not None and flux is not None and len(flux) > 0:
                         mol_cache.append((
                             np.asarray(lam),
