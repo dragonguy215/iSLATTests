@@ -13,6 +13,7 @@ from ..Tooltips import CreateToolTip, MenuToolTip
 from .ResizableFrame import ResizableFrame
 from iSLAT.Modules.GUI.Widgets.ChartWindow import MoleculeSelector
 from iSLAT.Modules.GUI.Widgets.SampleManagerWindow import SampleManagerWindow
+from iSLAT.Modules.GUI.Widgets.SortMoleculesWindow import SortMoleculesWindow
 from iSLAT.Modules.GUI.PlotGridWindow import PlotGridWindow
 from iSLAT.Modules.GUI.FullSpectrumWindow import FullSpectrumWindow
 from iSLAT.Modules.FileHandling.iSLATFileHandling import (
@@ -144,6 +145,7 @@ class TopBar(ResizableFrame):
         molecule_menu.add_command(label="HITRAN Query", command=self.hitran_query)
         molecule_menu.add_command(label="Default Molecules", command=self.default_molecules)
         molecule_menu.add_command(label="Add Molecules", command=self.add_molecule)
+        molecule_menu.add_command(label="Sort Molecules", command=self.sort_molecules)
         molecule_menu.add_command(label="Export Models", command=self.export_models)
         molecule_menu.add_separator()
         molecule_menu.add_command(label="Save Parameters (Ctrl+S)", command=self.save_parameters)
@@ -156,6 +158,7 @@ class TopBar(ResizableFrame):
             "HITRAN Query":                        "Open the HITRAN molecule selector\nto query and add molecules by species.",
             "Default Molecules":                   "Load the default set of molecules\nfor the current spectrum.",
             "Add Molecules":                       "Add a molecule from the available\nHITRAN files.",
+            "Sort Molecules":                      "Sort the molecules in the control panel\nby a chosen property (temperature, radius,\ncolumn density, …), ascending or descending.",
             "Export Models":                       "Export current model spectra\nto CSV files for external use.",
             "Save Parameters (Ctrl+S)":            "Save current molecule parameters\nto the default save file\nfor this spectrum.",
             "Load Parameters (Ctrl+L)":            "Load molecule parameters from\nthe default save file\nfor this spectrum.",
@@ -1041,6 +1044,12 @@ class TopBar(ResizableFrame):
 
     def add_molecule(self):
         self.islat.add_molecule_from_hitran()
+
+    def sort_molecules(self):
+        """Open the popout window for sorting molecules in the control panel."""
+        SortMoleculesWindow.open(
+            self.master, self.islat, self.control_panel, self.theme
+        )
 
     def save_parameters(self, file_path = None, auto = False):
         """
