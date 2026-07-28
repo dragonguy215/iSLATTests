@@ -293,7 +293,7 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
                 vline.set_color(mol_color)
             if text_obj is not None:
                 text_obj.set_color(mol_color)
-            if picked_artist is vline:
+            if picked_artist is vline or picked_artist is text_obj:
                 picked_value = value
 
         # Highlight the picked vline

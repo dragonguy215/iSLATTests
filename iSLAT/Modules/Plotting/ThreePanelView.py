@@ -835,7 +835,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
             if text_obj is not None:
                 text_obj.set_color(mol_color)
 
-            is_line_picked = (picked_artist is line)
+            is_line_picked = (picked_artist is line or picked_artist is text_obj)
             point_idx = value.get('_scatter_point_index', None) if value else None
             is_scatter_picked = (scatter_point_clicked is not None and point_idx == scatter_point_clicked)
             is_picked = is_line_picked or is_scatter_picked
