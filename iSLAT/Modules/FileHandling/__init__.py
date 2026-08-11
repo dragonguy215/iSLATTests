@@ -59,6 +59,9 @@ set_output_file_name = "line_outputs.csv"
 batch_fitting_config_file_name = "BatchFittingConfig.json"
 batch_fitting_config_file_path = config_file_path / batch_fitting_config_file_name
 
+sample_config_file_name = "SampleConfig.json"
+sample_config_file_path = config_file_path / sample_config_file_name
+
 from .line_data_writer import write_line_data
 
 __all__ = [
@@ -95,5 +98,7 @@ __all__ = [
     "example_data_folder_path",
     "batch_fitting_config_file_name",
     "batch_fitting_config_file_path",
+    "sample_config_file_name",
+    "sample_config_file_path",
     "write_line_data"
 ]

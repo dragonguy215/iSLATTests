@@ -369,6 +369,119 @@ def resolve_batch_spectrum_files(
     )
     return resolved
 
+# -- Sample Config -----------------------------------------------------------
+
+_SAMPLE_CONFIG_DEFAULTS: Dict[str, Any] = {
+    "active_index": 0,
+    "spectra": [],
+}
+
+_SAMPLE_LOG_COMPONENT: str = "sample_config"
+
+def load_sample_config(file_path: Optional[str] = None) -> Dict[str, Any]:
+    """Load the persisted spectrum-sample configuration from JSON.
+
+    Parameters
+    ----------
+    file_path : str, optional
+        Full path to the config JSON.  Defaults to
+        ``DATAFILES/CONFIG/SampleConfig.json``.
+
+    Returns
+    -------
+    dict
+        ``{"active_index": int, "spectra": [{"file", "param_file", "overrides"}]}``.
+        Spectrum entries whose ``file`` no longer exists are skipped with a
+        warning.  Missing keys are back-filled from defaults.
+    """
+    from iSLAT.Modules.FileHandling import sample_config_file_path
+
+    if file_path is None:
+        file_path = str(sample_config_file_path)
+
+    if not os.path.exists(file_path):
+        debug_config.info(_SAMPLE_LOG_COMPONENT, f"Config not found at {file_path}, using defaults")
+        return {"active_index": 0, "spectra": []}
+
+    try:
+        with open(file_path, "r") as fh:
+            config: Dict[str, Any] = json.load(fh)
+    except (json.JSONDecodeError, OSError) as exc:
+        debug_config.error(_SAMPLE_LOG_COMPONENT, f"Error reading config: {exc}")
+        return {"active_index": 0, "spectra": []}
+
+    for key, default in _SAMPLE_CONFIG_DEFAULTS.items():
+        config.setdefault(key, default)
+
+    # Normalise entries and drop those whose spectrum file is gone
+    valid_entries: List[Dict[str, Any]] = []
+    for entry in config.get("spectra", []):
+        raw_file = entry.get("file")
+        if not raw_file:
+            continue
+        if not os.path.exists(raw_file):
+            print(f"[SampleConfig] Skipping missing spectrum file: {raw_file}")
+            continue
+        param_file = entry.get("param_file")
+        if param_file and not os.path.exists(param_file):
+            print(f"[SampleConfig] Parameter file not found (cleared): {param_file}")
+            param_file = None
+        overrides = entry.get("overrides") or {}
+        if not isinstance(overrides, dict):
+            overrides = {}
+        valid_entries.append({
+            "file": raw_file,
+            "param_file": param_file,
+            "overrides": overrides,
+        })
+    config["spectra"] = valid_entries
+
+    # Clamp the active index
+    n = len(valid_entries)
+    idx = config.get("active_index", 0)
+    if not isinstance(idx, int) or idx < 0 or idx >= max(n, 1):
+        idx = 0
+    config["active_index"] = idx
+
+    debug_config.info(
+        _SAMPLE_LOG_COMPONENT,
+        f"Loaded sample config: {n} spectra, active_index={idx}",
+    )
+    return config
+
+def save_sample_config(
+    config: Dict[str, Any],
+    file_path: Optional[str] = None,
+) -> str:
+    """Persist a spectrum-sample configuration to JSON.
+
+    Parameters
+    ----------
+    config : dict
+        ``{"active_index": int, "spectra": [{"file", "param_file", "overrides"}]}``.
+    file_path : str, optional
+        Full path for the output file.  Defaults to
+        ``DATAFILES/CONFIG/SampleConfig.json``.
+
+    Returns
+    -------
+    str
+        The path the file was written to.
+    """
+    from iSLAT.Modules.FileHandling import sample_config_file_path
+
+    if file_path is None:
+        file_path = str(sample_config_file_path)
+
+    try:
+        with open(file_path, "w") as fh:
+            json.dump(config, fh, indent=4)
+        debug_config.info(_SAMPLE_LOG_COMPONENT, f"Saved sample config to {file_path}")
+    except OSError as exc:
+        debug_config.error(_SAMPLE_LOG_COMPONENT, f"Error saving sample config: {exc}")
+
+    return file_path
+
 def read_from_csv(file_path=save_folder_path, file_name=molsave_file_name):
     file = os.path.join(file_path, file_name)
     if os.path.exists(file):

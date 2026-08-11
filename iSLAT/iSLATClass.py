@@ -11,6 +11,7 @@ from .Modules.Debug.PerformanceLogger import (
 )
 
 from .Modules.FileHandling.iSLATFileHandling import load_user_settings, save_user_settings, read_default_molecule_parameters, read_initial_molecule_parameters, read_full_molecule_parameters, read_HITRAN_data, read_from_user_csv, read_default_csv, read_spectral_data
+from .Modules.FileHandling.iSLATFileHandling import load_sample_config, save_sample_config, load_control_panel_fields_config
 from .Modules.FileHandling.iSLATFileHandling import molsave_file_name, save_folder_path, hitran_data_folder_path, hitran_data_folder_name, example_data_folder_path
 
 from . import Constants as c
@@ -73,6 +74,9 @@ class iSLAT:
         self.sample_spectra: list[str] = []       # file paths of all spectra in the sample
         self.sample_spectra_index: int = 0        # index into sample_spectra for currently displayed spectrum
         self.sample_spectra_params: dict[str, str] = {}  # spectrum path -> parameter file path (optional override)
+        self.sample_spectra_overrides: dict[str, dict[str, float]] = {}  # spectrum path -> {global field key -> value}
+        self._global_fields_config: Optional[dict] = None  # cached global_fields from ControlPanelFields.json
+        self._suppress_sample_save: bool = False  # guard against saving while restoring
         
         # === PERFORMANCE FLAGS ===
         self._use_parallel_processing = False
@@ -608,6 +612,100 @@ class iSLAT:
             return False
 
     # === SPECTRUM METHODS ===
+    def _get_global_fields_config(self) -> dict:
+        """Return (and cache) the ``global_fields`` section of ControlPanelFields.json."""
+        if self._global_fields_config is None:
+            config = load_control_panel_fields_config()
+            self._global_fields_config = config.get("global_fields", {})
+        return self._global_fields_config
+
+    def _apply_sample_overrides(self, file_path: str) -> None:
+        """Apply per-spectrum global-parameter overrides for *file_path*.
+
+        Overrides are stored in :attr:`sample_spectra_overrides` keyed by the
+        spectrum path.  Each override key is a field key from the
+        ``global_fields`` section of ControlPanelFields.json (e.g. ``distance``,
+        ``stellar_rv``); the value is set on ``molecules_dict`` via the field's
+        ``property`` name.  Overrides are applied *after* any parameter file,
+        so they win over parameter-file values.
+        """
+        overrides = self.sample_spectra_overrides.get(file_path)
+        if not overrides:
+            return
+        fields = self._get_global_fields_config()
+        for key, value in overrides.items():
+            field_cfg = fields.get(key) or {}
+            prop = field_cfg.get("property")
+            if not prop:
+                print(f"[SampleManager] Unknown global override '{key}' ignored")
+                continue
+            try:
+                setattr(self.molecules_dict, prop, float(value))
+            except Exception as exc:
+                print(f"[SampleManager] Failed to apply override {key}={value}: {exc}")
+
+    def save_sample_state(self) -> None:
+        """Persist the current sample (files, param files, overrides) to SampleConfig.json."""
+        if self._suppress_sample_save:
+            return
+        config = {
+            "active_index": int(self.sample_spectra_index),
+            "spectra": [
+                {
+                    "file": fp,
+                    "param_file": self.sample_spectra_params.get(fp),
+                    "overrides": self.sample_spectra_overrides.get(fp, {}),
+                }
+                for fp in self.sample_spectra
+            ],
+        }
+        try:
+            save_sample_config(config)
+        except Exception as exc:
+            print(f"[SampleManager] Could not save sample config: {exc}")
+
+    def restore_sample_state(self) -> None:
+        """Restore the sample list, parameter files and overrides from SampleConfig.json.
+
+        Missing spectrum files are skipped (with a warning) by the loader.
+        If a spectrum is currently loaded it is kept as the active entry:
+        it is inserted at the front of the sample if not already present.
+        """
+        try:
+            config = load_sample_config()
+        except Exception as exc:
+            print(f"[SampleManager] Could not load sample config: {exc}")
+            return
+
+        entries = config.get("spectra", [])
+        if not entries:
+            return
+
+        self._suppress_sample_save = True
+        try:
+            self.sample_spectra = [e["file"] for e in entries]
+            self.sample_spectra_params = {
+                e["file"]: e["param_file"] for e in entries if e.get("param_file")
+            }
+            self.sample_spectra_overrides = {
+                e["file"]: dict(e["overrides"]) for e in entries if e.get("overrides")
+            }
+            self.sample_spectra_index = int(config.get("active_index", 0))
+
+            # Keep the currently displayed spectrum consistent with the sample
+            loaded = getattr(self, "loaded_spectrum_file", None)
+            if loaded:
+                if loaded in self.sample_spectra:
+                    self.sample_spectra_index = self.sample_spectra.index(loaded)
+                else:
+                    self.sample_spectra.insert(0, loaded)
+                    self.sample_spectra_index = 0
+        finally:
+            self._suppress_sample_save = False
+
+        print(f"Restored sample with {len(self.sample_spectra)} spectra from saved config.")
+        self.save_sample_state()
+
     def add_sample_spectra(self, file_paths: list[str] | None = None):
         """
         Add spectra to the sample list.
@@ -646,6 +744,7 @@ class iSLAT:
         
         if added:
             print(f"Added {added} spectra to sample list (total: {len(self.sample_spectra)})")
+            self.save_sample_state()
             # Update the file interaction pane if GUI exists
             if hasattr(self, 'GUI') and self.GUI and hasattr(self.GUI, 'file_interaction_pane'):
                 self.GUI.file_interaction_pane.update_file_label()
@@ -653,10 +752,37 @@ class iSLAT:
                     f"Added {added} sample spectra ({len(self.sample_spectra)} total)"
                 )
 
+    def remove_sample_spectrum(self, index: int):
+        """Remove the spectrum at *index* from the sample.
+
+        Also purges any parameter-file assignment and global-parameter
+        overrides associated with that spectrum, adjusts the active index,
+        and persists the new sample state.
+        """
+        if not self.sample_spectra or index < 0 or index >= len(self.sample_spectra):
+            return
+
+        removed = self.sample_spectra.pop(index)
+        self.sample_spectra_params.pop(removed, None)
+        self.sample_spectra_overrides.pop(removed, None)
+
+        cur = int(self.sample_spectra_index)
+        if len(self.sample_spectra) == 0:
+            self.sample_spectra_index = 0
+        elif cur >= len(self.sample_spectra):
+            self.sample_spectra_index = len(self.sample_spectra) - 1
+        elif index < cur:
+            self.sample_spectra_index = cur - 1
+
+        self.save_sample_state()
+
     def clear_sample_spectra(self):
         """Remove all sample spectra."""
         self.sample_spectra.clear()
+        self.sample_spectra_params.clear()
+        self.sample_spectra_overrides.clear()
         self.sample_spectra_index = 0
+        self.save_sample_state()
         print("Cleared all sample spectra.")
         if hasattr(self, 'GUI') and self.GUI and hasattr(self.GUI, 'file_interaction_pane'):
             self.GUI.file_interaction_pane.update_file_label()
@@ -677,10 +803,10 @@ class iSLAT:
         # Wrap around
         index = index % len(self.sample_spectra)
         
-        if index == self.sample_spectra_index:
+        file_path = self.sample_spectra[index]
+        if index == self.sample_spectra_index and getattr(self, 'loaded_spectrum_file', None) == file_path:
             return  # already showing this one
         
-        file_path = self.sample_spectra[index]
         if not os.path.exists(file_path):
             print(f"Sample spectrum file not found: {file_path}")
             return
@@ -692,6 +818,10 @@ class iSLAT:
             self._load_parameters_from_explicit_file(param_file)
         else:
             self.load_spectrum(file_path=file_path)
+        
+        # Per-spectrum global overrides win over parameter-file values
+        self._apply_sample_overrides(file_path)
+        self.save_sample_state()
 
     def cycle_spectrum(self, direction: int):
         """
@@ -814,7 +944,10 @@ class iSLAT:
             # If user explicitly loaded a new primary spectrum, clear the sample
             if user_initiated and self.sample_spectra:
                 self.sample_spectra.clear()
+                self.sample_spectra_params.clear()
+                self.sample_spectra_overrides.clear()
                 self.sample_spectra_index = 0
+                self.save_sample_state()
                 print("Cleared sample spectra (new primary spectrum loaded).")
 
             # Initialize molecules after spectrum is loaded (most efficient approach)
@@ -1042,6 +1175,8 @@ class iSLAT:
             if not continue_init:
                 print("No spectrum selected. Exiting...")
                 sys.exit(0)
+            if self.user_settings.get("restore_sample_on_startup", True):
+                self.restore_sample_state()
             self.init_gui()
             
         except Exception as e:
