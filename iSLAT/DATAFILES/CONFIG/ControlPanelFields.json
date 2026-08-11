@@ -64,7 +64,7 @@
             "options": ["constant", "miri_mrs"],
             "option_labels": {"constant": "Constant FWHM", "miri_mrs": "JWST MIRI MRS"},
             "default": "constant",
-            "width": 14,
+            "width": 7,
             "tip": "Instrumental line-spread\nfunction profile.\n'Constant FWHM' uses the\ninstrumental FWHM value below.\n'JWST MIRI MRS' uses a\nwavelength-dependent R(λ)."
         },
         "instrumental_fwhm": {

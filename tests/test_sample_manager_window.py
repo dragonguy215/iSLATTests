@@ -307,3 +307,86 @@ def test_save_sample_state_suppressed(islat_with_sample):
     islat._suppress_sample_save = True
     islat.save_sample_state()
     assert not os.path.exists(islat._test_cfg_path)
+
+
+# ---------------------------------------------------------------------------
+# Control panel sync after switching sample spectra
+# ---------------------------------------------------------------------------
+
+class _FakeControlPanel:
+    def __init__(self):
+        self.refresh_count = 0
+
+    def refresh_from_molecules_dict(self):
+        self.refresh_count += 1
+
+
+class _FakeGUI:
+    def __init__(self):
+        self.control_panel = _FakeControlPanel()
+        self.plot = None
+
+
+def test_switch_to_spectrum_refreshes_control_panel_after_overrides(
+    islat_with_sample, monkeypatch
+):
+    """Regression: control panel must be re-synced *after* param file /
+    overrides are applied, not just by load_spectrum's earlier refresh."""
+    islat = islat_with_sample
+    islat.GUI = _FakeGUI()
+    islat.loaded_spectrum_file = islat.sample_spectra[0]
+    islat.sample_spectra_index = 0
+
+    target = islat.sample_spectra[1]
+    islat.sample_spectra_overrides[target] = {"distance": 250.0}
+
+    events = []
+    monkeypatch.setattr(
+        type(islat), "load_spectrum",
+        lambda self, file_path=None, load_parameters=False, force_dialog=False: (
+            events.append("load"), setattr(self, "loaded_spectrum_file", file_path), True
+        )[-1],
+    )
+
+    orig_refresh = type(islat)._refresh_gui_after_parameter_change
+    monkeypatch.setattr(
+        type(islat), "_refresh_gui_after_parameter_change",
+        lambda self, update_plot=True: (
+            events.append("refresh"), orig_refresh(self, update_plot)
+        )[-1],
+    )
+
+    islat.switch_to_spectrum(1)
+
+    # Override was applied and the control panel refreshed afterwards
+    assert islat.molecules_dict.global_distance == 250.0
+    assert islat.GUI.control_panel.refresh_count == 1
+    assert events == ["load", "refresh"]
+
+
+def test_switch_to_spectrum_no_extra_refresh_without_overrides(
+    islat_with_sample, monkeypatch
+):
+    islat = islat_with_sample
+    islat.GUI = _FakeGUI()
+    islat.loaded_spectrum_file = islat.sample_spectra[0]
+    islat.sample_spectra_index = 0
+
+    monkeypatch.setattr(
+        type(islat), "load_spectrum",
+        lambda self, file_path=None, load_parameters=False, force_dialog=False: (
+            setattr(self, "loaded_spectrum_file", file_path), True
+        )[-1],
+    )
+
+    islat.switch_to_spectrum(1)
+
+    # load_spectrum already refreshes; no redundant explicit refresh needed
+    assert islat.GUI.control_panel.refresh_count == 0
+
+
+def test_refresh_gui_helper_handles_missing_gui(islat_with_sample):
+    islat = islat_with_sample
+    islat.GUI = None
+    # Should not raise
+    islat._refresh_gui_after_parameter_change()

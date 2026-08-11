@@ -813,15 +813,52 @@ class iSLAT:
         
         self.sample_spectra_index = index
         param_file = getattr(self, 'sample_spectra_params', {}).get(file_path)
+        param_loaded = False
         if param_file and os.path.exists(param_file):
             self.load_spectrum(file_path=file_path)
-            self._load_parameters_from_explicit_file(param_file)
+            param_loaded = self._load_parameters_from_explicit_file(param_file)
         else:
             self.load_spectrum(file_path=file_path)
         
         # Per-spectrum global overrides win over parameter-file values
+        overrides_applied = bool(self.sample_spectra_overrides.get(file_path))
         self._apply_sample_overrides(file_path)
+
+        # load_spectrum() already refreshed the GUI, but the parameter file
+        # and overrides are applied *after* that refresh, so the control
+        # panel (and plot) would otherwise show stale values.
+        if param_loaded or overrides_applied:
+            self._refresh_gui_after_parameter_change(update_plot=param_loaded)
+
         self.save_sample_state()
+
+    def _refresh_gui_after_parameter_change(self, update_plot: bool = True) -> None:
+        """Re-sync the control panel (and optionally the plot) with molecules_dict.
+
+        Used after molecule parameters change outside the control panel's own
+        callbacks (e.g. loading a parameter file or applying per-spectrum
+        overrides when switching sample spectra).
+        """
+        gui = getattr(self, "GUI", None)
+        if gui is None:
+            return
+        try:
+            control_panel = getattr(gui, "control_panel", None)
+            if control_panel is not None and hasattr(control_panel, "refresh_from_molecules_dict"):
+                control_panel.refresh_from_molecules_dict()
+        except Exception as exc:
+            print(f"[SampleManager] Control panel refresh error: {exc}")
+        if not update_plot:
+            return
+        try:
+            plot = getattr(gui, "plot", None)
+            if plot is not None:
+                if hasattr(plot, "update_all_plots"):
+                    plot.update_all_plots()
+                if hasattr(plot, "canvas"):
+                    plot.canvas.draw()
+        except Exception as exc:
+            print(f"[SampleManager] Plot refresh error: {exc}")
 
     def cycle_spectrum(self, direction: int):
         """
