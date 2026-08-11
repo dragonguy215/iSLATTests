@@ -463,3 +463,26 @@ class TestInteractionHandler:
         ih = InteractionHandler(mock_plot_manager)
         ih._on_span_select(18.0, 12.0)
         assert ih.selected_range == (12.0, 18.0)
+
+    def test_get_active_plot_range_reads_xlim(self, mock_plot_manager):
+        from iSLAT.Modules.GUI.InteractionHandler import InteractionHandler
+        ih = InteractionHandler(mock_plot_manager)
+        ih.islat.display_range = (0.0, 0.0)
+        ih.ax1.set_xlim(10.0, 20.0)
+        assert ih._get_active_plot_range() == (10.0, 20.0)
+
+    def test_apply_center_view_routes_through_control_panel(self, mock_plot_manager):
+        from iSLAT.Modules.GUI.InteractionHandler import InteractionHandler
+        from unittest.mock import MagicMock
+        ih = InteractionHandler(mock_plot_manager)
+
+        cp = MagicMock()
+        cp._format_value.side_effect = lambda v, name: v
+        ih.islat.GUI.control_panel = cp
+
+        ih._apply_center_view(center=15.0, plot_range=4.0)
+
+        # start = 15 - 2 = 13, range = 4
+        cp._set_var.assert_any_call(cp.plot_start_var, 13.0)
+        cp._set_var.assert_any_call(cp.plot_range_var, 4.0)
+        cp._update_display_range.assert_called_once()

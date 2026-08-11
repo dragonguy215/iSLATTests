@@ -536,6 +536,11 @@ class InteractionHandler:
             self._toggle_three_panel()
             return 'break'
 
+        # Handle 'c' key for opening the center-view dialog
+        elif keysym == 'c':
+            self._open_center_view_dialog()
+            return 'break'
+
         # Handle 'n' key for advancing plot start by the current range
         # Shift+N = retreat (subtract range), plain N = advance (add range)
         #elif keysym == 'n':
@@ -664,6 +669,145 @@ class InteractionHandler:
         """Toggle residual sub-panels in the full spectrum view."""
         if hasattr(self.plot_manager, 'toggle_residuals'):
             self.plot_manager.toggle_residuals()
+
+    def _get_active_plot_range(self) -> Tuple[float, float]:
+        """Return the current active (xmin, xmax) of the main plot view."""
+        try:
+            xmin, xmax = self.ax1.get_xlim()
+        except Exception:
+            xmin, xmax = None, None
+        if xmin is None or xmax is None:
+            if hasattr(self.islat, 'display_range') and self.islat.display_range:
+                xmin, xmax = self.islat.display_range
+            else:
+                xmin, xmax = 0.0, 0.0
+        if xmin > xmax:
+            xmin, xmax = xmax, xmin
+        return float(xmin), float(xmax)
+
+    def _apply_center_view(self, center: float, plot_range: float) -> None:
+        """Center the plot view on *center* with the given *plot_range* width."""
+        plot_range = abs(plot_range)
+        start = center - plot_range / 2.0
+        end = center + plot_range / 2.0
+
+        control_panel = None
+        if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'control_panel'):
+            control_panel = self.islat.GUI.control_panel
+
+        if control_panel is not None:
+            # Route through the control panel so all views (including the
+            # full-spectrum binding) stay in sync.
+            control_panel._set_var(
+                control_panel.plot_start_var,
+                control_panel._format_value(start, "display_range_start"),
+            )
+            control_panel._set_var(
+                control_panel.plot_range_var,
+                control_panel._format_value(plot_range, "display_range_range"),
+            )
+            control_panel._update_display_range()
+        elif hasattr(self.islat, 'display_range'):
+            self.islat.display_range = (start, end)
+            if hasattr(self.islat, 'GUI') and hasattr(self.islat.GUI, 'plot'):
+                self.islat.GUI.plot.match_display_range(match_y=True)
+
+    def _open_center_view_dialog(self) -> None:
+        """Open a popup letting the user center the view on a wavelength.
+
+        The user enters a wavelength to center the plot on and an optional
+        plot range. The plot range defaults to the width of the current
+        active range of the plot view.
+        """
+        import tkinter as tk
+        from tkinter import ttk
+
+        # Resolve the parent window
+        root = getattr(self, '_tk_root', None)
+        if root is None:
+            if hasattr(self.plot_manager, 'parent_frame') and self.plot_manager.parent_frame:
+                try:
+                    root = self.plot_manager.parent_frame.winfo_toplevel()
+                except Exception:
+                    root = None
+        if root is None and hasattr(self.islat, 'GUI') and getattr(self.islat.GUI, 'master', None):
+            root = self.islat.GUI.master
+        if root is None:
+            return
+
+        xmin, xmax = self._get_active_plot_range()
+        current_center = (xmin + xmax) / 2.0
+        current_range = xmax - xmin
+
+        win = tk.Toplevel(root)
+        win.title("Center View")
+        win.resizable(False, False)
+        win.transient(root)
+
+        content = ttk.Frame(win)
+        content.pack(fill="both", expand=True, padx=12, pady=12)
+
+        ttk.Label(content, text="Center wavelength (\u03bcm):").grid(
+            row=0, column=0, sticky="w", padx=(0, 6), pady=(0, 6)
+        )
+        center_var = tk.StringVar(value=f"{current_center:.4f}")
+        center_entry = ttk.Entry(content, textvariable=center_var, width=14)
+        center_entry.grid(row=0, column=1, sticky="ew", pady=(0, 6))
+
+        ttk.Label(content, text="Plot range (\u03bcm):").grid(
+            row=1, column=0, sticky="w", padx=(0, 6), pady=(0, 6)
+        )
+        range_var = tk.StringVar(value=f"{current_range:.4f}")
+        range_entry = ttk.Entry(content, textvariable=range_var, width=14)
+        range_entry.grid(row=1, column=1, sticky="ew", pady=(0, 6))
+
+        error_var = tk.StringVar(value="")
+        error_label = ttk.Label(content, textvariable=error_var, foreground="red")
+        error_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        def _apply(event=None):
+            try:
+                center = float(center_var.get())
+            except ValueError:
+                error_var.set("Invalid center wavelength.")
+                return
+            try:
+                plot_range = float(range_var.get())
+            except ValueError:
+                error_var.set("Invalid plot range.")
+                return
+            if plot_range <= 0:
+                error_var.set("Plot range must be greater than 0.")
+                return
+            self._apply_center_view(center, plot_range)
+            win.destroy()
+
+        def _cancel(event=None):
+            win.destroy()
+
+        btn_frame = ttk.Frame(content)
+        btn_frame.grid(row=3, column=0, columnspan=2, sticky="e")
+        ttk.Button(btn_frame, text="Center", command=_apply).pack(
+            side="right", padx=(4, 0)
+        )
+        ttk.Button(btn_frame, text="Cancel", command=_cancel).pack(
+            side="right", padx=4
+        )
+
+        win.bind("<Return>", _apply)
+        win.bind("<Escape>", _cancel)
+
+        # Center the dialog on screen and give the center entry focus.
+        win.update_idletasks()
+        x = win.winfo_screenwidth() // 2 - win.winfo_width() // 2
+        y = win.winfo_screenheight() // 2 - win.winfo_height() // 2
+        win.geometry(f"+{x}+{y}")
+        center_entry.focus_set()
+        center_entry.select_range(0, "end")
+        try:
+            win.grab_set()
+        except Exception:
+            pass
 
     def _advance_plot_start(self, extra_amount: Optional[float] = None):
         """Advance the plot start by the current plot range value."""
