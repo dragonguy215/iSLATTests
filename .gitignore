@@ -7,6 +7,7 @@ iSLAT/__pycache__/
 iSLAT.egg-info/
 
 iSLAT/DATAFILES/CONFIG/UserSettings.json
+iSLAT/DATAFILES/CONFIG/SampleConfig.json
 
 iSLAT/DATAFILES/SAVES/
 iSLAT/DATAFILES/LINESAVES/
