@@ -63,6 +63,14 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
     model_flux_hires : np.ndarray, optional
         High-resolution combined model flux corresponding to *model_wave*.
         When given, the filled area uses this array while residuals still use *model_flux* (which is on the data grid).
+    match_pixel_sampling : bool
+        When *True*, render the summed-model fill and each entry of
+        *model_components* on the observed *wave_data* grid instead of
+        their native (typically higher-resolution) grids.
+        The fill uses *model_flux* directly (matching the residual /
+        chi^2 arrays) and components are flux-conservingly resampled
+        with :func:`spectres` once at construction time.
+        Default *False* (native-grid rendering, backward compatible).
     line_list : pd.DataFrame, optional
         Saved-line annotations.
     atomic_lines : pd.DataFrame, optional
@@ -128,6 +136,7 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
         molecules: Optional["MoleculeDict"] = None,
         model_wave: Optional[np.ndarray] = None,
         model_flux_hires: Optional[np.ndarray] = None,
+        match_pixel_sampling: bool = False,
         line_list: Optional[pd.DataFrame] = None,
         atomic_lines: Optional[pd.DataFrame] = None,
         n_panels: int = 5,
@@ -174,7 +183,10 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
 
         # -- Model arrays (unique to ResidualSpectrumPlot) ------------
         self.model_flux = np.asarray(model_flux)
-        self.model_components = model_components
+        self.match_pixel_sampling = match_pixel_sampling
+        self.model_components = self._resample_components_to_data_grid(
+            model_components
+        )
         self.model_wave = (
             np.asarray(model_wave) if model_wave is not None else self.wave_data
         )
@@ -399,8 +411,9 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
 
         # --- Build the summed spectrum for this row --------------------
         # The model fill uses the adjusted hires model if available, otherwise falls back to the data-grid model.
+        # With match_pixel_sampling the data-grid model is always used so the fill matches the residual / chi^2 arrays.
         _hires_adj = self._model_flux_hires_adj
-        if _hires_adj is not None:
+        if _hires_adj is not None and not self.match_pixel_sampling:
             summed_w = self.model_wave
             summed_f = _hires_adj
         else:
@@ -902,5 +915,45 @@ class ResidualSpectrumPlot(FullSpectrumPlot):
     def set_model_components(
         self, components: List[Dict[str, Any]]
     ) -> None:
-        """Replace the model component list."""
-        self.model_components = components
+        """Replace the model component list.
+
+        When :attr:`match_pixel_sampling` is enabled, components are
+        flux-conservingly resampled onto the observed wavelength grid.
+        """
+        self.model_components = self._resample_components_to_data_grid(
+            components
+        )
+
+    def _resample_components_to_data_grid(
+        self, components: Optional[List[Dict[str, Any]]]
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Resample model components onto :attr:`wave_data`.
+
+        Returns *components* unchanged unless
+        :attr:`match_pixel_sampling` is enabled.  Otherwise returns
+        shallow copies of each component dict with ``"wave"`` /
+        ``"flux"`` replaced by the observed grid and the
+        flux-conservingly resampled flux (``spectres``, NaN fill
+        outside the component's native range).  The caller's dicts are
+        never mutated.
+        """
+        if not components or not self.match_pixel_sampling:
+            return components
+
+        from iSLAT.Modules.DataProcessing.spectral_utils import spectres
+
+        resampled: List[Dict[str, Any]] = []
+        for comp in components:
+            c_wave = np.asarray(comp["wave"], dtype=float)
+            c_flux = np.asarray(comp["flux"], dtype=float)
+            new_comp = dict(comp)
+            if not (
+                len(c_wave) == len(self.wave_data)
+                and np.array_equal(c_wave, self.wave_data)
+            ):
+                new_comp["wave"] = self.wave_data
+                new_comp["flux"] = spectres(
+                    self.wave_data, c_wave, c_flux, fill=np.nan
+                )
+            resampled.append(new_comp)
+        return resampled

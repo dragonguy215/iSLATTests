@@ -280,6 +280,106 @@ class TestResidualSpectrumPlot:
         rsp.set_model_components(comps)
         assert rsp.model_components == comps
 
+    # -- match_pixel_sampling ------------------------------------------
+    def _make_hires_inputs(self):
+        wave, flux, err = make_wave_flux(n=200)
+        model = flux + np.random.default_rng(7).normal(0, 0.002, 200)
+        wave_hr = np.linspace(wave[0], wave[-1], 2000)
+        flux_hr = np.interp(wave_hr, wave, model)
+        # Smooth component so flux-conserving resampling is comparable
+        # to pointwise interpolation in tests.
+        comp_flux_hr = 0.5 * (
+            0.05 + 0.1 * np.sin(2 * np.pi * (wave_hr - wave[0]) / 10.0)
+        )
+        comps = [
+            {"wave": wave_hr, "flux": comp_flux_hr,
+             "color": "red", "label": "comp1"},
+        ]
+        return wave, flux, err, model, wave_hr, flux_hr, comps
+
+    def test_match_pixel_sampling_sum_fill_uses_data_grid(self):
+        wave, flux, err, model, wave_hr, flux_hr, _ = self._make_hires_inputs()
+        rsp = ResidualSpectrumPlot(
+            wave, flux, model, error_data=err, n_panels=2,
+            model_wave=wave_hr, model_flux_hires=flux_hr,
+            match_pixel_sampling=True,
+        )
+        rsp.generate_plot()
+        spectrum_panel = rsp.panels[0][0]
+        np.testing.assert_array_equal(spectrum_panel.summed_wave, wave)
+        np.testing.assert_array_equal(
+            spectrum_panel.summed_flux, rsp._model_flux_adj
+        )
+        rsp.close()
+
+    def test_hires_fill_unchanged_by_default(self):
+        wave, flux, err, model, wave_hr, flux_hr, _ = self._make_hires_inputs()
+        rsp = ResidualSpectrumPlot(
+            wave, flux, model, error_data=err, n_panels=2,
+            model_wave=wave_hr, model_flux_hires=flux_hr,
+        )
+        rsp.generate_plot()
+        spectrum_panel = rsp.panels[0][0]
+        np.testing.assert_array_equal(spectrum_panel.summed_wave, wave_hr)
+        rsp.close()
+
+    def test_match_pixel_sampling_resamples_components(self):
+        wave, flux, err, model, wave_hr, flux_hr, comps = \
+            self._make_hires_inputs()
+        rsp = ResidualSpectrumPlot(
+            wave, flux, model, error_data=err, n_panels=2,
+            model_components=comps,
+            match_pixel_sampling=True,
+        )
+        comp = rsp.model_components[0]
+        np.testing.assert_array_equal(comp["wave"], wave)
+        assert len(comp["flux"]) == len(wave)
+        # Flux-conserving resample should track the hi-res component
+        finite = np.isfinite(comp["flux"])
+        assert np.any(finite)
+        expected = np.interp(wave[finite], wave_hr, comps[0]["flux"])
+        np.testing.assert_allclose(comp["flux"][finite], expected, atol=1e-4)
+        # Caller's dicts must not be mutated
+        assert len(comps[0]["wave"]) == len(wave_hr)
+        rsp.generate_plot()
+        rsp.close()
+
+    def test_components_unchanged_by_default(self):
+        wave, flux, err, model, wave_hr, flux_hr, comps = \
+            self._make_hires_inputs()
+        rsp = ResidualSpectrumPlot(
+            wave, flux, model, error_data=err, n_panels=2,
+            model_components=comps,
+        )
+        assert rsp.model_components is comps
+        np.testing.assert_array_equal(
+            rsp.model_components[0]["wave"], wave_hr
+        )
+
+    def test_set_model_components_resamples_when_enabled(self):
+        wave, flux, err, model, wave_hr, flux_hr, comps = \
+            self._make_hires_inputs()
+        rsp = ResidualSpectrumPlot(
+            wave, flux, model, error_data=err, n_panels=2,
+            match_pixel_sampling=True,
+        )
+        rsp.set_model_components(comps)
+        np.testing.assert_array_equal(rsp.model_components[0]["wave"], wave)
+
+    def test_match_pixel_sampling_skips_data_grid_components(self):
+        wave, flux, err = make_wave_flux(n=200)
+        model = flux.copy()
+        comps = [{"wave": wave, "flux": model * 0.5,
+                  "color": "red", "label": "comp1"}]
+        rsp = ResidualSpectrumPlot(
+            wave, flux, model, error_data=err, n_panels=2,
+            model_components=comps,
+            match_pixel_sampling=True,
+        )
+        np.testing.assert_array_equal(
+            rsp.model_components[0]["flux"], model * 0.5
+        )
+
     def test_save(self, tmp_path):
         rsp = self._make_rsp()
         rsp.generate_plot()
