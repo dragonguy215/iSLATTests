@@ -264,7 +264,8 @@ class TopBar(ResizableFrame):
             return
         
         # Get selection bounds
-        selected_wave = getattr(self.main_plot, 'selected_wave', None)
+        selected_wave = getattr(self.main_plot, 'current_selection', None) # use current_selection instead of selected_wave. 
+                                                                           # current_selection includes the actual selection range and selected_wave is the nearest pixels in the wave_data array.
         xmin, xmax = self.line_save_service.get_selection_bounds(
             selected_wave,
             self.main_plot.current_selection,
