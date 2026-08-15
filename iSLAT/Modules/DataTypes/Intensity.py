@@ -15,7 +15,6 @@ The class Intensity calculates the intensities
 - 11/01/2025 Johnny McCaskill, redesigned for performance and to enable overlapping line treatment
 
 """
-
 import numpy as np
 import time
 from typing import Optional, Union, Literal, TYPE_CHECKING, Any
@@ -1653,7 +1652,6 @@ class Intensity(WavelengthRangeMixin):
         return fint
 
     # ---- backward-compatible aliases --------------------------------
-
     @property
     def get_table(self) -> "pandas.DataFrame":
         """pd.DataFrame: Line data for the active wavelength range.
@@ -1680,7 +1678,6 @@ class Intensity(WavelengthRangeMixin):
     # ------------------------------------------------------------------
     # Population-diagram data
     # ------------------------------------------------------------------
-
     def get_population_diagram_data(
         self,
         radius: float,

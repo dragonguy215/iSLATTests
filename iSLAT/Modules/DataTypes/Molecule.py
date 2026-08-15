@@ -231,8 +231,9 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         }
     
     def _compute_intensity_hash(self):
-        wavelength_tuple = tuple(self._wavelength_range) if self._wavelength_range else ()
-        return hash((self._temp, self._n_mol, self._broad, wavelength_tuple))
+        #wavelength_tuple = tuple(self._wavelength_range) if self._wavelength_range else ()
+        # use INTENSITY_AFFECTING_PARAMS instead of hardcoding the parameters to ensure consistency
+        return hash(tuple(getattr(self, param) for param in self.INTENSITY_AFFECTING_PARAMS))
     
     def _compute_spectrum_hash(self):
         wavelength_tuple = tuple(self._wavelength_range) if self._wavelength_range else ()

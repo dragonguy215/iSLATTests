@@ -18,16 +18,10 @@ Usage example::
             ...
         )
 """
-
 from __future__ import annotations
-
 from typing import Any, Callable, Dict, List, Optional
 
-
-# ═══════════════════════════════════════════════════════════════════
 #  CacheStatsMixin
-# ═══════════════════════════════════════════════════════════════════
-
 class CacheStatsMixin:
     """Standardised cache hit/miss/invalidation bookkeeping.
 
@@ -45,13 +39,9 @@ class CacheStatsMixin:
     * ``_record_cache_invalidation()``
     * ``_reset_cache_stats()``
     """
-
     __slots__ = ()
 
-    # ------------------------------------------------------------------
     # Concrete implementations
-    # ------------------------------------------------------------------
-
     def _init_cache_stats(self) -> None:
         """Initialise the ``_cache_stats`` dict.
 
@@ -80,11 +70,7 @@ class CacheStatsMixin:
     def _reset_cache_stats(self) -> None:
         self._cache_stats.update(hits=0, misses=0, invalidations=0)  # type: ignore[attr-defined]
 
-
-# ═══════════════════════════════════════════════════════════════════
 #  WavelengthRangeMixin
-# ═══════════════════════════════════════════════════════════════════
-
 class WavelengthRangeMixin:
     """Getter/setter for a ``wavelength_range`` property with an
     invalidation hook.
@@ -100,7 +86,6 @@ class WavelengthRangeMixin:
         **only** when the new value differs from the old one.  The
         default implementation is a no-op.
     """
-
     __slots__ = ()
 
     @property
@@ -121,11 +106,7 @@ class WavelengthRangeMixin:
     ) -> None:
         """React to a wavelength-range change.  Override in subclasses."""
 
-
-# ═══════════════════════════════════════════════════════════════════
 #  ObservableMixin
-# ═══════════════════════════════════════════════════════════════════
-
 class ObservableMixin:
     """Simple observer pattern — instance-level callback list.
 
@@ -140,7 +121,6 @@ class ObservableMixin:
     * ``remove_callback(cb)``
     * ``notify_callbacks(*args, **kwargs)``
     """
-
     __slots__ = ()
 
     def _init_callbacks(self) -> None:
@@ -171,11 +151,7 @@ class ObservableMixin:
             except Exception as exc:
                 print(f"Error in callback {cb!r}: {exc}")
 
-
-# ═══════════════════════════════════════════════════════════════════
 #  ClassObservableMixin
-# ═══════════════════════════════════════════════════════════════════
-
 class ClassObservableMixin:
     """Observer pattern at the **class** level (shared by all instances).
 
@@ -195,7 +171,6 @@ class ClassObservableMixin:
     * ``remove_class_callback(cb)``
     * ``_notify_class_callbacks(*args, **kwargs)``
     """
-
     __slots__ = ()
 
     @classmethod
