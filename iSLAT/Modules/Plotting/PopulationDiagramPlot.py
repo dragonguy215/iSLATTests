@@ -236,9 +236,9 @@ class PopulationDiagramPlot(BasePlot):
 
         x_vals: List[float] = []
         y_vals: List[float] = []
-        # Each entry: (info_dict, al_idx) where al_idx is the index into
-        # active_lines for the corresponding vline (= position among the threshold-passing lines in line_data order).
-        value_data_list: List[Tuple[Dict[str, Any], int]] = []
+        # Each entry: (info_dict, al_idx) where al_idx is the index of the
+        # matching vline entry in active_lines, or None when no vline exists.
+        value_data_list: List[Tuple[Dict[str, Any], Optional[int]]] = []
 
         from iSLAT.Modules.DataTypes.Intensity import Intensity as _Intensity
 
@@ -252,20 +252,33 @@ class PopulationDiagramPlot(BasePlot):
             if _mol_id is None:
                 _mol_id = getattr(molecule, "molecule_id", None)
 
-        # al_idx tracks position among threshold-passing lines so it stays
-        # aligned with what LineInspectionPlot.render_active_lines added to
-        # active_lines (it increments for every threshold-passing line,
-        # whether or not the pop-diagram NaN check also passes).
-        al_idx = 0
+        # Index the existing active_lines entries that belong to *this*
+        # molecule by transition identity.  Positional matching is not safe:
+        # active_lines is shared across molecules (the primary molecule's
+        # entries come first) and LineInspectionPlot skips lines whose
+        # lineheight rounds to zero, so both offsets and gaps occur.
+        pending_by_key: Dict[Tuple[Any, Any, Any], List[int]] = {}
+        for entry_idx, entry in enumerate(active_lines):
+            entry_info = entry[3] if len(entry) > 3 else None
+            if not isinstance(entry_info, dict):
+                continue
+            if (entry_info.get("molecule_name") or "") != mol_name:
+                continue
+            entry_key = (
+                entry_info.get("lam"),
+                entry_info.get("e_up"),
+                entry_info.get("a_stein"),
+            )
+            pending_by_key.setdefault(entry_key, []).append(entry_idx)
 
         for line, intensity, tau_val in line_data:
             frac = intensity / max_intensity
             if frac < threshold:
-                continue  # skipped by both panels - al_idx unchanged
+                continue  # skipped by both panels
 
-            # This line passed threshold → a vline may exist at active_lines[al_idx].
-            current_al_idx = al_idx
-            al_idx += 1
+            # Locate the vline entry for this exact transition, if one exists.
+            _matches = pending_by_key.get((line.lam, line.e_up, line.a_stein))
+            current_al_idx = _matches.pop(0) if _matches else None
 
             if any(
                 x is None
@@ -330,7 +343,7 @@ class PopulationDiagramPlot(BasePlot):
 
         for scatter_idx, (info, al_idx) in enumerate(value_data_list):
             info["_scatter_point_index"] = scatter_idx
-            if al_idx < len(active_lines):
+            if al_idx is not None and al_idx < len(active_lines):
                 # Update the existing vline entry with scatter artist + pop-diagram info
                 active_lines[al_idx][2] = sc
                 active_lines[al_idx][3].update(info)

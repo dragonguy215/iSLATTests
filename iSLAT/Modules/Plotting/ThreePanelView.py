@@ -694,7 +694,12 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
             )
             # Store scatter collection keyed by molecule name
             if sc is not None:
-                point_count = len([e for e in self.active_lines if e[2] is not None])
+                # Count only the points belonging to *this* collection; entries
+                # for other molecules may still hold stale scatter references.
+                point_count = len([
+                    e for e in self.active_lines
+                    if len(e) > 2 and e[2] is sc
+                ])
                 self._active_scatter_collections[molecule.name] = (sc, point_count)
 
     # ------------------------------------------------------------------
@@ -837,7 +842,13 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
 
             is_line_picked = (picked_artist is line or picked_artist is text_obj)
             point_idx = value.get('_scatter_point_index', None) if value else None
-            is_scatter_picked = (scatter_point_clicked is not None and point_idx == scatter_point_clicked)
+            # The scatter index is only meaningful within the picked collection;
+            # entries of other molecules may carry the same index.
+            is_scatter_picked = (
+                scatter_point_clicked is not None
+                and scatter is picked_artist
+                and point_idx == scatter_point_clicked
+            )
             is_picked = is_line_picked or is_scatter_picked
 
             if is_picked:
