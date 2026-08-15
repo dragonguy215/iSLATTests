@@ -10,6 +10,7 @@ Can be used standalone (notebook / script) or embedded in a GUI layout.
 """
 from __future__ import annotations
 
+import weakref
 from typing import (
     Optional, Tuple, List, Dict, Any, Sequence, Union, TYPE_CHECKING,
 )
@@ -150,8 +151,9 @@ class PopulationDiagramPlot(BasePlot):
         # When True, the plot is locked to all active/visible molecules in
         # _molecules_dict_ref and regenerates automatically when the set changes.
         self._all_molecules_mode: bool = False
-        self._molecules_dict_ref = None   # weak reference target (MoleculeDict)
+        self._molecules_dict_ref = None   # MoleculeDict driving all-molecules mode
         self._molecules_change_cb = None  # registered callback handle
+        self._comparison_change_cb = None  # registered callback handle
         # Cache for the last render_active_lines call so active scatter can
         # be restored after generate_plot clears the axes.
         self._active_lines_cache: Optional[Dict[str, Any]] = None
@@ -1626,38 +1628,78 @@ class PopulationDiagramPlot(BasePlot):
         self._molecules_dict_ref = molecules_dict
         # Automatically color by molecule (uses each mol's own color)
         self._color_mapping = {"prop": "molecule", "cmap": "tab10"}
-        # Register for active-molecule and comparison-molecule changes
-        cb = self._on_molecules_changed
-        self._molecules_change_cb = cb
+        # Register for active-molecule and comparison-molecule changes.
+        # The callbacks only hold weak references to this plot so a discarded
+        # diagram can be garbage collected even if nobody calls close().
+        self._molecules_change_cb = self._make_weak_callback(
+            molecules_dict,
+            "_on_molecules_changed",
+            "remove_active_molecule_change_callback",
+        )
+        self._comparison_change_cb = self._make_weak_callback(
+            molecules_dict,
+            "_on_comparison_changed",
+            "remove_comparison_molecule_change_callback",
+        )
         try:
-            molecules_dict.add_active_molecule_change_callback(cb)
+            molecules_dict.add_active_molecule_change_callback(
+                self._molecules_change_cb
+            )
         except Exception:
             pass
         try:
             molecules_dict.add_comparison_molecule_change_callback(
-                self._on_comparison_changed
+                self._comparison_change_cb
             )
         except Exception:
             pass
 
+    def _make_weak_callback(self, molecules_dict, method_name: str, remover_name: str):
+        """Build a callback that keeps only a weak reference to this plot."""
+        self_ref = weakref.ref(self)
+        dict_ref = weakref.ref(molecules_dict)
+
+        def _dispatch(*args, **kwargs):
+            plot = self_ref()
+            if plot is None:
+                # Plot was garbage collected - self-unregister from the dict.
+                owner = dict_ref()
+                if owner is not None:
+                    try:
+                        getattr(owner, remover_name)(_dispatch)
+                    except Exception:
+                        pass
+                return
+            getattr(plot, method_name)(*args, **kwargs)
+
+        return _dispatch
+
     def _exit_all_molecules_mode(self) -> None:
         """Unregister change callbacks and clear all-molecules mode."""
-        if self._all_molecules_mode and self._molecules_dict_ref is not None:
-            try:
-                self._molecules_dict_ref.remove_active_molecule_change_callback(
-                    self._molecules_change_cb
-                )
-            except Exception:
-                pass
-            try:
-                self._molecules_dict_ref.remove_comparison_molecule_change_callback(
-                    self._on_comparison_changed
-                )
-            except Exception:
-                pass
+        if self._molecules_dict_ref is not None:
+            if self._molecules_change_cb is not None:
+                try:
+                    self._molecules_dict_ref.remove_active_molecule_change_callback(
+                        self._molecules_change_cb
+                    )
+                except Exception:
+                    pass
+            if self._comparison_change_cb is not None:
+                try:
+                    self._molecules_dict_ref.remove_comparison_molecule_change_callback(
+                        self._comparison_change_cb
+                    )
+                except Exception:
+                    pass
         self._all_molecules_mode = False
         self._molecules_dict_ref = None
         self._molecules_change_cb = None
+        self._comparison_change_cb = None
+
+    def close(self) -> None:
+        """Leave all-molecules mode (dropping callbacks) and release the figure."""
+        self._exit_all_molecules_mode()
+        super().close()
 
     def _on_molecules_changed(self, old_molecule=None, new_molecule=None) -> None:
         """Callback fired when the active molecule changes in all-molecules mode."""

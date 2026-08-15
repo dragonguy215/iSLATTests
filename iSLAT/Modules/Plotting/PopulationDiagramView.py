@@ -76,10 +76,23 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
     def _get_molecules(self) -> Optional["MoleculeDict"]:
         return getattr(self._islat, "molecules_dict", None)
 
+    def _discard_plot(self) -> None:
+        """Release the current plot so its MoleculeDict callbacks are dropped."""
+        plot = self._plot
+        self._plot = None
+        if plot is None:
+            return
+        try:
+            plot.close()
+        except Exception:
+            pass
+
     def _build_plot(self) -> None:
         """Create a new :class:`PopulationDiagramPlot` and render it."""
         mol = self._get_active_molecule()
         mols = self._get_molecules()
+
+        self._discard_plot()
 
         # Destroy old figure if present
         if self._fig is not None:
@@ -138,6 +151,8 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
 
         mol = self._get_active_molecule()
         mols = self._get_molecules()
+
+        self._discard_plot()
 
         for ax in self._fig.axes:
             ax.clear()
@@ -271,6 +286,12 @@ class PopulationDiagramView(PlotView, PopulationDiagramContextMixin):
         bus = getattr(self._pm, 'control_bus', None)
         if bus is not None:
             bus.unregister_owner(self)
+
+        # Stop live all-molecules re-rendering while the view is hidden; the
+        # plot is rebuilt on the next activate().
+        if self._plot is not None and getattr(self._plot, "_all_molecules_mode", False):
+            self._plot._exit_all_molecules_mode()
+            self._needs_refresh = True
 
         if self._canvas is not None:
             try:

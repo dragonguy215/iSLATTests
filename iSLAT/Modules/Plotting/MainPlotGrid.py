@@ -211,7 +211,7 @@ class MainPlotGrid(CompositePlot):
         self.child_panels.clear()
         self.spectrum_panel = None
         self.inspection_panel = None
-        self.pop_diagram_panel = None
+        self._close_pop_diagram_panel()
         self._pdp_mode = None
 
         (self.ax_spectrum,
@@ -489,6 +489,18 @@ class MainPlotGrid(CompositePlot):
         self.inspection_panel.generate_plot()
 
     # ------------------------------------------------------------------
+    def _close_pop_diagram_panel(self) -> None:
+        """Discard the current population panel, dropping its MoleculeDict callbacks."""
+        panel = self.pop_diagram_panel
+        self.pop_diagram_panel = None
+        if panel is None:
+            return
+        try:
+            panel.close()
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
     def _render_population_panel(self) -> None:
         ax = self.ax_popdiagram
 
@@ -518,6 +530,7 @@ class MainPlotGrid(CompositePlot):
         # since PopulationDiagramPlot enforces mutual exclusivity at construction.
         # Otherwise reuse the existing instance by mutating its attributes.
         if self.pop_diagram_panel is None or self._pdp_mode != new_mode:
+            self._close_pop_diagram_panel()
             self.pop_diagram_panel = PopulationDiagramPlot(
                 molecule=pdp_molecule,
                 molecules=pdp_molecules,
@@ -1006,6 +1019,7 @@ class MainPlotGrid(CompositePlot):
 
         try:
             if self.pop_diagram_panel is None or self._pdp_mode != "molecule":
+                self._close_pop_diagram_panel()
                 self.pop_diagram_panel = PopulationDiagramPlot(
                     molecule=molecule,
                     ax=ax,
