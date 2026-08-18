@@ -1911,6 +1911,7 @@ class Intensity(WavelengthRangeMixin):
             f"Wavelength (μm) = {wav_s}\n"
             f"Einstein-A coeff. (1/s) = {a_s}\n"
             f"Upper level energy (K) = {e_s}\n"
+            f"Line flux (erg/s/cm2) = {intensity:.3g}\n"
             f"Opacity = {tau_s}\n"
             f"Data flux in range (erg/s/cm2) = {dflux_s}\n"
             f"Model flux in range (erg/s/cm2) = {mflux_s}\n"
