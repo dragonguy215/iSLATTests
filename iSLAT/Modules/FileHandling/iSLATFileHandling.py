@@ -1251,7 +1251,12 @@ def generate_all_csv(molecules_data: 'MoleculeDict', output_dir=models_folder_pa
     
     print(f'All models exported to {output_dir}')
 
-def generate_csv(molecules_data: 'MoleculeDict', mol_name: str, data_field, output_dir=models_folder_path, wave_data=None):
+def generate_csv(molecules_data: 'MoleculeDict', 
+                 mol_name: str, 
+                 data_field, 
+                 output_dir=models_folder_path, 
+                 wave_data=None,
+                 save_tau: bool = True):
     """
     Generate CSV file for a specific molecule or summed spectrum.
     
@@ -1334,21 +1339,35 @@ def generate_csv(molecules_data: 'MoleculeDict', mol_name: str, data_field, outp
             len(lambdas) != len(fluxes)):
             print(f"Invalid data for {mol_name}")
             return
+        if save_tau:
+            taus = molecule.get_tau(
+                wavelength_array=wave_data, 
+                return_wavelengths=False, 
+                interpolate_to_input=False,
+            )
+            if taus is None or len(taus) == 0 or len(taus) != len(lambdas):
+                print(f"Invalid tau data for {mol_name}")
+                return
 
         try:
             # Write spectrum CSV
             csv_file_path = os.path.join(output_dir, f"{mol_name}_spec_output.csv")
             with open(csv_file_path, "w", newline="") as csv_file:
                 csv_writer = csv.writer(csv_file)
-                csv_writer.writerow(["wave", "flux"])
-                for wave, flux in zip(lambdas, fluxes):
-                    csv_writer.writerow([wave, flux])
+                if save_tau:
+                    csv_writer.writerow(["wave", "flux", "tau"])
+                    for wave, flux, tau in zip(lambdas, fluxes, taus):
+                        csv_writer.writerow([wave, flux, tau])
+                else:
+                    csv_writer.writerow(["wave", "flux"])
+                    for wave, flux in zip(lambdas, fluxes):
+                        csv_writer.writerow([wave, flux])
             
             # Export line parameters if available
             if hasattr(molecule, 'intensity') and molecule.intensity is not None:
                 if hasattr(molecule.intensity, 'get_table'):
                     try:
-                        line_params = molecule.intensity.get_table
+                        line_params = molecule.intensity.build_table()
                         if hasattr(line_params, 'to_csv'):
                             line_params_path = os.path.join(output_dir, f"{mol_name}_line_params.csv")
                             line_params.to_csv(line_params_path, index=False)
