@@ -1,7 +1,7 @@
-"""BulkApplyWindow — popout window for bulk-applying properties to molecules.
+"""BulkApplyWindow - popout window for bulk-applying properties to molecules.
 
 Lets the user set one or more molecule properties (temperature, radius, column
-density, …) on many molecules at once, optionally restricting the change to only
+density, ...) on many molecules at once, optionally restricting the change to only
 the molecules that are currently visible in the control panel.
 
 Usage
@@ -10,11 +10,11 @@ Usage
     BulkApplyPropertiesWindow.open(parent_widget, islat_instance, control_panel, theme)
 """
 from __future__ import annotations
-
 import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import messagebox
 from typing import Any, Dict, List, Optional, Tuple
+from iSLAT.Modules.DataProcessing.InstrumentalProfiles import PROFILE_DISPLAY_NAMES
 
 # Ordered mapping of display label -> molecule attribute. Each property is a
 # numeric physical parameter accepted by ``MoleculeDict.bulk_update_parameters``.
@@ -29,15 +29,24 @@ BULK_PROPERTIES: List[Tuple[str, str]] = [
     ("RV Shift", "rv_shift"),
 ]
 
-class BulkApplyPropertiesWindow:
-    """Singleton popout window that bulk-applies properties to molecules."""
+# Sentinel shown in choice drop-downs meaning "do not change this property".
+UNCHANGED_CHOICE = "(unchanged)"
 
+# Ordered mapping of display label -> (molecule attribute, {display -> value}).
+# These are non-numeric properties selected from a drop-down.
+BULK_CHOICE_PROPERTIES: List[Tuple[str, str, Dict[str, str]]] = [
+    (
+        "Inst. Profile",
+        "instrumental_profile_key",
+        {label: key for key, label in PROFILE_DISPLAY_NAMES.items()},
+    ),
+]
+
+class BulkApplyPropertiesWindow:
+    """Popout window that bulk-applies properties to molecules."""
     # Class-level registry: one window per (islat instance id)
     _instances: Dict[int, "BulkApplyPropertiesWindow"] = {}
-
-    # ------------------------------------------------------------------
     # Public factory
-    # ------------------------------------------------------------------
     @classmethod
     def open(
         cls,
@@ -63,9 +72,6 @@ class BulkApplyPropertiesWindow:
         cls._instances[key] = instance
         return instance
 
-    # ------------------------------------------------------------------
-    # Constructor
-    # ------------------------------------------------------------------
     def __init__(
         self,
         parent: tk.Widget,
@@ -84,6 +90,10 @@ class BulkApplyPropertiesWindow:
 
         self._entry_vars: Dict[str, tk.StringVar] = {
             attr: tk.StringVar() for _label, attr in BULK_PROPERTIES
+        }
+        self._choice_vars: Dict[str, tk.StringVar] = {
+            attr: tk.StringVar(value=UNCHANGED_CHOICE)
+            for _label, attr, _options in BULK_CHOICE_PROPERTIES
         }
         self._visible_only_var = tk.BooleanVar(value=False)
 
@@ -106,9 +116,12 @@ class BulkApplyPropertiesWindow:
 
         ttk.Label(
             content,
-            text="Leave a field blank to keep that property unchanged.",
+            text=f"Leave a field blank (or set to {UNCHANGED_CHOICE})\n"
+            "to keep that property unchanged.",
+            justify="left",
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
+        row = 0
         for row, (label, attr) in enumerate(BULK_PROPERTIES, start=1):
             ttk.Label(content, text=f"{label}:").grid(
                 row=row, column=0, sticky="w", padx=(0, 6), pady=2
@@ -117,12 +130,25 @@ class BulkApplyPropertiesWindow:
                 content, textvariable=self._entry_vars[attr], width=18
             ).grid(row=row, column=1, sticky="ew", pady=2)
 
+        for label, attr, options in BULK_CHOICE_PROPERTIES:
+            row += 1
+            ttk.Label(content, text=f"{label}:").grid(
+                row=row, column=0, sticky="w", padx=(0, 6), pady=2
+            )
+            ttk.Combobox(
+                content,
+                textvariable=self._choice_vars[attr],
+                values=[UNCHANGED_CHOICE, *options.keys()],
+                state="readonly",
+                width=16,
+            ).grid(row=row, column=1, sticky="ew", pady=2)
+
         ttk.Checkbutton(
             content,
             text="Apply to visible molecules only",
             variable=self._visible_only_var,
         ).grid(
-            row=len(BULK_PROPERTIES) + 1,
+            row=row + 1,
             column=0,
             columnspan=2,
             sticky="w",
@@ -130,9 +156,7 @@ class BulkApplyPropertiesWindow:
         )
 
         btn_frame = ttk.Frame(content)
-        btn_frame.grid(
-            row=len(BULK_PROPERTIES) + 2, column=0, columnspan=2, sticky="e"
-        )
+        btn_frame.grid(row=row + 2, column=0, columnspan=2, sticky="e")
         ttk.Button(btn_frame, text="Apply", command=self._on_apply).pack(
             side="right", padx=(4, 0)
         )
@@ -153,6 +177,11 @@ class BulkApplyPropertiesWindow:
 
         raw_values = {attr: var.get() for attr, var in self._entry_vars.items()}
         param_dict, invalid = build_parameter_dict(raw_values)
+        param_dict.update(
+            build_choice_dict(
+                {attr: var.get() for attr, var in self._choice_vars.items()}
+            )
+        )
 
         if invalid:
             invalid_labels = [
@@ -244,6 +273,23 @@ def build_parameter_dict(
         except (TypeError, ValueError):
             invalid.append(attr)
     return param_dict, invalid
+
+def build_choice_dict(raw_values: Dict[str, str]) -> Dict[str, str]:
+    """Convert drop-down selections into a parameter dict.
+
+    Selections equal to :data:`UNCHANGED_CHOICE` (or blank) are skipped; the
+    remaining display labels are mapped back to their stored attribute values.
+    """
+    option_maps = {attr: options for _label, attr, options in BULK_CHOICE_PROPERTIES}
+    param_dict: Dict[str, str] = {}
+    for attr, raw in raw_values.items():
+        text = (raw or "").strip()
+        if not text or text == UNCHANGED_CHOICE:
+            continue
+        value = option_maps.get(attr, {}).get(text)
+        if value is not None:
+            param_dict[attr] = value
+    return param_dict
 
 def resolve_target_names(mol_dict: Any, visible_only: bool) -> List[str]:
     """Return the molecule names to update.

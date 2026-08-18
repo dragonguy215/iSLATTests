@@ -894,7 +894,8 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
         
         # Properties with special converters - default to float for all others
         special_converters = {
-            'is_visible': lambda x: x.lower() in ('true', '1', 'yes', 'on') if isinstance(x, str) else bool(x)
+            'is_visible': lambda x: x.lower() in ('true', '1', 'yes', 'on') if isinstance(x, str) else bool(x),
+            'instrumental_profile_key': lambda x: str(x or 'constant'),
         }
         
         # Properties with special setters

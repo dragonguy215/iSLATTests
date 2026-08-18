@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Unit tests for the BulkApplyPropertiesWindow helper logic."""
 from iSLAT.Modules.GUI.Widgets.BulkApplyWindow import (
+    UNCHANGED_CHOICE,
+    build_choice_dict,
     build_parameter_dict,
     resolve_target_names,
 )
@@ -32,6 +34,21 @@ def test_build_parameter_dict_empty():
     params, invalid = build_parameter_dict({"temp": "", "radius": ""})
     assert params == {}
     assert invalid == []
+
+def test_build_choice_dict_skips_unchanged():
+    assert build_choice_dict({"instrumental_profile_key": UNCHANGED_CHOICE}) == {}
+    assert build_choice_dict({"instrumental_profile_key": ""}) == {}
+
+def test_build_choice_dict_maps_display_label_to_key():
+    from iSLAT.Modules.DataProcessing.InstrumentalProfiles import PROFILE_DISPLAY_NAMES
+
+    label = PROFILE_DISPLAY_NAMES["miri_mrs"]
+    assert build_choice_dict({"instrumental_profile_key": label}) == {
+        "instrumental_profile_key": "miri_mrs"
+    }
+
+def test_build_choice_dict_ignores_unknown_label():
+    assert build_choice_dict({"instrumental_profile_key": "Bogus"}) == {}
 
 def _make_dict():
     return {
