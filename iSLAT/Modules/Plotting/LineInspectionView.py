@@ -319,6 +319,7 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
 
         data_flux = None
         model_flux = None
+        opacity_in_range = None
         sel = self._current_selection
         if sel is not None:
             xmin, xmax = sel
@@ -333,6 +334,11 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
                 mol_wave, mol_flux_arr = active_mol.get_flux(return_wavelengths=True)
                 model_flux, _ = flux_integral(
                     lam=mol_wave, flux=mol_flux_arr,
+                    lam_min=xmin, lam_max=xmax, err=None,
+                )
+                _, mol_opacity_arr = active_mol.get_tau(return_wavelengths=True)
+                opacity_in_range, _ = flux_integral(
+                    lam=mol_wave, flux=mol_opacity_arr,
                     lam_min=xmin, lam_max=xmax, err=None,
                 )
 
@@ -354,6 +360,7 @@ class LineInspectionView(SpectrumPanelView, LineInspectionContextMixin):
             tau=value.get('tau'),
             data_flux_in_range=data_flux,
             model_flux_in_range=model_flux,
+            opacity_in_range=opacity_in_range,
             molecule=getattr(islat, 'active_molecule', None),
         )
         info_str = _LIP.format_line_info(info)

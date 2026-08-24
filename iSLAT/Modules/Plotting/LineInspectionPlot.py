@@ -332,6 +332,7 @@ class LineInspectionPlot(SpectrumPanel):
         tau: Optional[float] = None,
         data_flux_in_range: Optional[float] = None,
         model_flux_in_range: Optional[float] = None,
+        opacity_in_range: Optional[float] = None,
         molecule: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Build a structured information dict for a single molecular line.
@@ -352,6 +353,8 @@ class LineInspectionPlot(SpectrumPanel):
             (erg s^-1 cm^-2).
         model_flux_in_range : float, optional
             Model flux integral in the selection range (erg s^-1 cm^-2).
+        opacity_in_range: float, optional
+            Model optical depth in the selection range.
         molecule : Molecule, optional
             Active molecule.  When provided the instrumental, Keplerian,
             and convolved FWHM at the line wavelength are included in the
@@ -371,6 +374,7 @@ class LineInspectionPlot(SpectrumPanel):
             line, intensity, tau,
             data_flux_in_range=data_flux_in_range,
             model_flux_in_range=model_flux_in_range,
+            opacity_in_range=opacity_in_range,
             molecule=molecule,
         )
 

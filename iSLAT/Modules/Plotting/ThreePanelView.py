@@ -1070,6 +1070,11 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
                     lam_min=xmin, lam_max=xmax,
                     err=None,
                 )
+                _, mol_opacity_arr = active_mol.get_tau(return_wavelengths=True)
+                opacity_in_range, _ = flux_integral(
+                    lam=molecule_wave, flux=mol_opacity_arr,
+                    lam_min=xmin, lam_max=xmax, err=None,
+                )
 
         # --- build line info dict + formatted string -------------------
         if 'formatted_text' in value:
@@ -1090,6 +1095,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
                 tau=value.get('tau'),
                 data_flux_in_range=data_flux,
                 model_flux_in_range=model_flux,
+                opacity_in_range=opacity_in_range,
                 molecule=getattr(islat, 'active_molecule', None),
             )
         else:
@@ -1110,6 +1116,7 @@ class ThreePanelView(ToggleMixin, PlotView, PopulationDiagramContextMixin, LineI
                 tau=value.get('tau'),
                 data_flux_in_range=data_flux,
                 model_flux_in_range=model_flux,
+                opacity_in_range=opacity_in_range,
                 molecule=getattr(islat, 'active_molecule', None),
             )
 

@@ -111,7 +111,7 @@ class Intensity(WavelengthRangeMixin):
     
     # Weak-blend early-exit threshold in Gaussian widths
     # At 4*sigma, overlap contribution is exp(-16) ~ 1.1e-7 -- negligible
-    _WEAK_BLEND_THRESHOLD = 4.0
+    _WEAK_BLEND_THRESHOLD = 0.01
     
     @staticmethod
     def _bb(nu: np.ndarray, T: np.ndarray) -> np.ndarray:
@@ -1803,7 +1803,6 @@ class Intensity(WavelengthRangeMixin):
     # ------------------------------------------------------------------
     # Per-line information helpers  (used by GUI data-field display)
     # ------------------------------------------------------------------
-
     @staticmethod
     def get_line_info(
         line: Any,
@@ -1811,6 +1810,7 @@ class Intensity(WavelengthRangeMixin):
         tau: Optional[float] = None,
         data_flux_in_range: Optional[float] = None,
         model_flux_in_range: Optional[float] = None,
+        opacity_in_range: Optional[float] = None,
         molecule: Optional[Any] = None,
     ) -> dict:
         """Build a structured information dict for a single molecular line.
@@ -1890,6 +1890,7 @@ class Intensity(WavelengthRangeMixin):
         tau_s   = f"{tau_val:.3f}"   if isinstance(tau_val, (int, float))         else str(tau_val)
         dflux_s = f"{data_flux_in_range:.3e}"  if data_flux_in_range  is not None else "N/A"
         mflux_s = f"{model_flux_in_range:.3e}" if model_flux_in_range is not None else "N/A"
+        moptical_s = f"{opacity_in_range:.3e}" if opacity_in_range is not None else "N/A"
 
         fwhm_block = ""
         if fwhm_inst is not None:
@@ -1911,8 +1912,9 @@ class Intensity(WavelengthRangeMixin):
             f"Wavelength (μm) = {wav_s}\n"
             f"Einstein-A coeff. (1/s) = {a_s}\n"
             f"Upper level energy (K) = {e_s}\n"
-            f"Line flux (erg/s/cm2) = {intensity:.3g}\n"
-            f"Opacity = {tau_s}\n"
+            f"Line center flux (erg/s/cm2) = {intensity:.3g}\n"
+            f"Line center opacity = {tau_s}\n"
+            f"Model opacity in range = {moptical_s}\n"
             f"Data flux in range (erg/s/cm2) = {dflux_s}\n"
             f"Model flux in range (erg/s/cm2) = {mflux_s}\n"
             + fwhm_block

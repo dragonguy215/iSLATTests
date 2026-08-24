@@ -32,6 +32,12 @@ BULK_PROPERTIES: List[Tuple[str, str]] = [
 # Sentinel shown in choice drop-downs meaning "do not change this property".
 UNCHANGED_CHOICE = "(unchanged)"
 
+# How an entered value combines with each molecule's current value.
+MODE_SET = "Set"
+MODE_ADD = "Add"
+MODE_SCALE = "Scale"
+BULK_MODES: List[str] = [MODE_SET, MODE_ADD, MODE_SCALE]
+
 # Ordered mapping of display label -> (molecule attribute, {display -> value}).
 # These are non-numeric properties selected from a drop-down.
 BULK_CHOICE_PROPERTIES: List[Tuple[str, str, Dict[str, str]]] = [
@@ -91,6 +97,9 @@ class BulkApplyPropertiesWindow:
         self._entry_vars: Dict[str, tk.StringVar] = {
             attr: tk.StringVar() for _label, attr in BULK_PROPERTIES
         }
+        self._mode_vars: Dict[str, tk.StringVar] = {
+            attr: tk.StringVar(value=MODE_SET) for _label, attr in BULK_PROPERTIES
+        }
         self._choice_vars: Dict[str, tk.StringVar] = {
             attr: tk.StringVar(value=UNCHANGED_CHOICE)
             for _label, attr, _options in BULK_CHOICE_PROPERTIES
@@ -117,9 +126,11 @@ class BulkApplyPropertiesWindow:
         ttk.Label(
             content,
             text=f"Leave a field blank (or set to {UNCHANGED_CHOICE})\n"
-            "to keep that property unchanged.",
+            "to keep that property unchanged.\n"
+            f"'{MODE_ADD}' adds the value to each molecule's current value;\n"
+            f"'{MODE_SCALE}' multiplies the current value by it.",
             justify="left",
-        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
         row = 0
         for row, (label, attr) in enumerate(BULK_PROPERTIES, start=1):
@@ -129,6 +140,13 @@ class BulkApplyPropertiesWindow:
             ttk.Entry(
                 content, textvariable=self._entry_vars[attr], width=18
             ).grid(row=row, column=1, sticky="ew", pady=2)
+            ttk.Combobox(
+                content,
+                textvariable=self._mode_vars[attr],
+                values=BULK_MODES,
+                state="readonly",
+                width=7,
+            ).grid(row=row, column=2, sticky="ew", padx=(6, 0), pady=2)
 
         for label, attr, options in BULK_CHOICE_PROPERTIES:
             row += 1
@@ -150,13 +168,13 @@ class BulkApplyPropertiesWindow:
         ).grid(
             row=row + 1,
             column=0,
-            columnspan=2,
+            columnspan=3,
             sticky="w",
             pady=(8, 8),
         )
 
         btn_frame = ttk.Frame(content)
-        btn_frame.grid(row=row + 2, column=0, columnspan=2, sticky="e")
+        btn_frame.grid(row=row + 2, column=0, columnspan=3, sticky="e")
         ttk.Button(btn_frame, text="Apply", command=self._on_apply).pack(
             side="right", padx=(4, 0)
         )
@@ -177,10 +195,9 @@ class BulkApplyPropertiesWindow:
 
         raw_values = {attr: var.get() for attr, var in self._entry_vars.items()}
         param_dict, invalid = build_parameter_dict(raw_values)
-        param_dict.update(
-            build_choice_dict(
-                {attr: var.get() for attr, var in self._choice_vars.items()}
-            )
+        modes = {attr: var.get() for attr, var in self._mode_vars.items()}
+        choice_dict = build_choice_dict(
+            {attr: var.get() for attr, var in self._choice_vars.items()}
         )
 
         if invalid:
@@ -194,7 +211,7 @@ class BulkApplyPropertiesWindow:
             )
             return
 
-        if not param_dict:
+        if not param_dict and not choice_dict:
             messagebox.showinfo(
                 "Nothing to apply",
                 "Enter a value for at least one property.",
@@ -216,7 +233,9 @@ class BulkApplyPropertiesWindow:
             return
 
         try:
-            mol_dict.bulk_update_parameters(param_dict, molecules=target_names)
+            apply_bulk_updates(
+                mol_dict, target_names, param_dict, modes, choice_dict
+            )
         except Exception as exc:
             messagebox.showerror(
                 "Error", f"Failed to apply properties:\n{exc}", parent=self._win
@@ -290,6 +309,69 @@ def build_choice_dict(raw_values: Dict[str, str]) -> Dict[str, str]:
         if value is not None:
             param_dict[attr] = value
     return param_dict
+
+def apply_mode(current: Any, value: float, mode: str) -> Optional[float]:
+    """Combine *value* with a molecule's *current* value according to *mode*.
+
+    Returns ``None`` when a relative mode is requested but the current value is
+    not numeric, meaning the property should be left untouched.
+    """
+    if mode == MODE_SET:
+        return value
+    try:
+        current_value = float(current)
+    except (TypeError, ValueError):
+        return None
+    if mode == MODE_ADD:
+        return current_value + value
+    if mode == MODE_SCALE:
+        return current_value * value
+    return value
+
+def resolve_molecule_parameters(
+    molecule: Any, param_dict: Dict[str, float], modes: Dict[str, str]
+) -> Dict[str, float]:
+    """Resolve the final per-molecule values for *param_dict* given *modes*."""
+    resolved: Dict[str, float] = {}
+    for attr, value in param_dict.items():
+        mode = modes.get(attr, MODE_SET)
+        new_value = apply_mode(getattr(molecule, attr, None), value, mode)
+        if new_value is not None:
+            resolved[attr] = new_value
+    return resolved
+
+def apply_bulk_updates(
+    mol_dict: Any,
+    target_names: List[str],
+    param_dict: Dict[str, float],
+    modes: Dict[str, str],
+    choice_dict: Optional[Dict[str, str]] = None,
+) -> None:
+    """Apply numeric and choice properties to *target_names* in *mol_dict*.
+
+    Properties in ``Set`` mode share a single bulk call; relative modes
+    (``Add``/``Scale``) are resolved per molecule against its current value.
+    """
+    choice_dict = choice_dict or {}
+    absolute = {
+        attr: value
+        for attr, value in param_dict.items()
+        if modes.get(attr, MODE_SET) == MODE_SET
+    }
+    relative = {attr: value for attr, value in param_dict.items() if attr not in absolute}
+
+    shared = {**absolute, **choice_dict}
+    if shared:
+        mol_dict.bulk_update_parameters(shared, molecules=target_names)
+
+    if not relative:
+        return
+
+    for name in target_names:
+        molecule = mol_dict[name]
+        resolved = resolve_molecule_parameters(molecule, relative, modes)
+        if resolved:
+            mol_dict.bulk_update_parameters(resolved, molecules=[name])
 
 def resolve_target_names(mol_dict: Any, visible_only: bool) -> List[str]:
     """Return the molecule names to update.
