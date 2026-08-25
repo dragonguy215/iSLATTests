@@ -1547,7 +1547,10 @@ class ControlPanel(ttk.Frame):
                 print(f"ControlPanel: {msg}")
             return
         from iSLAT.Modules.GUI.Widgets.LineListFilterWindow import LineListFilterWindow
-        LineListFilterWindow(self, mol_obj, self.data_field, islat=self.islat)
+        LineListFilterWindow.open(
+            self, mol_obj, self.data_field, islat=self.islat,
+            theme=getattr(getattr(self.islat, "GUI", None), "theme", None),
+        )
 
     def _change_line_list_action(self, mol_name: str) -> None:
         """Open a file dialog to pick a new .par line-list file for *mol_name*."""

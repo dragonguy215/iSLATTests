@@ -5,6 +5,8 @@ Unit tests for iSLAT.Modules.DataProcessing.LineListMaker.
 Tests the chainable builder API for filtering and exporting line lists.
 """
 
+import json
+
 import pytest
 import numpy as np
 import warnings
@@ -14,6 +16,10 @@ import pandas as pd
 
 from iSLAT.Modules.DataTypes.MoleculeLineList import MoleculeLineList
 from iSLAT.Modules.DataProcessing.LineListMaker import LineListMaker, _ensure_dataframe
+from iSLAT.Modules.DataProcessing.LineFilterExpression import (
+    Condition,
+    ConditionError,
+)
 
 
 # ============================================================================
@@ -474,3 +480,227 @@ class TestChainIntegration:
         assert 'filter_wavelength' in summary
         assert 'filter_eup' in summary
         assert 'filter_astein' in summary
+
+
+# ============================================================================
+# filter_expression / filter_any / filter_all
+# ============================================================================
+
+class TestFilterExpression:
+    """Boolean AND/OR filtering through the two-level expression model."""
+
+    def test_user_motivating_example(self, maker):
+        """Two wavelength ranges OR an E_up cut - the literal user request."""
+        maker.filter_any(
+            Condition('range', field='lam', op='between',
+                      min_val=6.0, max_val=7.0),
+            Condition('range', field='lam', op='between',
+                      min_val=12.0, max_val=13.0),
+            Condition('range', field='e_up', op='ge', min_val=5000.0))
+        assert sorted(round(v, 3) for v in maker.df['lam']) == [6.5, 12.407]
+
+    def test_dict_form_accepted(self, maker):
+        maker.filter_expression({
+            'join': 'AND',
+            'groups': [{'join': 'OR', 'conditions': [
+                {'kind': 'range', 'field': 'lam', 'op': 'between',
+                 'min_val': 6.0, 'max_val': 7.0},
+                {'kind': 'range', 'field': 'lam', 'op': 'between',
+                 'min_val': 12.0, 'max_val': 13.0},
+                {'kind': 'range', 'field': 'e_up', 'op': 'ge',
+                 'min_val': 5000.0}]}]})
+        assert sorted(round(v, 3) for v in maker.df['lam']) == [6.5, 12.407]
+
+    def test_two_groups_and(self, maker):
+        """(A OR B) AND e_up <= 5000."""
+        maker.filter_expression({'join': 'AND', 'groups': [
+            {'join': 'OR', 'conditions': [
+                {'kind': 'range', 'field': 'lam', 'op': 'between',
+                 'min_val': 6.0, 'max_val': 7.0},
+                {'kind': 'range', 'field': 'lam', 'op': 'between',
+                 'min_val': 12.0, 'max_val': 13.0}]},
+            {'join': 'AND', 'conditions': [
+                {'kind': 'range', 'field': 'e_up', 'op': 'le',
+                 'max_val': 5000.0}]}]})
+        assert sorted(round(v, 3) for v in maker.df['lam']) == [12.407]
+
+    def test_filter_all_is_and(self, maker):
+        maker.filter_all(
+            Condition('range', field='lam', op='ge', min_val=10.0),
+            Condition('range', field='e_up', op='le', max_val=5000.0))
+        assert sorted(round(v, 3) for v in maker.df['lam']) == \
+            [12.407, 14.95, 17.221, 22.5]
+
+    def test_records_exactly_one_entry(self, maker):
+        maker.filter_any(Condition('range', field='lam', op='ge', min_val=10.0))
+        assert len(maker.filters) == 1
+        assert maker.filters[0][0] == 'filter_expression'
+
+    def test_recorded_kwargs_are_plain_json(self, maker):
+        maker.filter_any(Condition('range', field='lam', op='ge', min_val=10.0))
+        json.dumps(maker.filters[0][1])  # must not raise
+
+    def test_narrows_current_frame(self, maker):
+        """An expression composes as an implicit AND with earlier filters."""
+        maker.filter_wavelength(min_val=13.0)
+        maker.filter_any(
+            Condition('range', field='lam', op='between',
+                      min_val=6.0, max_val=7.0),
+            Condition('range', field='lam', op='between',
+                      min_val=12.0, max_val=15.0))
+        assert sorted(round(v, 3) for v in maker.df['lam']) == [14.95]
+
+    def test_returns_self(self, maker):
+        result = maker.filter_any(
+            Condition('range', field='lam', op='ge', min_val=1.0))
+        assert result is maker
+
+    def test_empty_result_is_legal(self, maker):
+        maker.filter_all(
+            Condition('range', field='lam', op='between',
+                      min_val=6.0, max_val=7.0),
+            Condition('range', field='lam', op='between',
+                      min_val=12.0, max_val=13.0))
+        assert len(maker) == 0
+
+    def test_raise_records_nothing(self, maker):
+        """A bad condition must leave the log and the frame untouched."""
+        with pytest.raises(ConditionError):
+            maker.filter_any(
+                Condition('range', field='nope', op='ge', min_val=1.0))
+        assert maker.filters == []
+        assert len(maker) == 5
+
+    def test_no_duplicate_rows_in_export(self, maker, tmp_path):
+        maker.filter_any(
+            Condition('range', field='lam', op='between',
+                      min_val=6.0, max_val=15.0),
+            Condition('range', field='lam', op='between',
+                      min_val=12.0, max_val=23.0))
+        out = maker.to_csv(tmp_path / 'or.csv')
+        written = pd.read_csv(out)
+        assert len(written) == len(maker)
+        assert len(set(written['lam'])) == len(written)
+
+
+class TestExpressionLogLifecycle:
+    """An expression is one ordinary entry in the flat filter log."""
+
+    def test_survives_replay(self, maker):
+        maker.filter_wavelength(min_val=5.0)
+        maker.filter_any(
+            Condition('range', field='lam', op='between',
+                      min_val=6.0, max_val=7.0),
+            Condition('range', field='lam', op='between',
+                      min_val=12.0, max_val=13.0))
+        maker.remove_filter(0)
+        assert [n for n, _ in maker.filters] == ['filter_expression']
+        assert sorted(round(v, 3) for v in maker.df['lam']) == [6.5, 12.407]
+
+    def test_pop_filter_removes_expression(self, maker):
+        maker.filter_any(Condition('range', field='lam', op='ge', min_val=20.0))
+        maker.pop_filter()
+        assert len(maker) == 5
+        assert maker.filters == []
+
+    def test_reset_clears_expression(self, maker):
+        maker.filter_any(Condition('range', field='lam', op='ge', min_val=20.0))
+        maker.reset()
+        assert maker.filters == []
+        assert maker.expression is None
+
+    def test_copy_is_independent(self, maker):
+        clone = maker.copy()
+        clone.filter_any(Condition('range', field='lam', op='ge', min_val=20.0))
+        assert len(maker) == 5
+        assert maker.filters == []
+        assert len(clone) == 1
+
+    def test_expression_property_returns_last(self, maker):
+        maker.filter_any(Condition('range', field='lam', op='ge', min_val=10.0))
+        expr = maker.expression
+        assert expr is not None
+        assert expr.groups[0].join == 'OR'
+        assert expr.groups[0].conditions[0].field == 'lam'
+
+    def test_summary_renders_expression(self, maker):
+        maker.filter_any(
+            Condition('range', field='lam', op='between',
+                      min_val=6.0, max_val=7.0),
+            Condition('range', field='lam', op='between',
+                      min_val=12.0, max_val=13.0))
+        summary = maker.summary()
+        assert 'filter_expression' in summary
+        assert 'OR' in summary
+        assert "{'kind':" not in summary
+
+    def test_original_df_is_the_unfiltered_snapshot(self, maker):
+        maker.filter_wavelength(min_val=20.0)
+        assert len(maker) == 1
+        assert len(maker.original_df) == 5
+
+
+class TestFilterSpeciesReplay:
+    """filter_species records a kwarg but takes var-positional args."""
+
+    def test_remove_filter_after_filter_species(self):
+        df = pd.DataFrame({
+            'species': ['H2O', 'H2O', 'CO'],
+            'lam': [1.0, 2.0, 3.0],
+        })
+        maker = LineListMaker(df)
+        maker.filter_range('lam', min_val=0)
+        maker.filter_species('H2O')
+        maker.remove_filter(0)  # must not raise TypeError
+        assert [n for n, _ in maker.filters] == ['filter_species']
+        assert len(maker) == 2
+
+
+class TestReplayIsAtomic:
+    """A failed replay must never leave an empty log over unfiltered data."""
+
+    def test_failed_replay_preserves_filters_and_rows(self):
+        base = pd.DataFrame([
+            {'lam': 1.0, 'e_up': 100.0, 'flux': 5.0},
+            {'lam': 2.0, 'e_up': 200.0, 'flux': 7.0},
+        ])
+        maker = LineListMaker(base, species='H2O')
+        maker.filter_any(Condition('range', field='flux', op='ge', min_val=6.0))
+        maker.filter_range('e_up', min_val=0.0)
+        assert len(maker) == 1
+
+        # The baseline loses the column the recorded expression needs.
+        maker._df_original = maker._df_original.drop(columns=['flux'])
+        with pytest.raises(ConditionError):
+            maker.pop_filter()
+
+        # Had this wiped, a caller swallowing the error would export
+        # every line believing the list was filtered.
+        assert [n for n, _ in maker.filters] == ['filter_expression', 'filter_range']
+        assert len(maker) == 1
+
+    def test_failed_remove_filter_preserves_state(self):
+        base = pd.DataFrame([
+            {'lam': 1.0, 'e_up': 100.0, 'flux': 5.0},
+            {'lam': 2.0, 'e_up': 200.0, 'flux': 7.0},
+        ])
+        maker = LineListMaker(base, species='H2O')
+        maker.filter_range('e_up', min_val=0.0)
+        maker.filter_any(Condition('range', field='flux', op='ge', min_val=6.0))
+        maker._df_original = maker._df_original.drop(columns=['flux'])
+        with pytest.raises(ConditionError):
+            maker.remove_filter(0)
+        assert len(maker.filters) == 2
+        assert len(maker) == 1
+
+    def test_successful_removal_still_replays(self):
+        base = pd.DataFrame([
+            {'lam': 1.0, 'e_up': 100.0, 'flux': 5.0},
+            {'lam': 2.0, 'e_up': 200.0, 'flux': 7.0},
+        ])
+        maker = LineListMaker(base, species='H2O')
+        maker.filter_any(Condition('range', field='flux', op='ge', min_val=6.0))
+        maker.filter_range('e_up', min_val=0.0)
+        maker.remove_filter(1)
+        assert [n for n, _ in maker.filters] == ['filter_expression']
+        assert len(maker) == 1

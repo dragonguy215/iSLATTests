@@ -8,7 +8,7 @@ DataFrame returned by ``MoleculeLineList.get_pandas_table()``.
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -44,18 +44,32 @@ class LineListViewWindow(tk.Toplevel):
     ----------
     parent : tk.Widget
         Parent window (typically the ControlPanel or root).
-    mol_obj : Molecule
-        The molecule whose ``line_list`` will be displayed.
+    mol_obj : Molecule, optional
+        The molecule whose ``line_list`` will be displayed.  May be ``None``
+        when *data_provider* is given.
     data_field : optional
         iSLAT data field for status messages (``insert_text`` interface).
+    data_provider : callable, optional
+        Zero-argument callable returning the DataFrame to display.  When given
+        it replaces the molecule lookup entirely.  Storing a *callable* rather
+        than a frame is what makes :meth:`refresh` live: it is re-invoked on
+        every refresh, so the window always shows the caller's current data.
+    title : str, optional
+        Window title override.
+    export_basename : str, optional
+        Default file name (without extension) offered by "Export CSV".
     """
-    def __init__(self, parent, mol_obj: "Molecule", data_field=None):
+    def __init__(self, parent, mol_obj: "Molecule" = None, data_field=None, *,
+                 data_provider=None, title: str = None,
+                 export_basename: str = None):
         super().__init__(parent)
         self.mol_obj = mol_obj
         self.data_field = data_field
+        self._data_provider = data_provider
+        self._export_basename = export_basename
 
         mol_name = getattr(mol_obj, "name", "Molecule")
-        self.title(f"Line List: {mol_name}")
+        self.title(title or f"Line List: {mol_name}")
         self.resizable(True, True)
         self._constrain_to_screen()
 
@@ -66,6 +80,19 @@ class LineListViewWindow(tk.Toplevel):
 
         self._build_ui()
         self._load_data()
+
+    @classmethod
+    def from_dataframe(cls, parent, source, *, title: str = "Line List",
+                       data_field=None, export_basename: str = "line_list"):
+        """Open a viewer on a DataFrame, or on a callable returning one.
+
+        Passing a *callable* is what makes :meth:`refresh` live: it is
+        re-invoked on every refresh, so the window tracks the caller's current
+        data instead of a snapshot taken when it opened.
+        """
+        provider = source if callable(source) else (lambda: source)
+        return cls(parent, None, data_field, data_provider=provider,
+                   title=title, export_basename=export_basename)
 
     # ------------------------------------------------------------------
     # Geometry
@@ -94,7 +121,11 @@ class LineListViewWindow(tk.Toplevel):
 
         ttk.Label(top, text="Search:").grid(row=0, column=0, padx=(0, 4))
         self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", self._on_search_change)
+        # Keep the handle: Tcl holds a callback referencing this window until
+        # the trace is removed, which would otherwise pin the window, its data
+        # provider, and everything that provider closes over.
+        self._search_trace = self._search_var.trace_add(
+            "write", self._on_search_change)
         search_entry = ttk.Entry(top, textvariable=self._search_var)
         search_entry.grid(row=0, column=1, sticky="ew", padx=(0, 4))
 
@@ -166,9 +197,25 @@ class LineListViewWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     # Data loading
     # ------------------------------------------------------------------
+    def refresh(self) -> None:
+        """Re-fetch from the provider (or the molecule) and redraw.
+
+        Safe to call from another window driving this view: it is a no-op once
+        this window has been closed.
+        """
+        try:
+            if not self.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        self._refresh()
+
     def _refresh(self) -> None:
-        """Reload the line list from the molecule, preserving the current search."""
+        """Reload the data, preserving the current search and sort order."""
         current_search = self._search_var.get()
+        # Sort is preserved: an externally driven refresh must not silently
+        # undo the column the user clicked while they carry on typing.
+        sort_col, sort_reverse = self._sort_col, self._sort_reverse
         self._all_rows = []
         self._columns = []
         self._sort_col = None
@@ -177,29 +224,67 @@ class LineListViewWindow(tk.Toplevel):
         self._status_var.set("Refreshing…")
         self.update_idletasks()
         self._load_data()
-        # Re-apply any active search after reload
+        # Re-apply any active search BEFORE re-sorting: _on_search_change
+        # repopulates from the unsorted model, which would undo the sort if it
+        # ran afterwards.
         if current_search:
             self._search_var.set(current_search)
+        if sort_col and sort_col in self._columns:
+            # _sort_by flips the direction when re-sorting the same column,
+            # so pre-invert to land back on the order the user had.
+            self._sort_col = sort_col
+            self._sort_reverse = not sort_reverse
+            self._sort_by(sort_col)
 
-    def _load_data(self) -> None:
-        """Fetch the line list DataFrame and populate the Treeview."""
+    def destroy(self) -> None:
+        """Remove the search trace and drop the data source before closing.
+
+        A ``data_provider`` is typically a bound method of the window that
+        opened this one, so holding it after close would keep that window, its
+        LineListMaker and the whole unfiltered frame alive for the life of the
+        Tk application.
+        """
+        handle = getattr(self, "_search_trace", None)
+        if handle is not None:
+            try:
+                self._search_var.trace_remove("write", handle)
+            except tk.TclError:
+                pass
+            self._search_trace = None
+        self._data_provider = None
+        self.mol_obj = None
+        self._all_rows = []
+        super().destroy()
+
+    def _fetch_dataframe(self):
+        """Return ``(df, error_message)``.  A data provider, when set, wins."""
+        if self._data_provider is not None:
+            try:
+                return self._data_provider(), None
+            except Exception as exc:
+                return None, f"Error fetching table: {exc}"
         try:
             ll = self.mol_obj.line_list
         except Exception as exc:
-            self._status_var.set(f"Error accessing line list: {exc}")
-            return
-
+            return None, f"Error accessing line list: {exc}"
         if ll is None:
-            self._status_var.set("No line list loaded for this molecule.")
-            return
-
+            return None, "No line list loaded for this molecule."
         try:
-            df = ll.get_pandas_table()
+            return ll.get_pandas_table(), None
         except Exception as exc:
-            self._status_var.set(f"Error building table: {exc}")
+            return None, f"Error building table: {exc}"
+
+    def _load_data(self) -> None:
+        """Fetch the DataFrame and populate the Treeview."""
+        df, error = self._fetch_dataframe()
+        if error:
+            self._status_var.set(error)
             return
 
         if df is None or df.empty:
+            self._columns = []
+            self._tree["columns"] = ()
+            self._tree.delete(*self._tree.get_children())
             self._status_var.set("Line list is empty.")
             return
 
@@ -327,11 +412,12 @@ class LineListViewWindow(tk.Toplevel):
             return
 
         mol_name = getattr(self.mol_obj, "name", "molecule")
+        basename = self._export_basename or f"{mol_name}_line_list"
         filepath = filedialog.asksaveasfilename(
             parent=self,
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            initialfile=f"{mol_name}_line_list",
+            initialfile=basename,
         )
         if not filepath:
             return
@@ -348,4 +434,4 @@ class LineListViewWindow(tk.Toplevel):
             else:
                 print(msg)
         except Exception as exc:
-            tk.messagebox.showerror("Export failed", str(exc), parent=self)
+            messagebox.showerror("Export failed", str(exc), parent=self)

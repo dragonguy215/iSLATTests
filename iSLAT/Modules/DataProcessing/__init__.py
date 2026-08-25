@@ -13,6 +13,13 @@ from .BatchFittingService import BatchFittingService
 from .DeblendingService import DeblendingService
 from .LineSaveService import LineSaveService
 from .LineListMaker import LineListMaker
+from .LineFilterExpression import (
+    Condition,
+    ConditionError,
+    ConditionGroup,
+    FilterExpression,
+    MaskContext,
+)
 
 __all__ = [
     "Chi2Spectrum",
@@ -24,4 +31,9 @@ __all__ = [
     "DeblendingService",
     "LineSaveService",
     "LineListMaker",
+    "Condition",
+    "ConditionError",
+    "ConditionGroup",
+    "FilterExpression",
+    "MaskContext",
 ]

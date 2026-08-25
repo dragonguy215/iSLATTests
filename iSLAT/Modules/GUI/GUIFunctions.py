@@ -266,9 +266,17 @@ def create_scrollable_frame(parent, height = 150, width = 300, vertical = False,
                     widget.bind("<Button-4>", _on_horizontal, add="+")
                     widget.bind("<Button-5>", _on_horizontal, add="+")
 
+        # Track what is already bound: <Configure> fires every time a widget is
+        # added or removed, and _bind_scroll uses add="+", so re-binding blindly
+        # would stack a duplicate handler per event and multiply scroll speed.
+        _bound_widgets = set()
+
         def _rebind_children(root):
             for child in root.winfo_children():
-                _bind_scroll(child)
+                key = str(child)
+                if key not in _bound_widgets:
+                    _bound_widgets.add(key)
+                    _bind_scroll(child)
                 _rebind_children(child)
 
         _bind_scroll(canvasscroll)

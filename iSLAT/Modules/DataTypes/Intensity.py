@@ -1180,9 +1180,25 @@ class Intensity(WavelengthRangeMixin):
                 dv=self._dv,
                 method="curve_growth",
             )
-            return (tmp_intens._intensity, tmp_intens._tau)
+            full_i, full_t = tmp_intens._intensity, tmp_intens._tau
         except Exception:
-            return np.full(n_rows, np.nan), np.full(n_rows, np.nan)
+            full_i = full_t = None
+
+        if full_i is not None and len(full_i) == n_rows:
+            return (full_i, full_t)
+
+        # The rebuild did not line up with *raw*.  This happens whenever the
+        # line list has no source file to rebuild from - a filtered or
+        # otherwise synthesized MoleculeLineList - in which case the temporary
+        # list comes back empty.  For such a list there is no wider range to
+        # widen to, so the arrays already computed on this instance ARE the
+        # full-range arrays.  Returning them keeps the row counts consistent;
+        # anything else would build a DataFrame from mismatched columns.
+        if self._intensity is not None and len(self._intensity) == n_rows:
+            tau = (self._tau if self._tau is not None
+                   and len(self._tau) == n_rows else np.full(n_rows, np.nan))
+            return (self._intensity, tau)
+        return np.full(n_rows, np.nan), np.full(n_rows, np.nan)
 
     # ---- Batch evaluation API ------------------------------------
 

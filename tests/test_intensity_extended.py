@@ -478,3 +478,118 @@ class TestWavelengthRangeExtensionIntensity(_IntensityTestBase):
             inten_ext.intensity, inten_full.intensity, rtol=1e-8,
             err_msg="Intensity values should match between full range and extended range"
         )
+
+
+class TestFullRangeWithoutSourceFile(_IntensityTestBase):
+    """build_table(full_range=True) on a line list with no file to rebuild from.
+
+    _compute_full_range_intensity rebuilds a temporary MoleculeLineList from
+    the parent's ``_filename`` to compute intensities over every line.  A list
+    built from ``lines_data`` - a filtered subset, or any test fixture - has no
+    such file, so the rebuild comes back empty.  Returning those zero-length
+    arrays produced a DataFrame built from mismatched columns.
+    """
+
+    def _intensity(self, n_lines=8):
+        from iSLAT.Modules.DataTypes.Intensity import Intensity
+        ll = self._make_line_list(n_lines=n_lines)
+        assert getattr(ll, '_filename', None) is None
+        intensity = Intensity(ll)
+        intensity.calc_intensity(t_kin=500.0, n_mol=1e17, dv=2.0)
+        return intensity, ll
+
+    def test_build_table_full_range_does_not_raise(self):
+        intensity, _ll = self._intensity()
+        df = intensity.build_table(full_range=True)
+        assert df is not None
+
+    def test_build_table_full_range_row_count_matches_line_list(self):
+        intensity, ll = self._intensity(n_lines=8)
+        df = intensity.build_table(full_range=True)
+        assert len(df) == ll.num_lines
+
+    def test_full_range_intensity_column_is_populated(self):
+        """The active arrays ARE the full-range arrays for such a list."""
+        intensity, _ll = self._intensity()
+        df = intensity.build_table(full_range=True)
+        assert np.isfinite(np.asarray(df['intens'], dtype=float)).any()
+
+    def test_full_range_matches_active_range(self):
+        intensity, _ll = self._intensity()
+        full = intensity.build_table(full_range=True)
+        active = intensity.build_table(full_range=False)
+        assert len(full) == len(active)
+        np.testing.assert_allclose(
+            np.asarray(full['intens'], dtype=float),
+            np.asarray(active['intens'], dtype=float),
+        )
+
+    def test_population_diagram_data_available(self):
+        intensity, ll = self._intensity()
+        data = intensity.get_population_diagram_data(1.0, 160.0)
+        assert data is not None
+        assert len(data['eu']) == ll.num_lines
+
+    def test_population_diagram_arrays_are_mutually_aligned(self):
+        intensity, ll = self._intensity()
+        data = intensity.get_population_diagram_data(1.0, 160.0)
+        lengths = {len(data[k]) for k in
+                   ('eu', 'rd_yax', 'wavelength', 'a_stein', 'g_up')}
+        assert lengths == {ll.num_lines}
+
+    def test_no_parameters_set_gives_nan_not_a_crash(self):
+        from iSLAT.Modules.DataTypes.Intensity import Intensity
+        ll = self._make_line_list(n_lines=5)
+        df = Intensity(ll).build_table(full_range=True)
+        assert len(df) == ll.num_lines
+        assert np.isnan(np.asarray(df['intens'], dtype=float)).all()
+
+
+class TestPopulationDataAlignsWithPandasTable(_IntensityTestBase):
+    """get_population_diagram_data(full_range=False) must align row-for-row
+    with get_pandas_table().
+
+    The filtered population diagram builds a boolean mask over the frame from
+    get_pandas_table() and uses it to index the population-diagram arrays.  If
+    the two disagree in length or order the diagram plots the wrong lines, so
+    this alignment is a contract, not an incidental property.
+    """
+
+    def _prepared(self, wavelength_range=None):
+        from iSLAT.Modules.DataTypes.Intensity import Intensity
+        ll = self._make_line_list(n_lines=20, lam_start=10.0, lam_step=1.0)
+        if wavelength_range is not None:
+            ll.wavelength_range = wavelength_range
+        intensity = Intensity(ll)
+        intensity.calc_intensity(t_kin=600.0, n_mol=1e17, dv=2.0)
+        return ll, intensity
+
+    def test_lengths_match_without_wavelength_range(self):
+        ll, intensity = self._prepared()
+        df = ll.get_pandas_table()
+        data = intensity.get_population_diagram_data(1.0, 160.0, full_range=False)
+        assert len(df) == len(data['eu'])
+
+    def test_lengths_match_with_wavelength_range(self):
+        ll, intensity = self._prepared(wavelength_range=(12.0, 18.0))
+        df = ll.get_pandas_table()
+        data = intensity.get_population_diagram_data(1.0, 160.0, full_range=False)
+        assert len(df) < 20                      # the range really did narrow it
+        assert len(df) == len(data['eu'])
+
+    def test_rows_align_elementwise_with_wavelength_range(self):
+        ll, intensity = self._prepared(wavelength_range=(12.0, 18.0))
+        df = ll.get_pandas_table()
+        data = intensity.get_population_diagram_data(1.0, 160.0, full_range=False)
+        np.testing.assert_allclose(
+            np.asarray(df['lam'], dtype=float),
+            np.asarray(data['wavelength'], dtype=float),
+        )
+        assert [str(v) for v in df['lev_up']] == [str(v) for v in data['lev_up']]
+
+    def test_full_range_diverges_when_a_range_is_set(self):
+        """Documents WHY the filtered diagram asks for full_range=False."""
+        ll, intensity = self._prepared(wavelength_range=(12.0, 18.0))
+        df = ll.get_pandas_table()
+        full = intensity.get_population_diagram_data(1.0, 160.0, full_range=True)
+        assert len(full['eu']) != len(df)

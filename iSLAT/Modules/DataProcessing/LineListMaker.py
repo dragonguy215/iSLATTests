@@ -32,6 +32,19 @@ import numpy as np
 import pandas as pd
 
 from ..DataTypes.MoleculeLineList import MoleculeLineList
+from .LineFilterExpression import (  # noqa: F401  (re-exported for back-compat)
+    Condition,
+    ConditionError,
+    ConditionGroup,
+    FilterExpression,
+    MaskContext,
+    describe_expression,
+    expression_mask,
+    _parse_vib_band,
+    _vib_part,
+    _vib_perms,
+    _vib_perms_up_to,
+)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -62,88 +75,6 @@ def _ensure_dataframe(df_or_linelist: Union[pd.DataFrame, MoleculeLineList],
     raise TypeError(
         f"Expected pd.DataFrame or MoleculeLineList, got {type(df_or_linelist).__name__}"
     )
-
-
-# ---------------------------------------------------------------------------
-# Vibrational-band helpers
-# ---------------------------------------------------------------------------
-
-def _vib_part(level_str: str) -> str:
-    """Return the vibrational portion of a quantum-state label (before ``'|'``).
-
-    e.g. ``'0_0_1|16_1_15'`` -> ``'0_0_1'``.
-    Falls back to the full string when no ``'|'`` is present.
-    """
-    return level_str.split("|")[0] if "|" in level_str else level_str
-
-
-def _vib_perms(n: int, n_modes: int = 3) -> set:
-    """All underscore-joined vibrational-mode tuples where ``max(qi) == n``.
-
-    Parameters
-    ----------
-    n : int
-        Target vibrational quantum number (the maximum across all modes).
-    n_modes : int
-        Number of vibrational modes (default 3 for H₂O, CO₂, etc.).
-    """
-    from itertools import product as _product
-    combos: set = set()
-    for vals in _product(range(n + 1), repeat=n_modes):
-        if max(vals) == n:
-            combos.add("_".join(str(v) for v in vals))
-    return combos
-
-
-def _vib_perms_up_to(n: int, n_modes: int = 3) -> set:
-    """All underscore-joined vibrational-mode tuples where ``max(qi) <= n``."""
-    result: set = set()
-    for m in range(n + 1):
-        result |= _vib_perms(m, n_modes)
-    return result
-
-
-def _parse_vib_band(spec: str, n_modes: int = 3):
-    """Parse a band-spec string into ``(up_set, low_set)``.
-
-    Supported formats
-    -----------------
-    ``"v1"``   -> upper from exact v=1 states (``max(qi) == 1``),
-                  lower from *any* state up to v=1 (``max(qi) <= 1``).
-                  Captures all lines *from* the v=1 level, including both
-                  the fundamental band (v=1 → v=0) and hot bands (v=1 → v=1).
-    ``"v1-0"`` -> upper from exact v=1, lower from exact v=0.
-    ``"v2-1"`` -> upper from exact v=2, lower from exact v=1.
-
-    The leading ``'v'`` is optional.  For the two-number ``"vN-M"`` form both
-    sides use **exact** level matching.
-
-    Returns
-    -------
-    (up_set, low_set) : tuple of set of str
-        Sets of underscore-joined vibrational labels.
-
-    Raises
-    ------
-    ValueError
-        If the spec cannot be parsed.
-    """
-    spec = spec.strip().lower().lstrip("v")
-    if not spec:
-        raise ValueError("Empty band spec.")
-    parts = spec.split("-")
-    if len(parts) == 1:
-        n_up = int(parts[0])
-        up_set = _vib_perms(n_up, n_modes)
-        low_set = _vib_perms_up_to(n_up, n_modes)  # cumulative: captures all bands from this level
-    elif len(parts) == 2:
-        n_up = int(parts[0])
-        n_low = int(parts[1])
-        up_set = _vib_perms(n_up, n_modes)
-        low_set = _vib_perms(n_low, n_modes)  # exact lower level
-    else:
-        raise ValueError(f"Cannot parse band spec: {spec!r}")
-    return up_set, low_set
 
 
 # ╭──────────────────────────────────────────────────────────────────╮
@@ -291,6 +222,10 @@ class LineListMaker:
         if self._filters:
             lines.append("  Active filters:")
             for name, kw in self._filters:
+                if name == "filter_expression":
+                    expr = FilterExpression.from_dict(kw["expr"])
+                    lines.append(f"    • {name}: {describe_expression(expr)}")
+                    continue
                 param_str = ", ".join(f"{k}={v!r}" for k, v in kw.items())
                 lines.append(f"    • {name}({param_str})")
         else:
@@ -605,6 +540,92 @@ class LineListMaker:
         return self._apply_mask(mask)
 
     # ------------------------------------------------------------------
+    # Boolean expression filter (AND / OR of many conditions)
+    # ------------------------------------------------------------------
+
+    def filter_expression(
+        self,
+        expr: Union["FilterExpression", Dict[str, Any]],
+        *,
+        on_error: str = "raise",
+    ) -> "LineListMaker":
+        """Apply a two-level boolean expression as a SINGLE filter step.
+
+        Groups combine internally by their own AND/OR; the resulting group
+        masks then combine by the expression's AND/OR.  Because there are
+        exactly two levels and one operator per level, precedence is
+        structural - there is no operator-binding rule to remember.
+
+        The expression is evaluated against the *current* DataFrame, so it
+        narrows exactly like every other filter and composes as an implicit
+        AND with anything applied before it.  It is recorded as **one** entry
+        in the flat filter log, so :meth:`pop_filter`, :meth:`remove_filter`
+        and :meth:`copy` all work unchanged.
+
+        >>> maker.filter_expression({
+        ...     "join": "AND",
+        ...     "groups": [{"join": "OR", "conditions": [
+        ...         {"kind": "range", "field": "lam",  "op": "between",
+        ...          "min_val": 6.0,  "max_val": 7.0},
+        ...         {"kind": "range", "field": "lam",  "op": "between",
+        ...          "min_val": 12.0, "max_val": 13.0},
+        ...         {"kind": "range", "field": "e_up", "op": "ge",
+        ...          "min_val": 5000.0}]}]})
+
+        Parameters
+        ----------
+        expr : FilterExpression or dict
+            A dict is parsed via :meth:`FilterExpression.from_dict`.
+        on_error : {"raise", "identity", "drop"}
+            ``"raise"`` (default) aborts with :class:`ConditionError` and
+            records nothing.  ``"identity"`` treats an unevaluable condition as
+            all-True; **this is unsafe inside an OR group**, where it widens
+            the group to the whole line list.  ``"drop"`` omits it from the
+            fold.
+
+        Returns
+        -------
+        LineListMaker
+            ``self`` for chaining.
+
+        Raises
+        ------
+        ConditionError
+            When a condition cannot be evaluated and ``on_error="raise"``.
+            Nothing is recorded and the DataFrame is left untouched.
+        """
+        expr_obj = (expr if isinstance(expr, FilterExpression)
+                    else FilterExpression.from_dict(expr))
+        ctx = MaskContext(species=self._species, on_error=on_error)
+        # Build the mask BEFORE recording: with on_error="raise" as the
+        # default, recording first would leave a recorded-but-never-applied
+        # entry that re-raises on the next pop_filter / remove_filter.
+        mask = expression_mask(self._df, expr_obj, ctx)
+        self._record_filter("filter_expression",
+                            expr=expr_obj.to_dict(), on_error=on_error)
+        return self._apply_mask(mask)
+
+    def filter_any(self, *conditions: "Condition", **kw: Any) -> "LineListMaker":
+        """Keep rows matching ANY of *conditions* (a single OR group).
+
+        >>> maker.filter_any(
+        ...     Condition("range", field="lam",  op="between", min_val=6.0,  max_val=7.0),
+        ...     Condition("range", field="lam",  op="between", min_val=12.0, max_val=13.0),
+        ...     Condition("range", field="e_up", op="ge",      min_val=5000.0))
+        """
+        return self.filter_expression(
+            FilterExpression(groups=(ConditionGroup(tuple(conditions), join="OR"),)),
+            **kw,
+        )
+
+    def filter_all(self, *conditions: "Condition", **kw: Any) -> "LineListMaker":
+        """Keep rows matching ALL of *conditions* (a single AND group)."""
+        return self.filter_expression(
+            FilterExpression(groups=(ConditionGroup(tuple(conditions), join="AND"),)),
+            **kw,
+        )
+
+    # ------------------------------------------------------------------
     # Sort
     # ------------------------------------------------------------------
 
@@ -633,6 +654,27 @@ class LineListMaker:
     def filters(self) -> List[Tuple[str, Dict[str, Any]]]:
         """Return a *copy* of the active filter log."""
         return list(self._filters)
+
+    @property
+    def expression(self) -> Optional["FilterExpression"]:
+        """The most recently applied boolean expression, or ``None``.
+
+        Derived from the filter log rather than stored separately, so
+        :meth:`copy` and :meth:`reset` need no extra bookkeeping.
+        """
+        for name, kw in reversed(self._filters):
+            if name == "filter_expression":
+                return FilterExpression.from_dict(kw["expr"])
+        return None
+
+    @property
+    def original_df(self) -> pd.DataFrame:
+        """Read-only view of the unfiltered snapshot.  **Do not mutate.**
+
+        Returned *without* copying so a live GUI preview can evaluate against
+        it on every keystroke without cloning a large frame each time.
+        """
+        return self._df_original
 
     @property
     def species(self) -> Optional[str]:
@@ -671,8 +713,7 @@ class LineListMaker:
         """
         if not self._filters:
             raise IndexError("No filters to pop.")
-        self._filters.pop()
-        return self._replay_filters()
+        return self._remove_and_replay(len(self._filters) - 1)
 
     def remove_filter(self, index: int) -> "LineListMaker":
         """Remove the filter at *index* and replay the rest.
@@ -681,9 +722,30 @@ class LineListMaker:
         ----------
         index : int
             Zero-based index into :attr:`filters`.
+
+        Raises
+        ------
+        IndexError
+            If *index* is out of range.
         """
+        return self._remove_and_replay(index)
+
+    def _remove_and_replay(self, index: int) -> "LineListMaker":
+        """Drop the filter at *index* and replay, atomically.
+
+        On any replay failure the maker keeps the filters and data it had
+        before the call, so a failed removal never silently unfilters the
+        line list.
+        """
+        saved = list(self._filters)
+        df_at_entry = self._df
         del self._filters[index]
-        return self._replay_filters()
+        try:
+            return self._replay_filters()
+        except Exception:
+            self._filters = saved
+            self._df = df_at_entry
+            raise
 
     # ------------------------------------------------------------------
     # Export — DataFrame
@@ -953,8 +1015,16 @@ class LineListMaker:
         return self._apply_mask(mask)
 
     def _replay_filters(self) -> "LineListMaker":
-        """Reset to original data and replay all stored filters."""
+        """Reset to original data and replay all stored filters.
+
+        If any filter fails to replay, the maker is restored to the state it
+        had on entry and the error is re-raised.  Leaving an empty filter log
+        over the fully unfiltered frame would be far worse than failing: a
+        caller that swallowed the error would go on to export or apply the
+        entire line list believing it had been filtered.
+        """
         saved = list(self._filters)
+        df_at_entry = self._df
         self._df = self._df_original.copy()
         self._filters.clear()
 
@@ -972,19 +1042,30 @@ class LineListMaker:
             "filter_quantum_field": self.filter_quantum_field,
             "filter_species": self.filter_species,
             "filter_vib_band": self.filter_vib_band,
+            "filter_expression": self.filter_expression,
         }
 
-        for name, kwargs in saved:
-            method = _method_map.get(name)
-            if method is not None:
-                method(**kwargs)
-            elif name == "filter_custom":
-                # Custom lambdas are not replayable — warn and skip
-                warnings.warn(
-                    f"Cannot replay filter_custom(label={kwargs.get('label', '?')!r}); "
-                    "it has been dropped."
-                )
-            # Other entries (e.g. "append") are structural, not replayable
+        try:
+            for name, kwargs in saved:
+                if name == "filter_species":
+                    # filter_species is var-positional but records a 'species'
+                    # kwarg, so method(**kwargs) would raise TypeError.
+                    self.filter_species(*kwargs.get("species", ()))
+                    continue
+                method = _method_map.get(name)
+                if method is not None:
+                    method(**kwargs)
+                elif name == "filter_custom":
+                    # Custom lambdas are not replayable — warn and skip
+                    warnings.warn(
+                        f"Cannot replay filter_custom(label={kwargs.get('label', '?')!r}); "
+                        "it has been dropped."
+                    )
+                # Other entries (e.g. "append") are structural, not replayable
+        except Exception:
+            self._df = df_at_entry
+            self._filters = saved
+            raise
         return self
 
     def _prepare_export_df(
