@@ -79,7 +79,8 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
     _cache_lock = threading.Lock()
     
     INTENSITY_AFFECTING_PARAMS = {'temp', 'n_mol', 'broad', 'rv_shift', 'wavelength_range', 'intensity_calculation_method'}
-    SPECTRUM_AFFECTING_PARAMS = {'radius', 'distance', 'fwhm', 'keplerian_fwhm', 'instrumental_profile_key', 'rv_shift', 'wavelength_range'}
+    # model_pixel_res is spectrum-affecting because Spectrum is built with dlambda=model_pixel_res
+    SPECTRUM_AFFECTING_PARAMS = {'radius', 'distance', 'fwhm', 'keplerian_fwhm', 'instrumental_profile_key', 'rv_shift', 'wavelength_range', 'model_pixel_res'}
     FLUX_AFFECTING_PARAMS = INTENSITY_AFFECTING_PARAMS | SPECTRUM_AFFECTING_PARAMS | {'model_pixel_res'}
 
     # Parameters transferred by Copy/Paste Parameters and Duplicate.
@@ -244,6 +245,7 @@ class Molecule(CacheStatsMixin, WavelengthRangeMixin, ClassObservableMixin):
             self._keplerian_fwhm,
             self._instrumental_profile_key,
             self._rv_shift,
+            self._model_pixel_res,  # Spectrum grid spacing (dlambda) depends on this
             wavelength_tuple,
             self._compute_intensity_hash()  # Include intensity hash for dependencies
         ))
