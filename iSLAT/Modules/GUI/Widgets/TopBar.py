@@ -21,7 +21,7 @@ from iSLAT.Modules.FileHandling.iSLATFileHandling import (
     write_molecules_to_csv, generate_csv, line_saves_file_path,
     line_saves_file_name, example_data_folder_path, read_from_user_csv
 )
-from iSLAT.Modules.FileHandling import save_folder_path
+from iSLAT.Modules.FileHandling import save_folder_path, models_folder_path
 from iSLAT.Modules.Plotting.FullSpectrumView import output_full_spectrum
 from iSLAT.Modules.DataProcessing.Slabfit import SlabModel
 from iSLAT.Modules.DataProcessing.BatchFittingService import BatchFittingService
@@ -971,18 +971,89 @@ class TopBar(ResizableFrame):
 
         # Create a label in the new window
         label = tk.Label(export_window, text="Select a molecule:")
-        label.grid(row=0, column=0)
+        label.grid(row=0, column=0, sticky="w")
 
         # Create a dropdown menu in the new window
         options = list(self.islat.molecules_dict.keys()) + ["SUM", "ALL"]
         dropdown_var = tk.StringVar()
         dropdown = ttk.Combobox(export_window, textvariable=dropdown_var, values=options)
         dropdown.set(options[0])
-        dropdown.grid(row=1, column=0)
+        dropdown.grid(row=1, column=0, sticky="w")
+
+        # Matched pixel sampling checkbox — defaults to the current GUI/MoleculeDict state
+        match_sampling_var = tk.BooleanVar(
+            value=bool(getattr(self.islat.molecules_dict, 'match_spectral_sampling', False))
+        )
+        match_check = ttk.Checkbutton(
+            export_window,
+            text="Match pixel sampling",
+            variable=match_sampling_var,
+        )
+        match_check.grid(row=2, column=0, sticky="w")
+
+        # --- Save location -------------------------------------------------
+        dir_var = tk.StringVar(value=str(models_folder_path))
+        name_var = tk.StringVar(value=f"{dropdown_var.get()}_spec_output.csv")
+
+        tk.Label(export_window, text="Save folder:").grid(row=3, column=0, sticky="w")
+        dir_entry = ttk.Entry(export_window, textvariable=dir_var, width=40)
+        dir_entry.grid(row=4, column=0, sticky="we")
+        ttk.Button(
+            export_window,
+            text="Browse\u2026",
+            command=lambda: self._browse_export_dir(export_window, dir_var),
+        ).grid(row=4, column=1, padx=4)
+
+        name_label = tk.Label(export_window, text="File name:")
+        name_label.grid(row=5, column=0, sticky="w")
+        name_entry = ttk.Entry(export_window, textvariable=name_var, width=40)
+        name_entry.grid(row=6, column=0, sticky="we")
+
+        def _on_selection_changed(*_args):
+            """Keep the default file name in sync; ALL writes one file per molecule."""
+            selection = dropdown_var.get()
+            if selection == "ALL":
+                name_var.set("")
+                name_entry.state(["disabled"])
+                name_label.config(text="File name: (one file per molecule)")
+            else:
+                name_entry.state(["!disabled"])
+                name_label.config(text="File name:")
+                name_var.set(f"{selection}_spec_output.csv")
+
+        dropdown_var.trace_add("write", _on_selection_changed)
+        export_window.columnconfigure(0, weight=1)
 
         # Create a button in the new window
-        button = ttk.Button(export_window, text="Generate CSV", command=lambda: generate_csv(molecules_data=self.islat.molecules_dict, mol_name=dropdown_var.get(),data_field=self.data_field, wave_data=self.islat.wave_data_original))
+        button = ttk.Button(
+            export_window,
+            text="Generate CSV",
+            command=lambda: generate_csv(
+                molecules_data=self.islat.molecules_dict,
+                mol_name=dropdown_var.get(),
+                data_field=self.data_field,
+                output_dir=dir_var.get().strip() or str(models_folder_path),
+                wave_data=self.islat.wave_data_original,
+                match_pixel_sampling=match_sampling_var.get(),
+                file_name=name_var.get().strip() or None,
+            ),
+        )
         button.grid(row=1, column=1)
+
+    def _browse_export_dir(self, parent, dir_var):
+        """Prompt for the model-export destination folder."""
+        # Drop topmost so the native dialog is not hidden behind the window
+        parent.attributes("-topmost", False)
+        try:
+            chosen = filedialog.askdirectory(
+                title="Select export folder",
+                initialdir=dir_var.get() or str(models_folder_path),
+                parent=parent,
+            )
+        finally:
+            parent.attributes("-topmost", True)
+        if chosen:
+            dir_var.set(chosen)
 
     def toggle_atomic_lines(self):
         """

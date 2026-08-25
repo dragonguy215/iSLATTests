@@ -3,6 +3,7 @@ import csv
 import json
 import pandas as pd
 import numpy as np
+from contextlib import contextmanager
 from ...Constants import MOLECULES_DATA
 from .molecular_data_reader import read_molecular_data
 from iSLAT.Modules.Debug.DebugConfig import debug_config
@@ -1172,7 +1173,64 @@ def load_control_panel_fields_config(file_path=None, file_name="ControlPanelFiel
         # Return default configuration if file is missing or invalid
         return {"global_fields": {}, "molecule_fields": {}}
 
-def generate_all_csv(molecules_data: 'MoleculeDict', output_dir=models_folder_path, wave_data=None):
+def _resolve_match_pixel_sampling(molecules_data: 'MoleculeDict',
+                                  match_pixel_sampling: Optional[bool]) -> bool:
+    """Resolve the effective matched-pixel-sampling state for model export.
+
+    ``None`` (the default) follows the current GUI / MoleculeDict state
+    (``molecules_data.match_spectral_sampling``); an explicit bool overrides it.
+    """
+    if match_pixel_sampling is None:
+        return bool(getattr(molecules_data, 'match_spectral_sampling', False))
+    return bool(match_pixel_sampling)
+
+def _matched_sampling_target_wave(molecules_data: 'MoleculeDict', wave_data):
+    """Rest-frame target grid for matched-sampling export (mirrors plotting)."""
+    apply_rv = getattr(molecules_data, 'apply_stellar_rv', None)
+    return apply_rv(wave_data) if callable(apply_rv) else wave_data
+
+@contextmanager
+def _match_sampling_override(molecules_data: 'MoleculeDict', state: bool):
+    """Temporarily force ``match_spectral_sampling`` on *molecules_data*.
+
+    Global-parameter callbacks are suppressed during the override so no
+    GUI refreshes are triggered mid-export. No-op when the state already
+    matches or the object does not expose the property.
+    """
+    if not hasattr(molecules_data, 'match_spectral_sampling'):
+        yield
+        return
+    current = bool(molecules_data.match_spectral_sampling)
+    if current == bool(state):
+        yield
+        return
+    had_suppress = hasattr(molecules_data, '_suppress_global_callbacks')
+    old_suppress = getattr(molecules_data, '_suppress_global_callbacks', None)
+    try:
+        if had_suppress:
+            molecules_data._suppress_global_callbacks = True
+        molecules_data.match_spectral_sampling = bool(state)
+        yield
+    finally:
+        molecules_data.match_spectral_sampling = current
+        if had_suppress:
+            molecules_data._suppress_global_callbacks = old_suppress
+
+def _resolve_output_path(output_dir, file_name: Optional[str], default_name: str) -> str:
+    """Build the CSV output path, falling back to *default_name*.
+
+    Any directory component of *file_name* is stripped (the destination
+    folder is always *output_dir*) and a ``.csv`` extension is enforced.
+    """
+    name = os.path.basename(str(file_name).strip()) if file_name else ""
+    if not name:
+        name = default_name
+    if not name.lower().endswith(".csv"):
+        name += ".csv"
+    return os.path.join(output_dir, name)
+
+def generate_all_csv(molecules_data: 'MoleculeDict', output_dir=models_folder_path, wave_data=None,
+                     match_pixel_sampling: Optional[bool] = None):
     """
     Generate CSV files for all molecules in the MoleculeDict.
     
@@ -1184,10 +1242,16 @@ def generate_all_csv(molecules_data: 'MoleculeDict', output_dir=models_folder_pa
         Output directory path
     wave_data : np.ndarray, optional
         Wavelength array to use for flux calculation
+    match_pixel_sampling : bool, optional
+        Whether to resample each model onto the observed *wave_data* grid
+        (matched pixel sampling). ``None`` (default) follows the current
+        ``molecules_data.match_spectral_sampling`` state.
     """
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
-    
+
+    use_matched = _resolve_match_pixel_sampling(molecules_data, match_pixel_sampling)
+
     # Export individual molecule spectra
     for mol_name, molecule in molecules_data.items():
         # Skip if molecule is not visible or doesn't have plot data
@@ -1197,11 +1261,19 @@ def generate_all_csv(molecules_data: 'MoleculeDict', output_dir=models_folder_pa
         # Get wavelength and flux data from molecule using get_flux method
         if wave_data is not None:
             try:
-                lambdas, fluxes = molecule.get_flux(
-                    wavelength_array=wave_data, 
-                    return_wavelengths=True, 
-                    interpolate_to_input=False
-                )
+                if use_matched:
+                    target_wave = _matched_sampling_target_wave(molecules_data, wave_data)
+                    lambdas, fluxes = molecule.get_flux(
+                        wavelength_array=target_wave,
+                        return_wavelengths=True,
+                        interpolate_to_input=True
+                    )
+                else:
+                    lambdas, fluxes = molecule.get_flux(
+                        wavelength_array=wave_data,
+                        return_wavelengths=True,
+                        interpolate_to_input=False
+                    )
             except Exception as e:
                 print(f"Error getting flux data for {mol_name}: {e}")
                 continue
@@ -1233,7 +1305,8 @@ def generate_all_csv(molecules_data: 'MoleculeDict', output_dir=models_folder_pa
     if visible_molecules and wave_data is not None:
         try:
             # Get summed flux from MoleculeDict - now returns (wavelengths, flux)
-            summed_wavelengths, summed_flux = molecules_data.get_summed_flux(wave_data, visible_only=True)
+            with _match_sampling_override(molecules_data, use_matched):
+                summed_wavelengths, summed_flux = molecules_data.get_summed_flux(wave_data, visible_only=True)
             
             if summed_flux is not None and len(summed_flux) > 0:
                 # Write summed spectrum CSV using the combined wavelength grid
@@ -1256,7 +1329,9 @@ def generate_csv(molecules_data: 'MoleculeDict',
                  data_field, 
                  output_dir=models_folder_path, 
                  wave_data=None,
-                 save_tau: bool = True):
+                 save_tau: bool = True,
+                 match_pixel_sampling: Optional[bool] = None,
+                 file_name: Optional[str] = None):
     """
     Generate CSV file for a specific molecule or summed spectrum.
     
@@ -1270,10 +1345,21 @@ def generate_csv(molecules_data: 'MoleculeDict',
         Output directory path
     wave_data : np.ndarray, optional
         Wavelength array to use for flux calculation
+    match_pixel_sampling : bool, optional
+        Whether to resample the exported model(s) onto the observed
+        *wave_data* grid (matched pixel sampling). ``None`` (default)
+        follows the current ``molecules_data.match_spectral_sampling``
+        state, i.e. the GUI toggle.
+    file_name : str, optional
+        Output file name for single-molecule and ``"SUM"`` exports.
+        Defaults to ``"<mol_name>_spec_output.csv"``.  Ignored for
+        ``"ALL"``, which writes one file per molecule.
     """
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
-    
+
+    use_matched = _resolve_match_pixel_sampling(molecules_data, match_pixel_sampling)
+
     if mol_name == "SUM":
         # Generate summed spectrum
         if wave_data is None:
@@ -1281,22 +1367,23 @@ def generate_csv(molecules_data: 'MoleculeDict',
             return
             
         try:
-            summed_wavelengths, summed_flux = molecules_data.get_summed_flux(wave_data, visible_only=True)
+            with _match_sampling_override(molecules_data, use_matched):
+                summed_wavelengths, summed_flux = molecules_data.get_summed_flux(wave_data, visible_only=True)
             
             if summed_flux is None or len(summed_flux) == 0:
                 print("No visible molecules or valid flux data for summed spectrum")
                 return
 
             # Write summed spectrum CSV using the combined wavelength grid
-            csv_file_path = os.path.join(output_dir, "SUM_spec_output.csv")
+            csv_file_path = _resolve_output_path(output_dir, file_name, "SUM_spec_output.csv")
             with open(csv_file_path, "w", newline="") as csv_file:
                 csv_writer = csv.writer(csv_file)
                 csv_writer.writerow(["wave", "flux"])
                 for wave, flux in zip(summed_wavelengths, summed_flux):
                     csv_writer.writerow([wave, flux])
             
-            print(f'SUM model exported to {output_dir}')
-            data_field.insert_text(f'SUM model exported to {output_dir}')
+            print(f'SUM model exported to {csv_file_path}')
+            data_field.insert_text(f'SUM model exported to {csv_file_path}')
             
         except Exception as e:
             print(f"Error generating summed spectrum: {e}")
@@ -1304,7 +1391,8 @@ def generate_csv(molecules_data: 'MoleculeDict',
     elif mol_name == "ALL":
         try:
             # Generate all molecule CSVs
-            generate_all_csv(molecules_data, output_dir, wave_data)
+            generate_all_csv(molecules_data, output_dir, wave_data,
+                             match_pixel_sampling=use_matched)
             print(f'All models exported to {output_dir}')
             data_field.insert_text(f'All models exported to {output_dir}')
         except Exception as e:
@@ -1321,11 +1409,20 @@ def generate_csv(molecules_data: 'MoleculeDict',
         # Get wavelength and flux data from molecule using get_flux method
         if wave_data is not None:
             try:
-                lambdas, fluxes = molecule.get_flux(
-                    wavelength_array=wave_data, 
-                    return_wavelengths=True, 
-                    interpolate_to_input=False
-                )
+                if use_matched:
+                    target_wave = _matched_sampling_target_wave(molecules_data, wave_data)
+                    lambdas, fluxes = molecule.get_flux(
+                        wavelength_array=target_wave,
+                        return_wavelengths=True,
+                        interpolate_to_input=True
+                    )
+                else:
+                    target_wave = wave_data
+                    lambdas, fluxes = molecule.get_flux(
+                        wavelength_array=wave_data,
+                        return_wavelengths=True,
+                        interpolate_to_input=False
+                    )
             except Exception as e:
                 print(f"Error getting flux data for {mol_name}: {e}")
                 return
@@ -1341,9 +1438,9 @@ def generate_csv(molecules_data: 'MoleculeDict',
             return
         if save_tau:
             taus = molecule.get_tau(
-                wavelength_array=wave_data, 
+                wavelength_array=target_wave, 
                 return_wavelengths=False, 
-                interpolate_to_input=False,
+                interpolate_to_input=use_matched,
             )
             if taus is None or len(taus) == 0 or len(taus) != len(lambdas):
                 print(f"Invalid tau data for {mol_name}")
@@ -1351,7 +1448,7 @@ def generate_csv(molecules_data: 'MoleculeDict',
 
         try:
             # Write spectrum CSV
-            csv_file_path = os.path.join(output_dir, f"{mol_name}_spec_output.csv")
+            csv_file_path = _resolve_output_path(output_dir, file_name, f"{mol_name}_spec_output.csv")
             with open(csv_file_path, "w", newline="") as csv_file:
                 csv_writer = csv.writer(csv_file)
                 if save_tau:
@@ -1369,14 +1466,15 @@ def generate_csv(molecules_data: 'MoleculeDict',
                     try:
                         line_params = molecule.intensity.build_table()
                         if hasattr(line_params, 'to_csv'):
-                            line_params_path = os.path.join(output_dir, f"{mol_name}_line_params.csv")
+                            stem = os.path.splitext(os.path.basename(csv_file_path))[0]
+                            line_params_path = os.path.join(output_dir, f"{stem}_line_params.csv")
                             line_params.to_csv(line_params_path, index=False)
                             print(f"Exported line parameters for {mol_name}")
                     except Exception as e:
                         print(f"Error exporting line parameters for {mol_name}: {e}")
 
-            data_field.insert_text(f'{mol_name} model exported to {output_dir}')
-            print(f'{mol_name} model exported to {output_dir}')
+            data_field.insert_text(f'{mol_name} model exported to {csv_file_path}')
+            print(f'{mol_name} model exported to {csv_file_path}')
             
         except Exception as e:
             data_field.insert_text(f"Error writing CSV for {mol_name}: {e}")

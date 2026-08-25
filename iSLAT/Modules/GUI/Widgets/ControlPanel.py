@@ -1494,9 +1494,8 @@ class ControlPanel(ttk.Frame):
         self.data_field.insert_text(f"Created merged molecule '{new_name}'.", clear_after=True)
         # Rebuild the UI to show the new molecule row
         self._rebuild_color_and_vis_controls()
-        self.plot.on_molecule_added(new_name, self.islat.molecules_dict)
-
-
+        #self.plot.on_molecule_added(new_name, self.islat.molecules_dict)
+        self.plot.update_model_plot()
 
     def _export_molecule_action(self, mol_name: str) -> None:
         """Export the named molecule's model spectrum to a CSV file."""
@@ -1580,7 +1579,7 @@ class ControlPanel(ttk.Frame):
         else:
             print(f"ControlPanel: {msg}")
 
-        # ── Redraw ────────────────────────────────────────────────────────────
+        # Redraw
         if hasattr(self, 'plot') and self.plot is not None:
             try:
                 self.plot.update_model_plot()
