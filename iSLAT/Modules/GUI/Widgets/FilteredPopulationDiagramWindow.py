@@ -33,7 +33,7 @@ from iSLAT.Modules.Plotting.PopulationDiagramContextMixin import (
 )
 
 # ---------------------------------------------------------------------------
-# Pure helpers (no Tk, no matplotlib display - unit-testable)
+# Pure helpers (no Tk, no matplotlib display)
 # ---------------------------------------------------------------------------
 
 #: Keys in a population-diagram data dict that are per-line arrays and must be
@@ -51,7 +51,6 @@ _STYLE_FIELDS: tuple = (
     "_x_prop", "_y_prop", "_x_log", "_y_log", "_x_lim", "_y_lim",
     "_color_mapping", "_shape_mapping", "_marker_size",
 )
-
 
 def subset_population_data(data: Optional[Dict[str, Any]],
                            mask: Optional[Sequence[bool]]) -> Optional[Dict[str, Any]]:
@@ -92,7 +91,6 @@ def subset_population_data(data: Optional[Dict[str, Any]],
     out["valid_mask"] = _recompute_valid_mask(out)
     return out
 
-
 def _recompute_valid_mask(data: Dict[str, Any]) -> Any:
     """Rebuild ``valid_mask`` from the retained lines' own fluxes.
 
@@ -115,7 +113,6 @@ def _recompute_valid_mask(data: Dict[str, Any]) -> Any:
     threshold = np.nanmax(values[positive]) / 100.0
     return values > threshold
 
-
 def _population_data_length(data: Dict[str, Any]) -> Optional[int]:
     """Number of lines represented by a population-diagram data dict."""
     for key in _PER_LINE_KEYS:
@@ -124,13 +121,11 @@ def _population_data_length(data: Dict[str, Any]) -> Optional[int]:
             return int(np.shape(value)[0])
     return None
 
-
 def _is_per_line(value: Any, length: Optional[int]) -> bool:
     """True when *value* is an array of one entry per line."""
     if value is None or np.ndim(value) < 1:
         return False
     return length is None or int(np.shape(value)[0]) == length
-
 
 def capture_pdp_style(pdp: Any) -> Dict[str, Any]:
     """Snapshot the user-adjustable settings of a PopulationDiagramPlot.
@@ -142,7 +137,6 @@ def capture_pdp_style(pdp: Any) -> Dict[str, Any]:
     if pdp is None:
         return {}
     return {field: getattr(pdp, field, None) for field in _STYLE_FIELDS}
-
 
 def apply_pdp_style(pdp: Any, style: Optional[Dict[str, Any]], *,
                     regenerate: bool = False) -> None:
@@ -200,7 +194,6 @@ def apply_pdp_style(pdp: Any, style: Optional[Dict[str, Any]], *,
     if regenerate:
         pdp.generate_plot()
 
-
 def find_main_population_plot(islat: Any) -> Any:
     """Locate the live PopulationDiagramPlot driving the main GUI, or None.
 
@@ -242,7 +235,6 @@ def find_main_population_plot(islat: Any) -> Any:
         return pdp
     return _from_three_panel()
 
-
 class _FrozenPopulationSource:
     """Duck-typed stand-in for :class:`Intensity` holding precomputed arrays.
 
@@ -255,9 +247,7 @@ class _FrozenPopulationSource:
     is drawn without touching any of the plot's settings - and without
     recomputing the intensity physics on every filter keystroke.
     """
-
     __slots__ = ("_data",)
-
     def __init__(self, data: Optional[Dict[str, Any]] = None) -> None:
         self._data = data
 
@@ -270,11 +260,9 @@ class _FrozenPopulationSource:
         """Return the precomputed data dict (signature matches Intensity)."""
         return self._data
 
-
 # ---------------------------------------------------------------------------
 # FilteredPopulationDiagramWindow
 # ---------------------------------------------------------------------------
-
 class FilteredPopulationDiagramWindow(tk.Toplevel, PopulationDiagramContextMixin):
     """Live population diagram of a filtered subset of a molecule's lines.
 
@@ -289,7 +277,6 @@ class FilteredPopulationDiagramWindow(tk.Toplevel, PopulationDiagramContextMixin
     on_close : callable, optional
         Invoked when this window closes, so the owner can deregister it.
     """
-
     def __init__(self, parent, mol_obj, islat=None, on_close: Callable = None):
         super().__init__(parent)
         self.mol_obj = mol_obj
@@ -400,8 +387,7 @@ class FilteredPopulationDiagramWindow(tk.Toplevel, PopulationDiagramContextMixin
                           "Re-copy the axis, colour and shape settings from the "
                           "main population diagram.")
             CreateToolTip(widget,
-                          "Right-click for Color By and Axis Settings - the same "
-                          "dialogs as the main population diagram.")
+                          "Right-click for Color By and Axis Settings")
         except Exception:
             pass
 

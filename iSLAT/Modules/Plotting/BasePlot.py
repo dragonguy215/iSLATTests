@@ -4,7 +4,6 @@ BasePlot - Abstract base class for all iSLAT plot types.
 Provides common infrastructure for figure/axes management, theming, molecule rendering helpers, and show/save functionality.
 All plot classes inherit from this so they can work both inside the GUI and as standalone matplotlib figures in scripts or Jupyter notebooks.
 """
-
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, Tuple, List, Union, TYPE_CHECKING
 from pathlib import Path
@@ -111,7 +110,6 @@ class BasePlot(ABC):
         Pre-existing matplotlib Figure to render into (e.g. from a GUI).
         When *None* a new figure will be created on demand.
     """
-
     def __init__(
         self,
         figsize: Optional[Tuple[float, float]] = None,
